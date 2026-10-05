@@ -1,0 +1,8 @@
+{
+  "$comment": "npm run dev. Watches the code and .env only: src/config/dashboards and src/config/rbac hold runtime data (dashboard JSON, scope dimensions) that is read per request, so watching either would restart the server for no reason.",
+  "exec": "tsx src/server.ts",
+  "watch": ["src", ".env"],
+  "ext": "ts,json",
+  "ignore": ["logs/*", "tests/*", "node_modules/*", "dist/*", "src/config/dashboards/*", "src/config/rbac/*"],
+  "delay": 500
+}
