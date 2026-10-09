@@ -1,11 +1,11 @@
 import config from '../src/config';
 const { db, withTransaction } = config.database;
-import { T } from '../src/models/rbac.model';
-import { bootstrapAppMeta } from '../src/services/bootstrap.service';
-import { issueActivationToken, activationUrl } from '../src/services/activation.service';
-import { revokeAllForUser } from '../src/services/token.service';
-import { sendEmail } from '../src/services/email.service';
-import { accountActivation } from '../src/views/templates/accountActivation.template';
+import { T } from '../src/models/rbacModel';
+import { bootstrapAppMeta } from '../src/services/bootstrapService';
+import { issueActivationToken, activationUrl } from '../src/services/activationService';
+import { revokeAllForUser } from '../src/services/tokenService';
+import { sendEmail } from '../src/services/emailService';
+import { accountActivation } from '../src/views/templates/accountActivationTemplate';
 import type { Queryable } from '../src/config/pgPool';
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 

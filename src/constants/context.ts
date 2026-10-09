@@ -34,6 +34,13 @@ const MCP_TOOLS = [
   { name: 'query_sql', description: 'Read-only SELECT / WITH over the context store, row-level scoped to the workspace.' },
 ];
 
+const CONTEXT_ACCESS_LEVELS = ['view', 'edit', 'full'] as const;
+type ContextAccessLevel = (typeof CONTEXT_ACCESS_LEVELS)[number];
+const CONTEXT_LEVEL_RANK: Record<ContextAccessLevel, number> = { view: 1, edit: 2, full: 3 };
+
+const GENERAL_ACCESS = ['restricted', 'company'] as const;
+type GeneralAccess = (typeof GENERAL_ACCESS)[number];
+
 export {
   AI_TEXT_KEYS,
   GENERIC_COLUMNS,
@@ -43,4 +50,8 @@ export {
   CONFIDENT,
   GLOSSARY_FILTERS,
   MCP_TOOLS,
+  CONTEXT_ACCESS_LEVELS,
+  CONTEXT_LEVEL_RANK,
+  GENERAL_ACCESS,
 };
+export type { ContextAccessLevel, GeneralAccess };

@@ -32,7 +32,6 @@ function signAccessToken(user: AccessTokenUser, familyId: string): string {
 function verifyAccessToken(token: string): JwtPayload {
   let payload;
   try {
-    // TODO(types): tokens are always signed with an object payload, never a bare string.
     payload = jwt.verify(token, JWT_ACCESS_SECRET) as JwtPayload;
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {

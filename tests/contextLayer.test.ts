@@ -5,16 +5,18 @@ process.env.CREDENTIAL_SECRET = process.env.CREDENTIAL_SECRET
 
 import config = require('../src/config');
 const { db } = config.database;
-import contextModel = require('../src/models/context.model');
+import contextModel = require('../src/models/contextModel');
 const { CT } = contextModel;
-import bootstrapService = require('../src/services/bootstrap.service');
+import bootstrapService = require('../src/services/bootstrapService');
 const { bootstrapAppMeta } = bootstrapService;
 import secretBox = require('../src/tools/secretBox');
 const { seal, open, hint } = secretBox;
-import domo = require('../src/services/providers/domo.provider');
-import service = require('../src/services/connection.service');
-import store = require('../src/services/context.service');
-import publish = require('../src/services/publish.service');
+import domo = require('../src/services/providers/domoProvider');
+import service = require('../src/services/connectionService');
+import store = require('../src/services/contextService');
+import publish = require('../src/services/publishService');
+import sharing = require('../src/services/contextSharingService');
+import agentGate = require('../src/services/agentGateService');
 import type { Actor } from '../src/types/actor';
 
 type FetchInit = { headers?: Record<string, string> } & Record<string, any>;
@@ -74,7 +76,6 @@ function json(body: unknown, status: number = 200): Response {
 }
 
 function installFakeDomo() {
-  // TODO(types) stand-in for fetch; the services only pass a URL string and a plain init.
   global.fetch = (async (url: string, init: FetchInit = {}) => {
     const target = new URL(url);
     const token = (init.headers || {} as Record<string, string>)['X-DOMO-Developer-Token'];
@@ -162,8 +163,24 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
     [companyId, username, `${username}@example.com`]
   );
   made.users.push(rows[0].id);
-  // TODO(types) a partial Actor: only the fields the services read.
-  return { id: rows[0].id, username, companyId, isPlatform: false, role: 'COMPANY_ADMIN' } as Actor;
+  return {
+    id: rows[0].id, username, companyId, isPlatform: false, role: 'COMPANY_ADMIN',
+    permissions: ['context.read', 'context.create', 'context.update', 'context.publish', 'context.delete', 'context.manage_all'],
+    features: [],
+  } as unknown as Actor;
+}
+
+async function makeMember(companyId: number, username: string): Promise<Actor> {
+  const { rows } = await db.query(
+    `INSERT INTO users (company_id, username, email, password_hash, role, status)
+     VALUES (?, ?, ?, 'x', 'USER', 'active') RETURNING id`,
+    [companyId, username, `${username}@example.com`]
+  );
+  made.users.push(rows[0].id);
+  return {
+    id: rows[0].id, username, companyId, isPlatform: false, role: 'USER',
+    permissions: ['context.read'], features: [],
+  } as unknown as Actor;
 }
 
 async function cleanup(): Promise<void> {
@@ -269,6 +286,84 @@ async function cleanup(): Promise<void> {
 
   const notAUuid = await codeOf(() => service.requireConnection(adminA, 'not-a-uuid'));
   check('a malformed id is a 404, not a crash', notAUuid === 'RESOURCE_NOT_FOUND', notAUuid);
+
+  section('Per-context sharing');
+
+  const memberA = await makeMember(companyA, 'ctx.alpha.member');
+  const otherAdminA = await makeAdmin(companyA, 'ctx.alpha.admin2');
+  const gate = (actor: Actor, path: string, method: string) =>
+    codeOf(() => agentGate.checkAgentRequest(actor, `/svc/adk/contexts/${connectionId}${path}`, method));
+
+  check('the creator owns it', created.connection.access?.isOwner === true, JSON.stringify(created.connection.access));
+  check('the creator has full access', created.connection.access?.level === 'full');
+  check('the creator may share it', created.connection.access?.canShare === true);
+  check('a new context starts restricted', created.connection.access?.generalAccess === 'restricted');
+
+  check('a member does not see a restricted context', (await service.listConnections(memberA)).length === 0);
+  const hidden = await codeOf(() => service.requireConnection(memberA, connectionId));
+  check('reading it unshared is a 404', hidden === 'RESOURCE_NOT_FOUND', hidden);
+  const hiddenGate = await gate(memberA, '/description-editor/sessions', 'GET');
+  check('the agent gate refuses it unshared', hiddenGate === 'RESOURCE_NOT_FOUND', hiddenGate);
+
+  const asOtherAdmin = await service.requireConnection(otherAdminA, connectionId);
+  check('another company admin has full access', asOtherAdmin.access.level === 'full');
+  check('but may not share it', asOtherAdmin.access.canShare === false);
+  const adminShares = await codeOf(() => sharing.shareWithUser(otherAdminA, connectionId, memberA.id, { level: 'view' }));
+  check('a non-owner admin sharing is refused', adminShares === 'INSUFFICIENT_PERMISSION', adminShares);
+
+  const people = await sharing.shareablePeople(adminA, connectionId);
+  check('the people to share with are the company, owner aside',
+    people.some((p: any) => p.userId === memberA.id) && !people.some((p: any) => p.userId === adminA.id)
+      && !people.some((p: any) => p.userId === adminB.id),
+    JSON.stringify(people.map((p: any) => p.userId)));
+
+  let shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'view' });
+  check('sharing lists the person with their level',
+    shared.people.length === 1 && shared.people[0].userId === memberA.id && shared.people[0].level === 'view',
+    JSON.stringify(shared.people));
+  check('the member now sees it', (await service.listConnections(memberA)).length === 1);
+  const asViewer = await service.requireConnection(memberA, connectionId);
+  check('as view', asViewer.access.level === 'view' && asViewer.access.canShare === false);
+  const viewerEdits = await codeOf(() => service.replaceSelection(memberA, connectionId, []));
+  check('view cannot change the draft', viewerEdits === 'INSUFFICIENT_PERMISSION', viewerEdits);
+  const viewerDeletes = await codeOf(() => service.deleteConnection(memberA, connectionId));
+  check('view cannot delete it', viewerDeletes === 'INSUFFICIENT_PERMISSION', viewerDeletes);
+  const viewerShares = await codeOf(() => sharing.shareWithUser(memberA, connectionId, otherAdminA.id, { level: 'view' }));
+  check('a sharee cannot share it on', viewerShares === 'INSUFFICIENT_PERMISSION', viewerShares);
+  check('the gate lets view read the description editor', (await gate(memberA, '/description-editor/sessions', 'GET')) === null);
+  const viewerChats = await gate(memberA, '/description-editor/sessions', 'POST');
+  check('the gate keeps view out of description edits', viewerChats === 'INSUFFICIENT_PERMISSION', viewerChats);
+
+  shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'edit' });
+  check('changing the level replaces it', shared.people.length === 1 && shared.people[0].level === 'edit');
+  check('edit can change the draft', (await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'))) === null);
+  check('the gate lets edit use the description editor', (await gate(memberA, '/description-editor/sessions/s1/messages', 'POST')) === null);
+  const editorDeletes = await codeOf(() => service.requireConnection(memberA, connectionId, 'full'));
+  check('edit still cannot delete', editorDeletes === 'INSUFFICIENT_PERMISSION', editorDeletes);
+
+  const toOwner = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminA.id, { level: 'view' }));
+  check('the owner cannot be given a level', toOwner === 'VALIDATION_ERROR', toOwner);
+  const crossCompany = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminB.id, { level: 'view' }));
+  check("another company's person cannot be added", crossCompany === 'RESOURCE_NOT_FOUND', crossCompany);
+  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'admin' }));
+  check('an unknown level is refused', badLevel === 'VALIDATION_ERROR', badLevel);
+
+  shared = await sharing.unshareWithUser(adminA, connectionId, memberA.id);
+  check('removing a person empties the list', shared.people.length === 0);
+  const removed = await codeOf(() => service.requireConnection(memberA, connectionId));
+  check('and they lose sight of it again', removed === 'RESOURCE_NOT_FOUND', removed);
+
+  shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'company' });
+  check('general access can open it to the company', shared.generalAccess === 'company');
+  const asCompany = await service.requireConnection(memberA, connectionId);
+  check('then everyone in the company can view it', asCompany.access.level === 'view');
+  const companyEdits = await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'));
+  check('but not edit it', companyEdits === 'INSUFFICIENT_PERMISSION', companyEdits);
+  const badGeneral = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'public' }));
+  check('an unknown general access is refused', badGeneral === 'VALIDATION_ERROR', badGeneral);
+  shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'restricted' });
+  check('and it can be restricted again', shared.generalAccess === 'restricted'
+    && (await service.listConnections(memberA)).length === 0);
 
   section('Listing datasets');
 
@@ -519,8 +614,8 @@ async function cleanup(): Promise<void> {
   await db.raw(`
     CREATE TABLE IF NOT EXISTS context_objects (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      workspace_id UUID NOT NULL,
-      bundle_id UUID NULL,
+      context_id UUID NOT NULL,
+      version_id UUID NOT NULL,
       object_type TEXT NOT NULL,
       qualified_name TEXT NOT NULL,
       source_type TEXT NOT NULL,
@@ -529,32 +624,32 @@ async function cleanup(): Promise<void> {
       payload JSONB NOT NULL,
       reviewed_by TEXT,
       reviewed_at TIMESTAMPTZ,
-      session_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE (workspace_id, qualified_name)
+      UNIQUE (context_id, version_id, qualified_name)
     )`);
 
   const fixture = async (
-    ws: string, session: string, type: string, name: string, payload: Record<string, any>,
+    ws: string, run: string, type: string, name: string, payload: Record<string, any>,
     extra: { source?: string; verified?: boolean; confidence?: number; order?: number } = {}
   ): Promise<string> => {
     const { rows } = await db.query(
       `INSERT INTO context_objects
-         (workspace_id, object_type, qualified_name, source_type, verified,
-          confidence, payload, session_id, created_at)
-       VALUES (?::uuid, ?, ?, ?, ?, ?, ?::jsonb, ?, now() + (? * interval '1 second'))
+         (context_id, object_type, qualified_name, source_type, verified,
+          confidence, payload, version_id, created_at)
+       VALUES (?::uuid, ?, ?, ?, ?, ?, ?::jsonb, ?::uuid, now() + (? * interval '1 second'))
        RETURNING id`,
       [ws, type, name, extra.source || 'db_inferred', extra.verified ?? false,
-       extra.confidence ?? null, JSON.stringify(payload), session, extra.order ?? 0]
+       extra.confidence ?? null, JSON.stringify(payload), run, extra.order ?? 0]
     );
     return rows[0].id;
   };
 
   const ws = connectionId;
-  const RUN = 'run-current';
+  const RUN = '00000000-0000-4000-8000-00000000c0de';
+  const OLD_RUN = '00000000-0000-4000-8000-0000000001d0';
 
-  await fixture(ws, 'run-old', 'table', 'stale_table', { description: 'from a previous run' }, { order: -100 });
+  await fixture(ws, OLD_RUN, 'table', 'stale_table', { description: 'from a previous run' }, { order: -100 });
 
   await fixture(ws, RUN, 'table', 'orders', { description: 'Order header rows' }, { order: 1 });
   await fixture(ws, RUN, 'table', 'customers', { description: 'Customer master' }, { order: 2 });
@@ -608,6 +703,23 @@ async function cleanup(): Promise<void> {
   const afterApprove = await store.reviewQueue(ws);
   check('approving sets our status',
     afterApprove.items.find((i: any) => i.id === colId).status === 'approved');
+
+  const pendingView = await store.tableView(ws, { review: 'pending' });
+  const pendingOrders = pendingView.tables.find((g: any) => g.table.qualifiedName === 'orders');
+  check('the review filter keeps only what is still pending',
+    Boolean(pendingOrders) && !pendingOrders.columns.some((c: any) => c.id === colId)
+      && pendingOrders.columns.some((c: any) => c.qualifiedName === 'orders.total'),
+    JSON.stringify(pendingOrders?.columns?.map((c: any) => c.qualifiedName)));
+  const allOrders = (await store.tableView(ws, {})).tables.find((g: any) => g.table.qualifiedName === 'orders');
+  check('without it every column is listed', allOrders?.columns.length === 2, String(allOrders?.columns.length));
+  check('each table says how much of it needs review, filtered or not',
+    (allOrders?.needsReview ?? 0) >= 1 && pendingOrders?.needsReview === allOrders?.needsReview,
+    `${allOrders?.needsReview} / ${pendingOrders?.needsReview}`);
+  check('review counts are the pending tables and columns',
+    pendingView.reviewCounts.tables === 2 && pendingView.reviewCounts.columns === 1,
+    JSON.stringify(pendingView.reviewCounts));
+  const badReview = await codeOf(() => store.tableView(ws, { review: 'maybe' }));
+  check('an unknown review filter is refused', badReview === 'VALIDATION_ERROR', badReview);
   const { rows: verifiedRow } = await db.query(
     'SELECT verified, reviewed_by FROM context_objects WHERE id = ?::uuid', [colId]);
   check('and mirrors verified into context_objects, which the analyst agent reads',

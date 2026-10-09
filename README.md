@@ -46,11 +46,11 @@ backend/
 │   │   ├── contextLayer             orchestration for the /api/context endpoints
 │   │   ├── connection, context, version, publish, mcp  the context layer
 │   │   ├── email, bootstrap
-│   │   └── providers/               smtp.provider.ts, domo.provider.ts
-│   ├── repositories/                every SQL statement and file read/write (base.repository.ts: paging, scoping)
-│   ├── models/                      rbac.model.ts, context.model.ts (DDL + table names), card.model.ts
+│   │   └── providers/               smtpProvider.ts, domoProvider.ts
+│   ├── repositories/                every SQL statement and file read/write (baseRepository.ts: paging, scoping)
+│   ├── models/                      rbacModel.ts, contextModel.ts (DDL + table names), cardModel.ts
 │   ├── views/
-│   │   ├── templates/               accountActivation.template.ts
+│   │   ├── templates/               accountActivationTemplate.ts
 │   │   └── serializers/             row -> response shaping, per resource
 │   ├── validators/                  request validation (ids, strings, lists, users, scopes, dashboards, context)
 │   ├── constants/                   error codes, permissions, audit events, statuses, query vocabulary, ...
@@ -76,19 +76,19 @@ backend/
 
 ```
 GET /api/dashboard/<id>
-  routes/dashboard.routes.ts           requirePermission('dashboard.read')
-  middleware/auth.middleware.ts        verify access token -> resolve the actor
+  routes/dashboardRoutes.ts           requirePermission('dashboard.read')
+  middleware/authMiddleware.ts        verify access token -> resolve the actor
                                        requireDashboardAccess('view')  <- before any SQL
-  controllers/dashboard.controller.ts  parse filters
-  services/dashboard.service.ts        dashboardId -> dashboard JSON, hydrateView
-  services/queryEngine.service.ts      hydrateDashboard
-    services/metadata.service          resolve + validate table and columns
-    services/queryPlanner.service      one isolated plan per card / slicer
-    services/queryOptimizer.service    merge compatible KPI queries
-    services/sqlGenerator.service      parameterised SQL
+  controllers/dashboardController.ts  parse filters
+  services/dashboardService.ts        dashboardId -> dashboard JSON, hydrateView
+  services/queryEngineService.ts      hydrateDashboard
+    services/metadataService          resolve + validate table and columns
+    services/queryPlannerService      one isolated plan per card / slicer
+    services/queryOptimizerService    merge compatible KPI queries
+    services/sqlGeneratorService      parameterised SQL
     tools/queryCache                   keyed on SQL + bound params
-    repositories/query.repository      PostgreSQL, bounded concurrency
-    services/resultFormatter.service   rows -> cards / slicers
+    repositories/queryRepository      PostgreSQL, bounded concurrency
+    services/resultFormatterService   rows -> cards / slicers
   JSON response
 ```
 
@@ -102,7 +102,7 @@ would misstate every visual.
 
 ## Cards
 
-A dashboard declares one ordered `cards` list. `models/card.model.ts` reads each card's
+A dashboard declares one ordered `cards` list. `models/cardModel.ts` reads each card's
 `chartType` to decide whether it is planned as a KPI badge (`planKpi` — one aggregated
 value, optionally compared across a date grain) or as a chart (`planCard`). Nothing else
 distinguishes them, so the same JSON keys mean the same thing on every card and the
@@ -150,7 +150,7 @@ dashboard, which cannot mean anything now that dashboards belong to companies.
 
 ## Access control
 
-RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/middleware/auth.middleware.ts`, and stores its data in
+RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/middleware/authMiddleware.ts`, and stores its data in
 the **same database as the reporting tables** — one `DB_NAME`, one pool, created
 automatically on first start.
 
@@ -237,7 +237,7 @@ validated: the only correct value is one the client cannot influence.
 
 ### Dashboards are still files
 
-There is no `dashboards` table. `services/dashboard.service.ts` remains the only source of
+There is no `dashboards` table. `services/dashboardService.ts` remains the only source of
 truth for which dashboards exist, so assignments and grants store the dashboard id as plain
 text, validated against the registry on write and joined against it on read.
 
@@ -265,7 +265,7 @@ Only the HMAC of a refresh token is stored, keyed with `JWT_REFRESH_SECRET`, so 
 
 Every endpoint is cookie-authenticated, so every state-changing request needs CSRF
 protection: `SameSite=Strict` plus a double-submit header (`X-CSRF-Token` matching the
-readable `da_csrf` cookie), checked in `src/middleware/csrf.middleware.ts`. `requireAuth` applies it
+readable `da_csrf` cookie), checked in `src/middleware/csrfMiddleware.ts`. `requireAuth` applies it
 to every non-GET/HEAD/OPTIONS request; refresh and logout, which authenticate from the
 refresh cookie instead, apply it directly. There is no `Authorization: Bearer` path.
 
@@ -274,7 +274,7 @@ refresh cookie instead, apply it directly. There is no `Authorization: Bearer` p
 Every list that grows with the business — `GET /api/users` (and `/api/platform/users`),
 `GET /api/platform/companies`, `GET /api/audit`, and the context layer's review queue,
 glossary and fact list — takes `?page&pageSize&search&sort&dir` plus its own filters and answers
-`{ items, total }` (`src/validators/list.validator.ts`, `src/repositories/base.repository.ts`). The database filters, orders and limits; `total`
+`{ items, total }` (`src/validators/listValidator.ts`, `src/repositories/baseRepository.ts`). The database filters, orders and limits; `total`
 comes from `COUNT(*) OVER ()` in the same statement, so paging costs no extra round trip. `sort`
 is a key from the endpoint's own whitelist, never SQL; an unknown key is a 400. Company scoping is
 applied in SQL exactly as before — a company caller's `companyId` parameter is still ignored.
@@ -368,7 +368,7 @@ Creation and mail are all-or-nothing on both paths. If delivery fails, the accou
 the company path the company with it — is removed again, because what would otherwise be
 left behind holds the username and email address that the retry needs.
 
-Both paths render the invitation through `services/onboarding.service.ts`, so the wording, the
+Both paths render the invitation through `services/onboardingService.ts`, so the wording, the
 expiry and the security notice cannot drift apart between them.
 
 "Reset access" (`POST /api/users/:id/activation`) is the same mechanism — it clears the
@@ -380,7 +380,7 @@ discovered.
 
 ### Email
 
-`src/services/email.service.ts` is the only way the application sends mail. Business code calls
+`src/services/emailService.ts` is the only way the application sends mail. Business code calls
 `sendEmail({ to, subject, text, html }, { consequence })` and knows nothing about transport;
 swapping SMTP for SES, SendGrid or Graph is a new file under `src/services/providers/`.
 
@@ -494,12 +494,12 @@ The engine targets PostgreSQL only. The differences that shaped the code:
 | **Slicer filters** | Values arrive from a URL as strings, so a non-text column is compared as `col::text = $1` - comparing text to an integer is refused outright. `setup:indexes` creates a matching expression index, because a plain index cannot serve a cast. |
 | **int8 and numeric** | node-postgres returns both as strings to protect precision. `config/pgPool.ts` parses them to Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
 | **One database** | The RBAC tables and the reporting tables share `DB_NAME` and one pool. The RBAC tables are unqualified and resolve through `search_path`; reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
-| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `repositories/loginAttempt.repository.ts` repeats its window test in each expression rather than computing it once. |
+| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `repositories/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
 
 ## Audit trail
 
 Every audited action is a row in `audit_logs` (created at startup with the other tables),
-written by `services/audit.service.ts` in the background so a failed write can never fail the
+written by `services/auditService.ts` in the background so a failed write can never fail the
 action. It is also printed to stdout. There are no foreign keys, so an entry outlives the user
 or company it names.
 

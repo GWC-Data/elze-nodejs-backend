@@ -5,22 +5,22 @@ live whole in `src/modules/context-layer/`; it is now split across the backend's
 layers like every other feature:
 
 ```
-routes/context.routes.ts                 route definitions, mounted at /api/context
-controllers/context.controller.ts        request parsing and responses
-services/contextLayer.service.ts         orchestration: drafts, versions, audit per endpoint
-services/connection.service.ts           company-scoped connection logic; the token never leaves it
-services/context.service.ts              facts, review, glossary, model graph, snapshot profiles
-services/version.service.ts              draft -> published -> next draft lifecycle
-services/publish.service.ts              publish = flip the draft to published + store the snapshot
-services/mcp.service.ts                  how an MCP client reaches a published context
-services/providers/domo.provider.ts      the only implemented provider
-repositories/connection.repository.ts    SQL for connections and datasets
-repositories/context.repository.ts       SQL for context_objects and review decisions
-repositories/version.repository.ts       SQL for context_layer_versions
-models/context.model.ts                  this feature's tables (DDL)
+routes/contextRoutes.ts                 route definitions, mounted at /api/context
+controllers/contextController.ts        request parsing and responses
+services/contextLayerService.ts         orchestration: drafts, versions, audit per endpoint
+services/connectionService.ts           company-scoped connection logic; the token never leaves it
+services/contextService.ts              facts, review, glossary, model graph, snapshot profiles
+services/versionService.ts              draft -> published -> next draft lifecycle
+services/publishService.ts              publish = flip the draft to published + store the snapshot
+services/mcpService.ts                  how an MCP client reaches a published context
+services/providers/domoProvider.ts      the only implemented provider
+repositories/connectionRepository.ts    SQL for connections and datasets
+repositories/contextRepository.ts       SQL for context_objects and review decisions
+repositories/versionRepository.ts       SQL for context_layer_versions
+models/contextModel.ts                  this feature's tables (DDL)
 constants/connectorCatalogue.ts          the warehouses this platform knows about
 constants/context.ts                     editable keys, glossary vocabulary, MCP tool list
-validators/context.validator.ts          limit, dataset selection and extraction payload checks
+validators/contextValidator.ts          limit, dataset selection and extraction payload checks
 tools/secretBox.ts                       AES-256-GCM seal/open for stored credentials
 config/context.ts                        CREDENTIAL_SECRET and CONTEXT_MCP_* settings
 ```
@@ -57,7 +57,7 @@ repository, and nothing in this build will catch it.
 | File | What was added |
 |---|---|
 | `src/routes/index.ts` | `router.use('/context', …)` |
-| `src/services/bootstrap.service.ts` | `createContextSchema()` after the RBAC tables |
+| `src/services/bootstrapService.ts` | `createContextSchema()` after the RBAC tables |
 | `src/constants/permissions.ts` | `context.read`, `context.manage` |
 | `src/constants/auditEvents.ts` | the `CONTEXT_*` event names |
 | `src/constants/errorCodes.ts` | `CONNECTOR_AUTH_FAILED`, `CONNECTOR_UNREACHABLE` |
@@ -85,7 +85,7 @@ repository, and nothing in this build will catch it.
 | `GET` | `/api/context/connections/:id/context-objects/by-table` | `context.read` — facts grouped per table (table, columns, related), paged by table |
 | `GET` | `/api/context/connections/:id/understanding` | `context.read` (glossary for step 4) |
 
-Model, Review and Publish routes (`/model`, `/review…`, `/publish…`) are in `routes/context.routes.ts`.
+Model, Review and Publish routes (`/model`, `/review…`, `/publish…`) are in `routes/contextRoutes.ts`.
 
 A connection belongs to exactly one company. A platform account must name the
 company on create; a company account gets its own and a `companyId` in the body
@@ -104,7 +104,7 @@ That is a real difference in exposure and worth stating plainly: a dump of
 Rotating `CREDENTIAL_SECRET` invalidates every stored connection — they report
 "the stored token could not be read" and have to be entered again.
 
-The decrypted token never leaves `services/connection.service.ts`. It is not in the
+The decrypted token never leaves `services/connectionService.ts`. It is not in the
 shaped response, not in the audit trail (`token` and `secret` are in
 `FORBIDDEN_DETAIL_KEYS`), and not in any log line. What the UI shows is
 `secretHint`, the last four characters.
@@ -123,7 +123,7 @@ This is why the form asks for the instance as well as the token. A token
 carries no address: it is issued by one instance and means nothing at another,
 so there is nothing to infer it from.
 
-Four instance endpoints are used, all in `services/providers/domo.provider.ts`:
+Four instance endpoints are used, all in `services/providers/domoProvider.ts`:
 
 | | |
 |---|---|
@@ -229,7 +229,7 @@ that this endpoint profiles the datasets somebody chose, and nothing else in the
 
 ## Versions: draft → published → next draft
 
-`context_layer_versions` (`services/version.service.ts`) holds one row per version of a context.
+`context_layer_versions` (`services/versionService.ts`) holds one row per version of a context.
 
 - **A write opens the draft, never a read.** Creating the connection, saving the
   selection, running an extraction and every review decision call `touchDraft`, which
@@ -242,7 +242,7 @@ that this endpoint profiles the datasets somebody chose, and nothing else in the
 - **Editing after publishing opens a new row** — version n+1, `based_on_id` → what it was
   edited from. The published row is never written again. A partial unique index allows
   one draft per connection.
-- Draft bookkeeping on the ordinary routes is best-effort (`recordDraft` in `services/contextLayer.service.ts`):
+- Draft bookkeeping on the ordinary routes is best-effort (`recordDraft` in `services/contextLayerService.ts`):
   the change itself is already saved, so a failed draft update is logged, not returned.
 - `context_publications` is legacy. Its rows are copied into `context_layer_versions` on
   every start (same id, `ON CONFLICT DO NOTHING`) and nothing writes it any more.
@@ -277,7 +277,7 @@ removed; old version rows keep their `extraction_mode = 'demo'` as history.
   an approved fact's `verified`. `context_object_reviews` keeps its status and `edited`
   flag, but the fact the analyst reads has changed. (The removed demo generator honoured both.)
 - **"Latest run" can pick an older session.** Node resolves the latest run as the
-  `session_id` of the most recently *created* `context_objects` row (`runClause` in `repositories/context.repository.ts`).
+  `session_id` of the most recently *created* `context_objects` row (`runClause` in `repositories/contextRepository.ts`).
   An upsert moves a row's `session_id` but not its `created_at`, so a re-run that only
   updates existing rows can leave an older session looking newest.
 
@@ -293,7 +293,7 @@ reads what that run wrote.
    `listDatasets({ host, token, limit })` and, to support the Profile step,
    `getTableProfile({ host, token, datasetId })`. A provider without the last one is
    refused by `tableProfile` with a clear message rather than crashing.
-2. Register it in `PROVIDERS` in `services/connection.service.ts`.
+2. Register it in `PROVIDERS` in `services/connectionService.ts`.
 3. Flip its `status` to `available` in `constants/connectorCatalogue.ts` and describe its
    credential fields there — the dialog is rendered from that data, so a new
    provider needs no new component.

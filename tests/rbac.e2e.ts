@@ -486,7 +486,7 @@ function activationTokenFrom(email: string | null): string | null {
 
   const gate = (uri: string, method: string) => ({ headers: { 'X-Original-URI': uri, 'X-Original-Method': method } });
 
-  const analystChat = '/svc/adk/workspaces/no-such-connection/agents/data_analyst/sessions';
+  const analystChat = '/svc/adk/contexts/no-such-connection/data-analyst/sessions';
   r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate(analystChat, 'POST'));
   check('the agent gate refuses a role without an agent permission', r.status === 403, String(r.status));
   r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate('/svc/adk/health', 'GET'));
@@ -506,9 +506,7 @@ function activationTokenFrom(email: string | null): string | null {
       && !(r.body?.data?.user?.permissions || []).includes('analyst.use'),
     JSON.stringify(r.body?.data?.user?.permissions));
 
-  // The Analyst role holds agent.* but no playbook permission, and the workspace is not one of
-  // Alpha's connections: refused either way, never proxied.
-  r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate('/svc/adk/workspaces/no-such-connection/playbook-builder/sessions', 'POST'));
+  r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate('/svc/adk/contexts/no-such-connection/playbook-builder/sessions', 'POST'));
   check('the agent gate refuses an action the role lacks', r.status === 403, String(r.status));
   r = await alphaUser.call('GET', '/api/gate/agents', undefined, { noAuth: true, ...gate(analystChat, 'GET') });
   check('the agent gate refuses an anonymous call with 401', r.status === 401, String(r.status));

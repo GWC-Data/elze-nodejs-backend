@@ -12,7 +12,6 @@ import {
 
 const { COOKIE_SECURE, COOKIE_SAMESITE, ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } = config.auth;
 
-// TODO(types): COOKIE_SAMESITE is a free-form env string; passed through to Express as-is.
 const SAME_SITE = COOKIE_SAMESITE as CookieOptions['sameSite'];
 
 function baseCookie(path: string, maxAgeSeconds: number): CookieOptions {

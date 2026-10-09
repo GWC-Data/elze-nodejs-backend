@@ -1,19 +1,19 @@
 import express from 'express';
-import { requestTimer } from '../middleware/requestTimer.middleware';
-import { notFound, errorHandler } from '../middleware/error.middleware';
-import { health } from '../controllers/health.controller';
-import authRoutes from './auth.routes';
-import platformRoutes from './platform.routes';
-import workspaceRoutes from './workspace.routes';
-import userRoutes from './user.routes';
-import groupRoutes from './group.routes';
-import accessRoutes from './access.routes';
-import contextRoutes from './context.routes';
-import metadataRoutes from './metadata.routes';
-import dashboardRoutes from './dashboard.routes';
-import auditRoutes from './audit.routes';
-import companyRoleRoutes from './companyRole.routes';
-import gateRoutes from './gate.routes';
+import { requestTimer } from '../middleware/requestTimerMiddleware';
+import { notFound, errorHandler } from '../middleware/errorMiddleware';
+import { health } from '../controllers/healthController';
+import authRoutes from './authRoutes';
+import platformRoutes from './platformRoutes';
+import workspaceRoutes from './workspaceRoutes';
+import userRoutes from './userRoutes';
+import groupRoutes from './groupRoutes';
+import accessRoutes from './accessRoutes';
+import contextRoutes from './contextRoutes';
+import metadataRoutes from './metadataRoutes';
+import dashboardRoutes from './dashboardRoutes';
+import auditRoutes from './auditRoutes';
+import companyRoleRoutes from './companyRoleRoutes';
+import gateRoutes from './gateRoutes';
 
 const router = express.Router();
 

@@ -2,8 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// The nearest package.json above this file, so the answer is the same whether this runs
-// from src/config (tsx) or dist/src/config (compiled).
 function findBackendRoot(start: string): string {
   let dir = start;
   while (!fs.existsSync(path.join(dir, 'package.json'))) {

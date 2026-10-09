@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import config from '../src/config';
 const { db } = config.database;
-import { bootstrapAppMeta } from '../src/services/bootstrap.service';
+import { bootstrapAppMeta } from '../src/services/bootstrapService';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const SKIP_REPORTING = process.argv.includes('--skip-reporting');

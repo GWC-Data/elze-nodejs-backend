@@ -1,7 +1,7 @@
 import type { Server } from 'http';
 import config from './config';
 import app from './app';
-import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrap.service';
+import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrapService';
 
 const { APPLICATION_URL } = config.auth;
 const { db } = config.database;

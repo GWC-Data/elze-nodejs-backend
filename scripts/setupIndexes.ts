@@ -1,7 +1,7 @@
 import config from '../src/config';
 const { db } = config.database;
-import * as dashboards from '../src/services/dashboard.service';
-import { resolveSourceMetadata } from '../src/services/metadata.service';
+import * as dashboards from '../src/services/dashboardService';
+import { resolveSourceMetadata } from '../src/services/metadataService';
 import { quoteIdentifier, quoteQualified } from '../src/tools/sql';
 
 type ColMeta = Record<string, any>;

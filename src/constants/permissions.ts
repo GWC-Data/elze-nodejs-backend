@@ -42,6 +42,7 @@ const ALL_PERMISSIONS = [
   { id: 'context.update', label: 'Edit Contexts', description: 'Choose datasets, run the AI analysis, edit and review facts.' },
   { id: 'context.publish', label: 'Publish Contexts', description: 'Publish a draft as a new version that agents read.' },
   { id: 'context.delete', label: 'Delete Contexts', description: 'Delete a connection or a published version.' },
+  { id: 'context.manage_all', label: 'Manage Every Context', description: 'Open, edit and delete every context of your company, not only your own and the ones shared with you.' },
 
   { id: 'analyst.use', label: 'Use Data Analyst', description: 'Chat with the data analyst agent and manage your own chats.' },
 
@@ -99,7 +100,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     'access.read', 'access.grant', 'access.revoke',
     'dashboard.read', 'dashboard.create', 'dashboard.update', 'dashboard.delete',
     'data.read',
-    'context.read', 'context.create', 'context.update', 'context.publish', 'context.delete',
+    'context.read', 'context.create', 'context.update', 'context.publish', 'context.delete', 'context.manage_all',
     'analyst.use',
     'playbook.read', 'playbook.create', 'playbook.update', 'playbook.delete', 'playbook.run',
     'agent.read', 'agent.create', 'agent.update', 'agent.delete', 'agent.schedule', 'agent.manage_all',
@@ -114,10 +115,6 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
 };
 
-// A custom company role is a member role: it can hold any feature permission and the read-only
-// administration ones, but never the permissions that manage people, groups or roles. Those
-// stay with COMPANY_ADMIN, because assertCanManageUser only lets a company admin manage members
-// - a custom role holding them would show buttons that every request then refuses.
 const CUSTOM_ROLE_EXCLUDED = new Set([
   'user.create', 'user.update', 'user.delete', 'user.activate', 'user.deactivate',
   'group.create', 'group.update', 'group.delete',
@@ -125,8 +122,6 @@ const CUSTOM_ROLE_EXCLUDED = new Set([
   'scope.update',
 ]);
 
-// Permissions retired from the catalogue, and what a role that held one gets instead - so a
-// split never silently takes access away. Applied once at startup, before the purge.
 const REPLACED_PERMISSIONS: Record<string, string[]> = {
   'context.manage': ['context.create', 'context.update', 'context.publish', 'context.delete'],
 };

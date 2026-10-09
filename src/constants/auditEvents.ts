@@ -50,6 +50,9 @@ const EVENTS = {
   CONTEXT_PUBLISHED: 'context_published',
   CONTEXT_VERSION_DELETED: 'context_version_deleted',
   CONTEXT_EXTRACTION_RUN: 'context_extraction_run',
+  CONTEXT_ACCESS_GRANTED: 'context_access_granted',
+  CONTEXT_ACCESS_UPDATED: 'context_access_updated',
+  CONTEXT_ACCESS_REVOKED: 'context_access_revoked',
 };
 
 const FORBIDDEN_DETAIL_KEYS = new Set([
@@ -72,8 +75,6 @@ const SUMMARY_MAX = 240;
 
 const AUDIT_SORTS: Record<string, string> = { ts: 'a.ts', event: 'a.event', actor: 'a.actor' };
 
-// `?category=` → event-name prefixes, any of which matches. `company` is the platform
-// overview's legacy mix; the rest are the audit screen's filter chips.
 const AUDIT_CATEGORIES: Record<string, string[]> = {
   company: ['company_', 'dashboard_', 'context_', 'access_granted', 'access_revoked'],
   lakehouse: ['context_'],
@@ -83,15 +84,12 @@ const AUDIT_CATEGORIES: Record<string, string[]> = {
   companies: ['company_'],
 };
 
-// `?action=` → event-name suffixes. Grouped by what happened to the thing, so publishing a
-// context counts as creating (a version) and a review decision as updating (a fact).
 const AUDIT_ACTIONS: Record<string, string[]> = {
   create: ['_created', '_published', '_granted', '_assigned', '_activated'],
   update: ['_updated', '_selected', '_decided', '_changed', '_resent'],
   delete: ['_deleted', '_revoked', '_unassigned', '_deactivated'],
 };
 
-// Readable names for the Lakehouse events (the UI calls it Metadata Lakehouse, not "context").
 const EVENT_LABELS: Record<string, string> = {
   context_connection_created: 'Lakehouse connection created',
   context_connection_deleted: 'Lakehouse connection deleted',
@@ -102,6 +100,9 @@ const EVENT_LABELS: Record<string, string> = {
   context_version_created: 'Lakehouse version created',
   context_version_deleted: 'Lakehouse version deleted',
   context_extraction_run: 'Lakehouse extraction run',
+  context_access_granted: 'Lakehouse context shared',
+  context_access_updated: 'Lakehouse sharing changed',
+  context_access_revoked: 'Lakehouse access removed',
 };
 
 export {

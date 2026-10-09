@@ -1,10 +1,10 @@
 import assert from 'assert';
 import config from '../src/config';
 const { db } = config.database;
-import { T } from '../src/models/rbac.model';
-import { bootstrapAppMeta } from '../src/services/bootstrap.service';
-import * as registry from '../src/services/dashboard.service';
-import * as access from '../src/services/access.service';
+import { T } from '../src/models/rbacModel';
+import { bootstrapAppMeta } from '../src/services/bootstrapService';
+import * as registry from '../src/services/dashboardService';
+import * as access from '../src/services/accessService';
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PLATFORM_ONLY_PERMISSIONS,
@@ -144,7 +144,7 @@ async function runTests(): Promise<void> {
     role: COMPANY_ADMIN,
     isPlatform: false,
     permissions: companyAdminPerms,
-  } as unknown as Actor; // TODO(types) a partial Actor
+  } as unknown as Actor;
 
   const mockCompanyUser = {
     id: 8883,
@@ -152,7 +152,7 @@ async function runTests(): Promise<void> {
     role: USER,
     isPlatform: false,
     permissions: userPerms,
-  } as unknown as Actor; // TODO(types) a partial Actor
+  } as unknown as Actor;
 
   const adminLevel = await access.getAccessLevel(mockCompanyAdmin, dashA_Id);
   const userLevel = await access.getAccessLevel(mockCompanyUser, dashA_Id);

@@ -1,5 +1,3 @@
-// Each section loads on first access, as before: a script that only needs `env` never
-// validates the SMTP or JWT settings. The require calls stay require for that reason.
 interface Config {
   readonly env: typeof import('./env');
   readonly app: typeof import('./appConfig');

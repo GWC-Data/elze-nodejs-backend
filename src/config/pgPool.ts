@@ -9,8 +9,6 @@ types.setTypeParser(PG_NUMERIC, (value: string | null) => (value === null ? null
 
 type Params = readonly unknown[];
 
-// Rows default to `any`: callers read columns by name from hand-written SQL, and a
-// row type is added where a caller benefits from one.
 interface Queryable {
   query<R extends QueryResultRow = any>(sql: string, params?: Params): Promise<QueryResult<R>>;
   raw<R extends QueryResultRow = any>(sql: string, params?: Params): Promise<QueryResult<R>>;
