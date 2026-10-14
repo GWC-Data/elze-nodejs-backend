@@ -82,8 +82,8 @@ async function upsert({ id, title, description, companyId, userId, spec }: {
 
 async function removeWithGrants(id: string): Promise<void> {
   await withTransaction(async (conn: Queryable) => {
-    await conn.query(`DELETE FROM ${T.dashboardAccess} WHERE dashboard_id = ?`, [id]);
-    await conn.query(`DELETE FROM ${T.groupDashboardAccess} WHERE dashboard_id = ?`, [id]);
+    await conn.query(`DELETE FROM ${T.dashboardUserAccess} WHERE dashboard_id = ?`, [id]);
+    await conn.query(`DELETE FROM ${T.dashboardGroupAccess} WHERE dashboard_id = ?`, [id]);
     await conn.query(`DELETE FROM ${T.companyDashboards} WHERE dashboard_id = ?`, [id]);
     await conn.query(`DELETE FROM ${T.dashboards} WHERE id = ?`, [id]);
   });

@@ -8,7 +8,7 @@ router.use(...authenticated);
 
 router.get('/permissions', requirePermission('role.read'), role.permissions);
 router.get('/', requirePermission('role.read'), role.list);
-router.get('/:name/permissions', requirePermission('role.read'), role.rolePermissions);
-router.put('/:name/permissions', requirePermission('role.update'), role.replacePermissions);
+router.get('/:id/permissions', requirePermission('role.read'), role.rolePermissions);
+router.put('/:id/permissions', requirePermission('role.update'), role.replacePermissions);
 
 export = router;

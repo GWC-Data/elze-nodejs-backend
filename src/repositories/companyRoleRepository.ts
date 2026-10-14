@@ -1,22 +1,35 @@
+import crypto from 'crypto';
 import config from '../config';
 import { T } from '../models/rbacModel';
 import type { Queryable } from '../config/pgPool';
 
 const { db, withTransaction } = config.database;
 
-const ROLE_COLUMNS = `r.id, r.company_id AS "companyId", r.name, r.description,
+const COMPANY_DEFAULT_NAME = 'Member';
+
+const ROLE_COLUMNS = `r.id, r.company_id AS "companyId", r.kind, r.tier, r.name, r.description,
                       r.created_at AS "createdAt", r.updated_at AS "updatedAt",
                       r.modified_at AS "modifiedAt",
                       (SELECT mu.username FROM ${T.users} mu WHERE mu.id = r.modified_by) AS "modifiedBy",
-                      COALESCE((SELECT array_agg(p.permission_id ORDER BY p.permission_id)
-                                  FROM ${T.companyRolePermissions} p WHERE p.role_id = r.id), '{}') AS permissions,
-                      (SELECT COUNT(*) FROM ${T.users} u WHERE u.custom_role_id = r.id) AS "userCount"`;
+                      COALESCE((SELECT rp.permission_ids FROM ${T.rolePermissions} rp WHERE rp.role_id = r.id), '{}')
+                        AS "permissionIds",
+                      (SELECT COUNT(*) FROM ${T.userRoles} ur WHERE ur.role_id = r.id) AS "userCount"`;
+
+async function writePermissions(conn: Queryable, roleId: string, ids: readonly string[], actorId: number | null) {
+  await conn.query(
+    `INSERT INTO ${T.rolePermissions} (role_id, permission_ids, updated_by)
+     VALUES (?, ?::uuid[], ?)
+     ON CONFLICT (role_id) DO UPDATE
+       SET permission_ids = EXCLUDED.permission_ids, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [roleId, ids, actorId]
+  );
+}
 
 async function listForCompany(companyId: number) {
   const { rows } = await db.query(
-    `SELECT ${ROLE_COLUMNS} FROM ${T.companyRoles} r
-      WHERE r.company_id = ? AND r.builtin_role IS NULL
-      ORDER BY lower(r.name), r.id`,
+    `SELECT ${ROLE_COLUMNS} FROM ${T.roles} r
+      WHERE r.company_id = ? AND r.kind = 'custom'
+      ORDER BY lower(r.name), r.created_at`,
     [companyId]
   );
   return rows;
@@ -24,56 +37,50 @@ async function listForCompany(companyId: number) {
 
 async function builtInCounts(companyId: number): Promise<Record<string, number>> {
   const { rows } = await db.query(
-    `SELECT role, COUNT(*) AS n FROM ${T.users}
-      WHERE company_id = ? AND custom_role_id IS NULL GROUP BY role`,
+    `SELECT r.tier, COUNT(*) AS n
+       FROM ${T.users} u
+       JOIN ${T.userRoles} ur ON ur.user_id = u.id
+       JOIN ${T.roles} r ON r.id = ur.role_id
+      WHERE u.company_id = ? AND r.kind <> 'custom'
+      GROUP BY r.tier`,
     [companyId]
   );
-  return Object.fromEntries(rows.map((r) => [r.role, Number(r.n)]));
+  return Object.fromEntries(rows.map((r) => [r.tier, Number(r.n)]));
 }
 
-async function findInCompany(id: number, companyId: number | null) {
+async function findInCompany(id: string, companyId: number | null) {
   const { rows } = await db.query(
-    `SELECT ${ROLE_COLUMNS} FROM ${T.companyRoles} r
-      WHERE r.id = ? AND r.builtin_role IS NULL${companyId === null ? '' : ' AND r.company_id = ?'}`,
+    `SELECT ${ROLE_COLUMNS} FROM ${T.roles} r
+      WHERE r.id = ? AND r.kind = 'custom'${companyId === null ? '' : ' AND r.company_id = ?'}`,
     companyId === null ? [id] : [id, companyId]
   );
   return rows[0] || null;
 }
 
-async function writePermissions(conn: Queryable, roleId: number, permissions: readonly string[]) {
-  await conn.query(`DELETE FROM ${T.companyRolePermissions} WHERE role_id = ?`, [roleId]);
-  if (permissions.length) {
-    await conn.query(
-      `INSERT INTO ${T.companyRolePermissions} (role_id, permission_id)
-       SELECT ?, p FROM unnest(?::text[]) AS p`,
-      [roleId, permissions]
-    );
-  }
-}
-
 async function insert(
-  { companyId, name, description, permissions, createdBy }: {
+  { companyId, name, description, permissionIds, createdBy }: {
     companyId: number;
     name: string;
     description: string | null;
-    permissions: readonly string[];
+    permissionIds: readonly string[];
     createdBy: number;
   }
-): Promise<number> {
+): Promise<string> {
   return withTransaction(async (conn: Queryable) => {
-    const { rows } = await conn.query(
-      `INSERT INTO ${T.companyRoles} (company_id, name, description, created_by)
-       VALUES (?, ?, ?, ?) RETURNING id`,
-      [companyId, name, description, createdBy]
+    const id = crypto.randomUUID();
+    await conn.query(
+      `INSERT INTO ${T.roles} (id, company_id, kind, tier, name, description, created_by)
+       VALUES (?, ?, 'custom', 'USER', ?, ?, ?)`,
+      [id, companyId, name, description, createdBy]
     );
-    await writePermissions(conn, rows[0].id, permissions);
-    return rows[0].id;
+    await writePermissions(conn, id, permissionIds, createdBy);
+    return id;
   });
 }
 
 async function update(
-  id: number,
-  { name, description, permissions }: { name?: string; description?: string | null; permissions?: readonly string[] },
+  id: string,
+  { name, description, permissionIds }: { name?: string; description?: string | null; permissionIds?: readonly string[] },
   actorId: number
 ): Promise<void> {
   await withTransaction(async (conn: Queryable) => {
@@ -81,153 +88,121 @@ async function update(
     const params: unknown[] = [actorId];
     if (name !== undefined) { sets.push('name = ?'); params.push(name); }
     if (description !== undefined) { sets.push('description = ?'); params.push(description); }
-    await conn.query(`UPDATE ${T.companyRoles} SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
-    if (permissions !== undefined) await writePermissions(conn, id, permissions);
+    await conn.query(`UPDATE ${T.roles} SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
+    if (permissionIds !== undefined) await writePermissions(conn, id, permissionIds, actorId);
   });
 }
 
-async function findBuiltInOverride(companyId: number, roleName: string) {
-  const { rows } = await db.query(
-    `SELECT ${ROLE_COLUMNS} FROM ${T.companyRoles} r WHERE r.company_id = ? AND r.builtin_role = ?`,
-    [companyId, roleName]
+async function findCompanyDefault(companyId: number, conn: Queryable = db) {
+  const { rows } = await conn.query(
+    `SELECT ${ROLE_COLUMNS} FROM ${T.roles} r
+      WHERE r.company_id = ? AND r.kind = 'company_default' AND r.tier = 'USER'`,
+    [companyId]
   );
   return rows[0] || null;
 }
 
-async function ensureBuiltInRow(conn: Queryable, companyId: number, roleName: string, actorId: number | null) {
+async function ensureCompanyDefault(conn: Queryable, companyId: number, actorId: number | null) {
   const { rows } = await conn.query(
-    `INSERT INTO ${T.companyRoles} (company_id, name, builtin_role, created_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (company_id, builtin_role) WHERE builtin_role IS NOT NULL
+    `INSERT INTO ${T.roles} (id, company_id, kind, tier, name, created_by)
+     VALUES (?, ?, 'company_default', 'USER', ?, ?)
+     ON CONFLICT (company_id, tier) WHERE kind = 'company_default'
        DO UPDATE SET updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
-    [companyId, roleName, roleName, actorId]
+    [crypto.randomUUID(), companyId, COMPANY_DEFAULT_NAME, actorId]
   );
-  return rows[0] as { id: number; inserted: boolean };
+  return rows[0] as { id: string; inserted: boolean };
 }
 
-async function seedBuiltInCopy(
-  companyId: number,
-  roleName: string,
-  permissions: readonly string[],
-  conn?: Queryable
-): Promise<boolean> {
+async function seedCompanyDefault(companyId: number, permissionIds: readonly string[], conn?: Queryable): Promise<boolean> {
   const work = async (client: Queryable) => {
-    const row = await ensureBuiltInRow(client, companyId, roleName, null);
-    if (row.inserted) await writePermissions(client, row.id, permissions);
+    const row = await ensureCompanyDefault(client, companyId, null);
+    if (row.inserted) await writePermissions(client, row.id, permissionIds, null);
     return row.inserted;
   };
   return conn ? work(conn) : withTransaction(work);
 }
 
-async function saveBuiltInCopy(
-  companyId: number,
-  roleName: string,
-  permissions: readonly string[],
-  actorId: number
-): Promise<void> {
+async function saveCompanyDefault(companyId: number, permissionIds: readonly string[], actorId: number): Promise<void> {
   await withTransaction(async (conn: Queryable) => {
-    const row = await ensureBuiltInRow(conn, companyId, roleName, actorId);
+    const row = await ensureCompanyDefault(conn, companyId, actorId);
     await conn.query(
-      `UPDATE ${T.companyRoles} SET modified_by = ?, modified_at = now(), updated_at = now() WHERE id = ?`,
+      `UPDATE ${T.roles} SET modified_by = ?, modified_at = now(), updated_at = now() WHERE id = ?`,
       [actorId, row.id]
     );
-    await writePermissions(conn, row.id, permissions);
+    await writePermissions(conn, row.id, permissionIds, actorId);
   });
 }
 
-async function resetBuiltInCopy(companyId: number, roleName: string, permissions: readonly string[]): Promise<boolean> {
+async function resetCompanyDefault(companyId: number, permissionIds: readonly string[], actorId: number): Promise<boolean> {
   return withTransaction(async (conn: Queryable) => {
-    const row = await ensureBuiltInRow(conn, companyId, roleName, null);
-    const { rows } = await conn.query(`SELECT modified_at FROM ${T.companyRoles} WHERE id = ?`, [row.id]);
+    const row = await ensureCompanyDefault(conn, companyId, null);
+    const { rows } = await conn.query(`SELECT modified_at FROM ${T.roles} WHERE id = ?`, [row.id]);
     await conn.query(
-      `UPDATE ${T.companyRoles} SET modified_by = NULL, modified_at = NULL, updated_at = now() WHERE id = ?`,
+      `UPDATE ${T.roles} SET modified_by = NULL, modified_at = NULL, updated_at = now() WHERE id = ?`,
       [row.id]
     );
-    await writePermissions(conn, row.id, permissions);
+    await writePermissions(conn, row.id, permissionIds, actorId);
     return Boolean(rows[0] && rows[0].modified_at);
   });
 }
 
-async function backfillBuiltInCopies(roleName: string, permissions: readonly string[]): Promise<number> {
+async function backfillCompanyDefaults(permissionIds: readonly string[]): Promise<number> {
   return withTransaction(async (conn: Queryable) => {
     const { rows } = await conn.query(
-      `INSERT INTO ${T.companyRoles} (company_id, name, builtin_role)
-       SELECT c.id, ?, ? FROM ${T.companies} c
-        WHERE NOT EXISTS (SELECT 1 FROM ${T.companyRoles} r WHERE r.company_id = c.id AND r.builtin_role = ?)
-       RETURNING id`,
-      [roleName, roleName, roleName]
+      `SELECT c.id FROM ${T.companies} c
+        WHERE NOT EXISTS (SELECT 1 FROM ${T.roles} r
+                           WHERE r.company_id = c.id AND r.kind = 'company_default' AND r.tier = 'USER')`
     );
-    for (const row of rows) await writePermissions(conn, row.id, permissions);
+    for (const row of rows) await seedCompanyDefault(row.id, permissionIds, conn);
     return rows.length;
   });
 }
 
-async function syncUnmodifiedBuiltInCopies(roleName: string, permissions: readonly string[]): Promise<number> {
+async function syncUnmodifiedCompanyDefaults(permissionIds: readonly string[]): Promise<number> {
   return withTransaction(async (conn: Queryable) => {
-    const { rows } = await conn.query(
-      `SELECT id FROM ${T.companyRoles} WHERE builtin_role = ? AND modified_at IS NULL`,
-      [roleName]
+    await conn.query(
+      `INSERT INTO ${T.rolePermissions} AS rp (role_id, permission_ids)
+       SELECT r.id, ?::uuid[] FROM ${T.roles} r
+        WHERE r.kind = 'company_default' AND r.tier = 'USER' AND r.modified_at IS NULL
+       ON CONFLICT (role_id) DO UPDATE SET permission_ids = EXCLUDED.permission_ids, updated_at = now()
+         WHERE NOT (rp.permission_ids @> EXCLUDED.permission_ids AND rp.permission_ids <@ EXCLUDED.permission_ids)`,
+      [permissionIds]
     );
-    const ids = rows.map((r) => r.id);
-    if (!ids.length) return 0;
-    await conn.query(`DELETE FROM ${T.companyRolePermissions} WHERE role_id = ANY(?::int[])`, [ids]);
-    if (permissions.length) {
-      await conn.query(
-        `INSERT INTO ${T.companyRolePermissions} (role_id, permission_id)
-         SELECT r, p FROM unnest(?::int[]) AS r, unnest(?::text[]) AS p`,
-        [ids, permissions]
-      );
-    }
-    return ids.length;
+    const { rows } = await conn.query(
+      `SELECT COUNT(*)::int AS n FROM ${T.roles}
+        WHERE kind = 'company_default' AND tier = 'USER' AND modified_at IS NULL`
+    );
+    return rows[0].n;
   });
 }
 
-async function markExistingBuiltInCopiesModified(): Promise<number> {
+async function markExistingCompanyDefaultsModified(): Promise<number> {
   const result = await db.query(
-    `UPDATE ${T.companyRoles} SET modified_at = updated_at, modified_by = created_by
-      WHERE builtin_role IS NOT NULL AND modified_at IS NULL`
+    `UPDATE ${T.roles} SET modified_at = updated_at, modified_by = created_by
+      WHERE kind = 'company_default' AND modified_at IS NULL`
   );
   return result.rowCount || 0;
 }
 
-async function remove(id: number): Promise<boolean> {
-  const result = await db.query(`DELETE FROM ${T.companyRoles} WHERE id = ?`, [id]);
+async function remove(id: string): Promise<boolean> {
+  const result = await db.query(`DELETE FROM ${T.roles} WHERE id = ? AND kind = 'custom'`, [id]);
   return result.rowCount! > 0;
 }
 
-async function purgePermissionsNotIn(permissionIds: readonly string[]): Promise<number> {
-  const result = await db.query(
-    `DELETE FROM ${T.companyRolePermissions} WHERE NOT (permission_id = ANY(?::text[]))`,
-    [permissionIds]
-  );
-  return result.rowCount || 0;
-}
-
-async function grantReplacements(retired: string, replacements: readonly string[]): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.companyRolePermissions} (role_id, permission_id)
-     SELECT p.role_id, r FROM ${T.companyRolePermissions} p, unnest(?::text[]) AS r
-      WHERE p.permission_id = ?
-     ON CONFLICT DO NOTHING`,
-    [replacements, retired]
-  );
-}
-
 export {
+  COMPANY_DEFAULT_NAME,
   listForCompany,
   builtInCounts,
   findInCompany,
   insert,
   update,
   remove,
-  purgePermissionsNotIn,
-  grantReplacements,
-  findBuiltInOverride,
-  seedBuiltInCopy,
-  saveBuiltInCopy,
-  resetBuiltInCopy,
-  backfillBuiltInCopies,
-  syncUnmodifiedBuiltInCopies,
-  markExistingBuiltInCopiesModified,
+  findCompanyDefault,
+  seedCompanyDefault,
+  saveCompanyDefault,
+  resetCompanyDefault,
+  backfillCompanyDefaults,
+  syncUnmodifiedCompanyDefaults,
+  markExistingCompanyDefaultsModified,
 };

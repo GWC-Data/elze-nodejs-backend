@@ -48,9 +48,11 @@ prints the token - it is emailed through the configured SMTP relay.
 
 async function list(): Promise<void> {
   const { rows } = await db.query(
-    `SELECT u.id, u.username, u.email, u.role, u.status, c.name AS company
+    `SELECT u.id, u.username, u.email, r.name AS role, u.status, c.name AS company
        FROM ${T.users} u
        LEFT JOIN ${T.companies} c ON c.id = u.company_id
+       LEFT JOIN ${T.userRoles} ur ON ur.user_id = u.id
+       LEFT JOIN ${T.roles} r ON r.id = ur.role_id
       ORDER BY c.name NULLS FIRST, u.username`
   );
   if (!rows.length) {

@@ -17,8 +17,7 @@ const COUNTED_FROM = `
 
 const COUNTED_COLUMNS = `c.id, c.name, c.slug, c.active, c.created_at,
          COALESCE(uc.n, 0) AS "userCount", COALESCE(dc.n, 0) AS "dashboardCount",
-         COALESCE((SELECT array_agg(f.feature_id ORDER BY f.feature_id) FROM ${T.companyFeatures} f
-                    WHERE f.company_id = c.id), '{}') AS features`;
+         COALESCE((SELECT f.feature_ids FROM ${T.companyFeatures} f WHERE f.company_id = c.id), '{}') AS feature_ids`;
 
 const COMPANY_SORTS: Record<string, string> = {
   name: 'lower(c.name)',
@@ -105,7 +104,8 @@ async function platformOverview(): Promise<Record<string, number>> {
                                           AND company_id IS NOT NULL)         AS "usersActive",
        (SELECT COUNT(*) FROM ${T.users} WHERE status = 'pending'
                                           AND company_id IS NOT NULL)         AS "usersPending",
-       (SELECT COUNT(*) FROM ${T.users} WHERE role = 'COMPANY_ADMIN')         AS "companyAdmins",
+       (SELECT COUNT(*) FROM ${T.userRoles} ur JOIN ${T.roles} r ON r.id = ur.role_id
+         WHERE r.tier = 'COMPANY_ADMIN')                                      AS "companyAdmins",
        (SELECT COUNT(*) FROM ${T.groups})                                     AS "groups",
        (SELECT COUNT(*) FROM ${T.companyDashboards})                          AS "assignments"`
   );

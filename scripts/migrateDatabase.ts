@@ -11,7 +11,10 @@ interface TableSpec {
   conflict: string;
   identity?: string;
   from?: string;
+  schema?: string;
 }
+
+const AC = 'access_control';
 
 interface CopyResult {
   table: string;
@@ -22,47 +25,73 @@ interface CopyResult {
 
 const TABLES: TableSpec[] = [
   { name: 'companies', conflict: '(id)', identity: 'id' },
-  { name: 'roles', conflict: '(name)', identity: 'id' },
-  { name: 'role_permissions', conflict: '(role_name, permission_id)' },
   { name: 'users', conflict: '(id)', identity: 'id' },
   { name: 'groups', conflict: '(id)', identity: 'id' },
   { name: 'group_users', conflict: '(group_id, user_id)' },
   { name: 'dashboards', conflict: '(id)' },
-  { name: 'company_dashboards', conflict: '(company_id, dashboard_id)' },
-  { name: 'dashboard_access', conflict: '(user_id, dashboard_id)' },
-  { name: 'group_dashboard_access', conflict: '(group_id, dashboard_id)' },
-  { name: 'user_data_scope', conflict: '(user_id, dimension, value)' },
+  { name: 'rbac_repairs', conflict: '(id)' },
   { name: 'refresh_tokens', conflict: '(id)' },
   { name: 'user_tokens', conflict: '(id)' },
   { name: 'login_attempts', conflict: '(identifier)' },
-  { name: 'permission_seed_log', conflict: '(permission_id)' },
+
+  { schema: AC, name: 'features', conflict: '(id)' },
+  { schema: AC, name: 'permissions', conflict: '(id)' },
+  { schema: AC, name: 'access_levels', conflict: '(id)' },
+  { schema: AC, name: 'roles', conflict: '(id)' },
+  { schema: AC, name: 'role_permissions', conflict: '(role_id)' },
+  { schema: AC, name: 'company_features', conflict: '(company_id)' },
+  { schema: AC, name: 'user_roles', conflict: '(user_id)' },
+  { schema: AC, name: 'user_permissions', conflict: '(user_id)' },
+  { schema: AC, name: 'user_data_scopes', conflict: '(user_id)' },
+  { schema: AC, name: 'company_dashboards', conflict: '(company_id, dashboard_id)' },
+  { schema: AC, name: 'dashboard_user_access', conflict: '(user_id, dashboard_id)' },
+  { schema: AC, name: 'dashboard_group_access', conflict: '(group_id, dashboard_id)' },
 
   { name: 'connections', from: 'context_connections', conflict: '(id)' },
   { name: 'datasets', from: 'context_connection_datasets', conflict: '(connection_id, dataset_id)' },
+
+  { schema: AC, name: 'context_user_access', conflict: '(connection_id, user_id)' },
+  { schema: AC, name: 'context_group_access', conflict: '(connection_id, group_id)' },
 ];
 
 const OURS = new Set([
-  ...TABLES.map((t) => t.from || t.name),
-  ...TABLES.map((t) => t.name),
+  ...TABLES.filter((t) => !t.schema).map((t) => t.from || t.name),
+  ...TABLES.filter((t) => !t.schema).map((t) => t.name),
 ]);
+
+const schemaOf = (spec: TableSpec) => spec.schema || 'public';
+const relationOf = (spec: TableSpec, table: string) => `"${schemaOf(spec)}"."${table}"`;
+
+async function assertSourceMigrated(source: Client): Promise<void> {
+  const { rows } = await source.query(
+    `SELECT to_regclass('public.role_permissions') IS NOT NULL AS legacy,
+            to_regclass('access_control.roles') IS NOT NULL AS current`
+  );
+  if (rows[0].legacy && !rows[0].current) {
+    throw new Error(
+      'The source database still keeps roles and permissions in the old public tables. ' +
+      'Start the backend once against the source so it moves them to the access_control schema, then run this again.'
+    );
+  }
+}
 
 function log(...args: unknown[]): void {
   console.log(...args);
 }
 
-async function sharedColumns(source: Client, destTable: string, sourceTable: string): Promise<string[]> {
+async function sharedColumns(source: Client, spec: TableSpec, destTable: string, sourceTable: string): Promise<string[]> {
   const [{ rows: destCols }, { rows: srcCols }] = await Promise.all([
     db.query(
       `SELECT column_name FROM information_schema.columns
-        WHERE table_schema = current_schema() AND table_name = ?
+        WHERE table_schema = ? AND table_name = ?
         ORDER BY ordinal_position`,
-      [destTable]
+      [schemaOf(spec), destTable]
     ),
     source.query(
       `SELECT column_name FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = $1
+        WHERE table_schema = $1 AND table_name = $2
         ORDER BY ordinal_position`,
-      [sourceTable]
+      [schemaOf(spec), sourceTable]
     ),
   ]);
 
@@ -92,22 +121,22 @@ async function copyTable(source: Client, spec: TableSpec): Promise<CopyResult> {
 
   const exists = await source.query(
     `SELECT 1 FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = $1`,
-    [sourceTable]
+      WHERE table_schema = $1 AND table_name = $2`,
+    [schemaOf(spec), sourceTable]
   );
   if (!exists.rows.length) {
     log(`  skip     ${destTable.padEnd(28)} (not in source)`);
     return { table: destTable, copied: 0, skipped: true };
   }
 
-  const columns = await sharedColumns(source, destTable, sourceTable);
+  const columns = await sharedColumns(source, spec, destTable, sourceTable);
   if (!columns.length) {
     log(`  skip     ${destTable.padEnd(28)} (no columns in common)`);
     return { table: destTable, copied: 0, skipped: true };
   }
 
   const { rows } = await source.query(
-    `SELECT ${columns.map((c) => `"${c}"`).join(', ')} FROM "${sourceTable}"`
+    `SELECT ${columns.map((c) => `"${c}"`).join(', ')} FROM ${relationOf(spec, sourceTable)}`
   );
   if (!rows.length) {
     log(`  empty    ${destTable.padEnd(28)} 0 rows`);
@@ -132,7 +161,7 @@ async function copyTable(source: Client, spec: TableSpec): Promise<CopyResult> {
     const params = batch.flatMap((row) => columns.map((c) => row[c]));
 
     const result = await db.query(
-      `INSERT INTO "${destTable}" (${quoted}) VALUES ${placeholders}${conflict}`,
+      `INSERT INTO ${relationOf(spec, destTable)} (${quoted}) VALUES ${placeholders}${conflict}`,
       params
     );
     copied += result.rowCount ?? 0;
@@ -251,6 +280,8 @@ async function main(): Promise<void> {
     console.error('  Source and destination look identical. Point backend/.env at the new database first.');
     process.exit(1);
   }
+
+  await assertSourceMigrated(source);
 
   if (!DRY_RUN) {
     log('  creating the destination schema (bootstrapAppMeta)…');

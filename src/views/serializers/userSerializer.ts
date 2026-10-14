@@ -5,6 +5,8 @@ interface UserListItem {
   username: any;
   email: any;
   role: any;
+  roleId: any;
+  roleName: any;
   status: any;
   customRoleId?: any;
   customRoleName?: any;
@@ -12,6 +14,8 @@ interface UserListItem {
   lastLoginAt?: any;
   companyName?: any;
 }
+
+const isCustom = (row: Row) => row.role_kind === 'custom';
 
 function publicUser(row: Row | null | undefined) {
   if (!row) return null;
@@ -23,8 +27,11 @@ function publicUser(row: Row | null | undefined) {
     email: row.email,
     displayName: row.display_name || null,
     role: row.role,
-    customRoleId: row.custom_role_id ?? null,
-    customRoleName: row.customRoleName ?? null,
+    roleId: row.role_id ?? null,
+    roleName: row.role_name ?? null,
+    roleKind: row.role_kind ?? null,
+    customRoleId: isCustom(row) ? row.role_id : null,
+    customRoleName: isCustom(row) ? row.role_name : null,
     status: row.status,
     mustChangePassword: Boolean(row.must_change_password),
     lastLoginAt: row.last_login_at || null,
@@ -33,10 +40,18 @@ function publicUser(row: Row | null | undefined) {
 }
 
 function userListItem(row: Row, withCompany?: boolean): UserListItem {
-  const item: UserListItem = { id: row.id, username: row.username, email: row.email, role: row.role, status: row.status };
-  if (row.custom_role_id) {
-    item.customRoleId = row.custom_role_id;
-    item.customRoleName = row.customRoleName ?? null;
+  const item: UserListItem = {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    role: row.role,
+    roleId: row.role_id ?? null,
+    roleName: row.role_name ?? null,
+    status: row.status,
+  };
+  if (isCustom(row)) {
+    item.customRoleId = row.role_id;
+    item.customRoleName = row.role_name ?? null;
   }
   if (row.display_name) item.displayName = row.display_name;
   if (row.last_login_at) item.lastLoginAt = row.last_login_at;

@@ -11,7 +11,8 @@ const CT = {
   versions: q('context_layer_versions'),
   objects: q('context_objects'),
   profiles: q('context_profiles'),
-  access: q('context_access'),
+  access: T.contextUserAccess,
+  groupAccess: T.contextGroupAccess,
 };
 
 const TABLES = [
@@ -109,16 +110,6 @@ const TABLES = [
      updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
      CONSTRAINT uq_context_profiles_connection UNIQUE (connection_id)
    )`,
-
-  `CREATE TABLE IF NOT EXISTS ${CT.access} (
-     connection_id UUID        NOT NULL REFERENCES ${CT.connections} (id) ON DELETE CASCADE,
-     user_id       INTEGER     NOT NULL REFERENCES ${T.users} (id) ON DELETE CASCADE,
-     access_level  VARCHAR(8)  NOT NULL,
-     granted_by    INTEGER     NULL REFERENCES ${T.users} (id) ON DELETE SET NULL,
-     granted_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-     PRIMARY KEY (connection_id, user_id),
-     CONSTRAINT chk_context_access_level CHECK (access_level IN ('view','edit','full'))
-   )`,
 ];
 
 const INDEXES = [
@@ -128,7 +119,6 @@ const INDEXES = [
   `ALTER TABLE ${CT.versions} ADD COLUMN IF NOT EXISTS extraction_dataset_ids JSONB NULL`,
   `ALTER TABLE ${CT.connections} ADD COLUMN IF NOT EXISTS general_access VARCHAR(16) NOT NULL DEFAULT 'company'
      CONSTRAINT chk_context_connections_general_access CHECK (general_access IN ('restricted','company'))`,
-  `CREATE INDEX IF NOT EXISTS idx_context_access_user ON ${CT.access} (user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_context_connections_company ON ${CT.connections} (company_id)`,
   `CREATE INDEX IF NOT EXISTS idx_context_object_reviews_connection
      ON ${CT.reviews} (connection_id)`,

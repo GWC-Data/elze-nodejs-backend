@@ -3,7 +3,7 @@ import { EVENTS, FORBIDDEN_DETAIL_KEYS, AUDIT_CATEGORIES, AUDIT_ACTIONS } from '
 import { fail } from '../tools/AppError';
 import { COMPANY_ADMIN } from '../constants/permissions';
 import { shapeEntry } from '../views/serializers/auditSerializer';
-import { FEATURE_OF_PERMISSION, usableFeatures } from '../constants/features';
+import { FEATURE_OF_PERMISSION, FEATURE_BY_ID, usableFeatures } from '../constants/features';
 import type { AuditScope } from '../repositories/auditRepository';
 import type { Actor } from '../types/actor';
 
@@ -98,6 +98,7 @@ function day(value: string | null | undefined, name: string): string | null {
 }
 
 const FEATURE_DETAIL_KEYS = ['features', 'enabled', 'disabled'];
+const FEATURE_ID_DETAIL_KEYS = ['featureIds', 'enabledIds', 'disabledIds'];
 
 function visibleDetail(detail: Record<string, unknown>, visible: Set<string> | null): Record<string, unknown> {
   if (!visible) return detail;
@@ -109,9 +110,19 @@ function visibleDetail(detail: Record<string, unknown>, visible: Set<string> | n
     if (kept.length) out[key] = kept;
     else delete out[key];
   }
+  for (const key of FEATURE_ID_DETAIL_KEYS) {
+    const value = out[key];
+    if (!Array.isArray(value)) continue;
+    const kept = value.filter((id) => visible.has(FEATURE_BY_ID.get(String(id))?.key || ''));
+    if (kept.length) out[key] = kept;
+    else delete out[key];
+  }
   const permission = typeof out.permission === 'string' ? out.permission : null;
   const owner = permission ? FEATURE_OF_PERMISSION.get(permission) : undefined;
-  if (owner && !visible.has(owner)) delete out.permission;
+  if (owner && !visible.has(owner)) {
+    delete out.permission;
+    delete out.permissionId;
+  }
   return out;
 }
 

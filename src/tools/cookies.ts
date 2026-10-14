@@ -24,18 +24,27 @@ function baseCookie(path: string, maxAgeSeconds: number): CookieOptions {
   };
 }
 
-function setSessionCookies(res: Response, { accessToken, refreshToken }: { accessToken: string; refreshToken: string }) {
+function secondsUntil(expiresAt: Date | undefined): number {
+  if (!expiresAt) return REFRESH_TOKEN_TTL_SECONDS;
+  return Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+}
+
+function setSessionCookies(
+  res: Response,
+  { accessToken, refreshToken, refreshExpiresAt }: { accessToken: string; refreshToken: string; refreshExpiresAt?: Date }
+) {
   const csrfToken = crypto.randomBytes(32).toString('base64url');
+  const refreshSeconds = secondsUntil(refreshExpiresAt);
 
   res.clearCookie(ACCESS_COOKIE, { ...baseCookie(LEGACY_ACCESS_PATH, 0), maxAge: undefined });
   res.cookie(ACCESS_COOKIE, accessToken, baseCookie(ACCESS_PATH, ACCESS_TOKEN_TTL_SECONDS));
-  res.cookie(REFRESH_COOKIE, refreshToken, baseCookie(REFRESH_PATH, REFRESH_TOKEN_TTL_SECONDS));
+  res.cookie(REFRESH_COOKIE, refreshToken, baseCookie(REFRESH_PATH, refreshSeconds));
   res.cookie(CSRF_COOKIE, csrfToken, {
     httpOnly: false,
     secure: COOKIE_SECURE,
     sameSite: SAME_SITE,
     path: '/',
-    maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
+    maxAge: refreshSeconds * 1000,
   });
 }
 

@@ -1,4 +1,4 @@
-import { effectiveFeatures } from '../../constants/features';
+import { effectiveFeatures, featureKeysOf } from '../../constants/features';
 
 type Row = Record<string, any>;
 
@@ -13,7 +13,7 @@ function shapeCompany(row: Row | null | undefined) {
     userCount: row.userCount === undefined ? undefined : Number(row.userCount),
     dashboardCount: row.dashboardCount === undefined ? undefined : Number(row.dashboardCount),
     pendingCount: row.pendingCount === undefined ? undefined : Number(row.pendingCount),
-    features: row.features === undefined ? undefined : effectiveFeatures(row.features),
+    features: row.feature_ids === undefined ? undefined : effectiveFeatures(featureKeysOf(row.feature_ids)),
   };
 }
 

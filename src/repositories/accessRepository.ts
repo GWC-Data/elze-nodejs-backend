@@ -1,9 +1,13 @@
 import config from '../config';
 import { T } from '../models/rbacModel';
+import { accessLevelId } from '../constants/accessLevels';
 import type { Queryable } from '../config/pgPool';
 import type { Actor } from '../types/actor';
 
 const { db, withTransaction } = config.database;
+
+const levelOf = (alias: string) => `(SELECT l.key FROM ${T.accessLevels} l WHERE l.id = ${alias}.access_level_id)`;
+const dashboardLevel = (level: string) => accessLevelId('dashboard', level);
 
 const COMPANY_DASHBOARD_IDS_SQL = `
   SELECT dashboard_id FROM ${T.companyDashboards} WHERE company_id = ?
@@ -37,13 +41,13 @@ async function assignIfMissing(companyId: number, dashboardId: string, assignedB
 async function unassign(companyId: number, dashboardId: string): Promise<boolean> {
   return withTransaction(async (conn: Queryable) => {
     await conn.query(
-      `DELETE FROM ${T.dashboardAccess}
+      `DELETE FROM ${T.dashboardUserAccess}
         WHERE dashboard_id = ?
           AND user_id IN (SELECT id FROM ${T.users} WHERE company_id = ?)`,
       [dashboardId, companyId]
     );
     await conn.query(
-      `DELETE FROM ${T.groupDashboardAccess}
+      `DELETE FROM ${T.dashboardGroupAccess}
         WHERE dashboard_id = ?
           AND group_id IN (SELECT id FROM ${T.groups} WHERE company_id = ?)`,
       [dashboardId, companyId]
@@ -76,11 +80,11 @@ async function gateAndLevels(actor: Actor, dashboardId: string): Promise<{ avail
               SELECT 1 FROM ${T.dashboards} WHERE company_id = ? AND id = ?
             ) AS available,
             ARRAY(
-              SELECT access_level FROM ${T.dashboardAccess}
-               WHERE user_id = ? AND dashboard_id = ?
+              SELECT ${levelOf('a')} FROM ${T.dashboardUserAccess} a
+               WHERE a.user_id = ? AND a.dashboard_id = ?
               UNION ALL
-              SELECT gda.access_level
-                FROM ${T.groupDashboardAccess} gda
+              SELECT ${levelOf('gda')}
+                FROM ${T.dashboardGroupAccess} gda
                 JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
                 JOIN ${T.groups} g ON g.id = gda.group_id
                WHERE gu.user_id = ? AND gda.dashboard_id = ? AND g.active AND g.company_id = ?
@@ -93,7 +97,7 @@ async function gateAndLevels(actor: Actor, dashboardId: string): Promise<{ avail
 
 async function directUserLevel(userId: unknown, dashboardId: string): Promise<string | null> {
   const { rows } = await db.query(
-    `SELECT access_level FROM ${T.dashboardAccess} WHERE user_id = ? AND dashboard_id = ?`,
+    `SELECT ${levelOf('a')} AS access_level FROM ${T.dashboardUserAccess} a WHERE a.user_id = ? AND a.dashboard_id = ?`,
     [userId, dashboardId]
   );
   return rows[0] ? rows[0].access_level : null;
@@ -101,10 +105,10 @@ async function directUserLevel(userId: unknown, dashboardId: string): Promise<st
 
 async function grantRowsForUser(actor: Actor) {
   const { rows } = await db.query(
-    `SELECT dashboard_id, access_level FROM ${T.dashboardAccess} WHERE user_id = ?
+    `SELECT a.dashboard_id, ${levelOf('a')} AS access_level FROM ${T.dashboardUserAccess} a WHERE a.user_id = ?
      UNION ALL
-     SELECT gda.dashboard_id, gda.access_level
-       FROM ${T.groupDashboardAccess} gda
+     SELECT gda.dashboard_id, ${levelOf('gda')}
+       FROM ${T.dashboardGroupAccess} gda
        JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
        JOIN ${T.groups} g ON g.id = gda.group_id
       WHERE gu.user_id = ? AND g.active AND g.company_id = ?`,
@@ -126,10 +130,10 @@ async function countGrantedDashboards(actor: Actor): Promise<number> {
     `SELECT COUNT(*)::int AS n
        FROM (${COMPANY_DASHBOARD_IDS_SQL}) avail
        JOIN (
-         SELECT dashboard_id FROM ${T.dashboardAccess} WHERE user_id = ?
+         SELECT dashboard_id FROM ${T.dashboardUserAccess} WHERE user_id = ?
          UNION
          SELECT gda.dashboard_id
-           FROM ${T.groupDashboardAccess} gda
+           FROM ${T.dashboardGroupAccess} gda
            JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
            JOIN ${T.groups} g ON g.id = gda.group_id
           WHERE gu.user_id = ? AND g.active AND g.company_id = ?
@@ -141,12 +145,12 @@ async function countGrantedDashboards(actor: Actor): Promise<number> {
 
 async function userGrantRows(userId: number) {
   const { rows } = await db.query(
-    `SELECT dashboard_id AS "dashboardId", access_level AS level, 'direct' AS origin,
-            NULL::int AS "groupId", NULL::text AS "groupName"
-       FROM ${T.dashboardAccess} WHERE user_id = ?
+    `SELECT a.dashboard_id AS "dashboardId", ${levelOf('a')} AS level, a.access_level_id AS "levelId",
+            'direct' AS origin, NULL::int AS "groupId", NULL::text AS "groupName"
+       FROM ${T.dashboardUserAccess} a WHERE a.user_id = ?
      UNION ALL
-     SELECT gda.dashboard_id, gda.access_level, 'group', g.id, g.name
-       FROM ${T.groupDashboardAccess} gda
+     SELECT gda.dashboard_id, ${levelOf('gda')}, gda.access_level_id, 'group', g.id, g.name
+       FROM ${T.dashboardGroupAccess} gda
        JOIN ${T.groups} g ON g.id = gda.group_id
        JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
       WHERE gu.user_id = ? AND g.active
@@ -158,8 +162,8 @@ async function userGrantRows(userId: number) {
 
 async function dashboardUserGrants(companyId: number | null, dashboardId: string) {
   const { rows } = await db.query(
-    `SELECT a.user_id AS "userId", u.username, u.email, a.access_level AS level
-       FROM ${T.dashboardAccess} a
+    `SELECT a.user_id AS "userId", u.username, u.email, ${levelOf('a')} AS level, a.access_level_id AS "levelId"
+       FROM ${T.dashboardUserAccess} a
        JOIN ${T.users} u ON u.id = a.user_id
       WHERE a.dashboard_id = ? AND u.company_id = ?
       ORDER BY u.username`,
@@ -170,9 +174,9 @@ async function dashboardUserGrants(companyId: number | null, dashboardId: string
 
 async function dashboardGroupGrants(companyId: number | null, dashboardId: string) {
   const { rows } = await db.query(
-    `SELECT gda.group_id AS "groupId", g.name AS "groupName", gda.access_level AS level,
-            g.active
-       FROM ${T.groupDashboardAccess} gda
+    `SELECT gda.group_id AS "groupId", g.name AS "groupName", ${levelOf('gda')} AS level,
+            gda.access_level_id AS "levelId", g.active
+       FROM ${T.dashboardGroupAccess} gda
        JOIN ${T.groups} g ON g.id = gda.group_id
       WHERE gda.dashboard_id = ? AND g.company_id = ?
       ORDER BY g.name`,
@@ -183,7 +187,8 @@ async function dashboardGroupGrants(companyId: number | null, dashboardId: strin
 
 async function groupGrantLevels(groupId: number) {
   const { rows } = await db.query(
-    `SELECT dashboard_id, access_level FROM ${T.groupDashboardAccess} WHERE group_id = ?`,
+    `SELECT gda.dashboard_id, ${levelOf('gda')} AS access_level, gda.access_level_id
+       FROM ${T.dashboardGroupAccess} gda WHERE gda.group_id = ?`,
     [groupId]
   );
   return rows;
@@ -191,26 +196,26 @@ async function groupGrantLevels(groupId: number) {
 
 async function grantUser(userId: number, dashboardId: string, level: string, grantedBy: number | null): Promise<void> {
   await db.query(
-    `INSERT INTO ${T.dashboardAccess} (user_id, dashboard_id, access_level, granted_by)
+    `INSERT INTO ${T.dashboardUserAccess} (user_id, dashboard_id, access_level_id, granted_by)
      VALUES (?, ?, ?, ?)
      ON CONFLICT (user_id, dashboard_id)
-       DO UPDATE SET access_level = EXCLUDED.access_level, granted_by = EXCLUDED.granted_by`,
-    [userId, dashboardId, level, grantedBy]
+       DO UPDATE SET access_level_id = EXCLUDED.access_level_id, granted_by = EXCLUDED.granted_by`,
+    [userId, dashboardId, dashboardLevel(level), grantedBy]
   );
 }
 
 async function grantCreatorAdmin(userId: number, dashboardId: string): Promise<void> {
   await db.query(
-    `INSERT INTO ${T.dashboardAccess} (user_id, dashboard_id, access_level, granted_by)
-     VALUES (?, ?, 'admin', ?)
-     ON CONFLICT (user_id, dashboard_id) DO UPDATE SET access_level = 'admin'`,
-    [userId, dashboardId, userId]
+    `INSERT INTO ${T.dashboardUserAccess} (user_id, dashboard_id, access_level_id, granted_by)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (user_id, dashboard_id) DO UPDATE SET access_level_id = EXCLUDED.access_level_id`,
+    [userId, dashboardId, dashboardLevel('admin'), userId]
   );
 }
 
 async function revokeUser(userId: number, dashboardId: string): Promise<boolean> {
   const result = await db.query(
-    `DELETE FROM ${T.dashboardAccess} WHERE user_id = ? AND dashboard_id = ?`,
+    `DELETE FROM ${T.dashboardUserAccess} WHERE user_id = ? AND dashboard_id = ?`,
     [userId, dashboardId]
   );
   return result.rowCount! > 0;
@@ -218,17 +223,17 @@ async function revokeUser(userId: number, dashboardId: string): Promise<boolean>
 
 async function grantGroup(groupId: number, dashboardId: string, level: string, grantedBy: number | null): Promise<void> {
   await db.query(
-    `INSERT INTO ${T.groupDashboardAccess} (group_id, dashboard_id, access_level, granted_by)
+    `INSERT INTO ${T.dashboardGroupAccess} (group_id, dashboard_id, access_level_id, granted_by)
      VALUES (?, ?, ?, ?)
      ON CONFLICT (group_id, dashboard_id)
-       DO UPDATE SET access_level = EXCLUDED.access_level, granted_by = EXCLUDED.granted_by`,
-    [groupId, dashboardId, level, grantedBy]
+       DO UPDATE SET access_level_id = EXCLUDED.access_level_id, granted_by = EXCLUDED.granted_by`,
+    [groupId, dashboardId, dashboardLevel(level), grantedBy]
   );
 }
 
 async function revokeGroup(groupId: number, dashboardId: string): Promise<boolean> {
   const result = await db.query(
-    `DELETE FROM ${T.groupDashboardAccess} WHERE group_id = ? AND dashboard_id = ?`,
+    `DELETE FROM ${T.dashboardGroupAccess} WHERE group_id = ? AND dashboard_id = ?`,
     [groupId, dashboardId]
   );
   return result.rowCount! > 0;

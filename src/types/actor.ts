@@ -11,7 +11,8 @@ interface Actor {
   mustChangePassword: boolean;
   permissions: readonly string[];
   features: readonly string[];
-  customRoleId: number | null;
+  roleId: string | null;
+  roleName: string | null;
   scopes?: any;
   familyId?: string;
 }

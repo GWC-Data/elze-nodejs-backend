@@ -41,9 +41,11 @@ async function memberIds(groupId: number): Promise<number[]> {
 
 async function listMembers(groupId: number) {
   const { rows } = await db.query(
-    `SELECT u.id, u.username, u.email, u.role, u.status
+    `SELECT u.id, u.username, u.email, r.tier AS role, u.status
        FROM ${T.groupUsers} gu
        JOIN ${T.users} u ON u.id = gu.user_id
+       LEFT JOIN ${T.userRoles} ur ON ur.user_id = u.id
+       LEFT JOIN ${T.roles} r ON r.id = ur.role_id
       WHERE gu.group_id = ? ORDER BY u.username`,
     [groupId]
   );

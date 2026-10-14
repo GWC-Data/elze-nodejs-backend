@@ -19,6 +19,8 @@ const TERM_ORDER: Record<string, number> = { entity: 0, metric: 1, dimension: 2,
 
 const CONFIDENT = 0.8;
 
+const HIGH_CONFIDENCE = 0.9;
+
 const GLOSSARY_FILTERS: Record<string, string[] | null> = {
   all: null,
   ai: ['ai_generated'],
@@ -48,6 +50,7 @@ export {
   TYPE_LABELS,
   TERM_ORDER,
   CONFIDENT,
+  HIGH_CONFIDENCE,
   GLOSSARY_FILTERS,
   MCP_TOOLS,
   CONTEXT_ACCESS_LEVELS,

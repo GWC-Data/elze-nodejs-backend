@@ -22,12 +22,20 @@ function ownerIdOf(row: Row): number | null {
   return row.created_by === null || row.created_by === undefined ? null : Number(row.created_by);
 }
 
+function strongest(...levels: unknown[]): ContextAccessLevel | null {
+  let best: ContextAccessLevel | null = null;
+  for (const level of levels) {
+    if (!CONTEXT_ACCESS_LEVELS.includes(level as ContextAccessLevel)) continue;
+    const candidate = level as ContextAccessLevel;
+    if (!best || CONTEXT_LEVEL_RANK[candidate] > CONTEXT_LEVEL_RANK[best]) best = candidate;
+  }
+  return best;
+}
+
 function levelOf(actor: Actor, row: Row): ContextAccessLevel | null {
   if (isContextAdmin(actor)) return 'full';
   if (ownerIdOf(row) === actor.id) return 'full';
-  if (CONTEXT_ACCESS_LEVELS.includes(row.granted_level)) return row.granted_level;
-  if (row.general_access === 'company') return 'view';
-  return null;
+  return strongest(row.granted_level, row.group_level, row.general_access === 'company' ? 'view' : null);
 }
 
 function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessLevel): boolean {

@@ -2,6 +2,12 @@ import { startSmtpSink } from './smtpSink';
 import type { SmtpSink } from './smtpSink';
 import { createReportingFixture } from './reportingFixture';
 import config from '../src/config';
+import { SYSTEM_ROLE_ID, permissionIdsOf, permissionKeysOf } from '../src/constants/permissions';
+import { featureIdsOf } from '../src/constants/features';
+import { accessLevelId } from '../src/constants/accessLevels';
+
+const pids = (...keys: string[]) => permissionIdsOf(keys);
+const keysIn = (ids: unknown) => permissionKeysOf(Array.isArray(ids) ? ids : []);
 const { BOOTSTRAP_SUPERADMIN } = config.app;
 const { APPLICATION_URL } = config.auth;
 
@@ -269,7 +275,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaAdmin.call('GET', '/api/access/dashboards');
   check('admin sees the assigned dashboard', r.status === 200 && r.body.data.some((d: any) => d.id === 'default'), JSON.stringify(r.body?.data));
 
-  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { level: 'view' });
+  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { levelId: accessLevelId('dashboard', 'view') });
   check('grants the dashboard to their user', r.status === 200, JSON.stringify(r.body));
 
   const betaAdmin = client('betaAdmin');
@@ -284,7 +290,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await betaAdmin.call('GET', '/api/access/dashboards');
   check('company B has no dashboards listed', r.status === 200 && r.body.data.length === 0);
 
-  r = await betaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { level: 'admin' });
+  r = await betaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { levelId: accessLevelId('dashboard', 'admin') });
   check('company B cannot grant company A\u2019s user', r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
 
   section('Plain user: least privilege');
@@ -311,7 +317,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/platform/companies');
   check('user cannot reach the platform namespace', r.status === 403 && r.body?.error?.code === 'TENANT_ACCESS_DENIED', JSON.stringify(r.body));
 
-  r = await alphaUser.call('PUT', '/api/platform/roles/USER/permissions', { permissions: [] });
+  r = await alphaUser.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.USER}/permissions`, { permissionIds: [] });
   check('user cannot edit role permissions', r.status === 403);
 
   r = await alphaUser.call('PATCH', '/api/dashboard/default/config', { index: 0, card: {} });
@@ -349,14 +355,14 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaAdmin.call('GET', `/api/groups/${betaGroupId}`);
   check('another company’s group is a 404', r.status === 404, JSON.stringify(r.body));
 
-  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/groups/${betaGroupId}`, { level: 'admin' });
+  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/groups/${betaGroupId}`, { levelId: accessLevelId('dashboard', 'admin') });
   check('another company’s group cannot be granted', r.status === 404, JSON.stringify(r.body));
 
   await alphaAdmin.call('DELETE', `/api/access/dashboards/default/users/${alphaUserId}`);
   r = await alphaUser.call('GET', '/api/access/dashboards');
   check('the direct grant is gone', r.status === 200 && r.body.data.length === 0, JSON.stringify(r.body?.data));
 
-  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/groups/${groupId}`, { level: 'view' });
+  r = await alphaAdmin.call('PUT', `/api/access/dashboards/default/groups/${groupId}`, { levelId: accessLevelId('dashboard', 'view') });
   check('the dashboard is granted to the group', r.status === 200, JSON.stringify(r.body));
 
   r = await alphaUser.call('GET', '/api/access/dashboards');
@@ -383,32 +389,32 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/dashboard/default');
   check('deleting the group takes the inherited access with it', r.status === 404, `${r.status}`);
 
-  await alphaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { level: 'view' });
+  await alphaAdmin.call('PUT', `/api/access/dashboards/default/users/${alphaUserId}`, { levelId: accessLevelId('dashboard', 'view') });
 
   section('Role permissions and the platform boundary');
 
-  r = await owner.call('PUT', '/api/platform/roles/COMPANY_ADMIN/permissions', {
-    permissions: ['user.read', 'company.create'],
+  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.COMPANY_ADMIN}/permissions`, {
+    permissionIds: pids('user.read', 'company.create'),
   });
   check('a company role cannot be given a platform permission', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR', JSON.stringify(r.body));
 
-  r = await owner.call('PUT', '/api/platform/roles/SUPER_ADMIN/permissions', { permissions: [] });
+  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.SUPER_ADMIN}/permissions`, { permissionIds: [] });
   check('SUPER_ADMIN permissions cannot be edited', r.status === 400, JSON.stringify(r.body));
 
-  r = await owner.call('PUT', '/api/platform/roles/USER/permissions', { permissions: ['dashboard.read', 'data.read'] });
+  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.USER}/permissions`, { permissionIds: pids('dashboard.read', 'data.read') });
   check('USER permissions can be edited', r.status === 200, JSON.stringify(r.body));
 
   section('Company features: set by the platform owner, a ceiling on every role');
 
   r = await owner.call('GET', '/api/platform/features');
-  check('the platform lists the features', r.status === 200 && (r.body?.data || []).some((f: any) => f.id === 'metadata_lakehouse' && f.locked), JSON.stringify(r.body));
+  check('the platform lists the features', r.status === 200 && (r.body?.data || []).some((f: any) => f.key === 'metadata_lakehouse' && f.locked), JSON.stringify(r.body));
 
   r = await owner.call('GET', `/api/platform/companies/${companyA}/features`);
   check('a company created without a list has every feature', r.status === 200 && (r.body?.data?.features || []).every((f: any) => f.enabled), JSON.stringify(r.body));
 
   r = await owner.call('POST', '/api/platform/companies', {
     name: 'Gamma Labs',
-    features: ['agents'],
+    featureIds: featureIdsOf(['agents']),
     admin: { username: 'gamma.admin', email: 'gamma.admin@example.com' },
   });
   const companyC = r.body?.data?.id;
@@ -417,17 +423,17 @@ function activationTokenFrom(email: string | null): string | null {
 
   r = await owner.call('POST', '/api/platform/companies', {
     name: 'Bad Feature Co',
-    features: ['teleport'],
+    featureIds: ['00000000-0000-4000-8000-000000000000'],
     admin: { username: 'bad.feature', email: 'bad.feature@example.com' },
   });
   check('an unknown feature is refused', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR', JSON.stringify(r.body));
 
-  r = await alphaAdmin.call('PUT', `/api/platform/companies/${companyA}/features`, { features: [] });
+  r = await alphaAdmin.call('PUT', `/api/platform/companies/${companyA}/features`, { featureIds: [] });
   check('a company admin cannot change features', r.status === 403, JSON.stringify(r.body));
 
-  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, { features: ['data_analyst', 'agents'] });
+  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, { featureIds: featureIdsOf(['data_analyst', 'agents']) });
   check('the platform owner switches Dashboards off', r.status === 200
-    && !(r.body?.data?.features || []).find((f: any) => f.id === 'dashboards')?.enabled, JSON.stringify(r.body));
+    && !(r.body?.data?.features || []).find((f: any) => f.key === 'dashboards')?.enabled, JSON.stringify(r.body));
 
   r = await alphaUser.call('GET', '/api/dashboard/default');
   check('a disabled feature is refused on the next request', r.status === 403 && r.body?.error?.code === 'FEATURE_NOT_ENABLED', `${r.status} ${JSON.stringify(r.body?.error)}`);
@@ -441,35 +447,35 @@ function activationTokenFrom(email: string | null): string | null {
       && (r.body?.data?.user?.permissions || []).includes('user.read'),
     JSON.stringify(r.body?.data?.user));
 
-  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, { features: ['data_analyst', 'agents', 'dashboards'] });
+  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, { featureIds: featureIdsOf(['data_analyst', 'agents', 'dashboards']) });
   check('switching it back on is accepted', r.status === 200, JSON.stringify(r.body));
   r = await alphaUser.call('GET', '/api/dashboard/default');
   check('switching it back on restores access exactly', r.status === 200, `${r.status} ${JSON.stringify(r.body?.error)}`);
 
   section('Company roles: created by the company admin');
 
-  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Analyst', permissions: ['dashboard.update', 'agent.create'] });
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Analyst', permissionIds: pids('dashboard.update', 'agent.create') });
   const analystRoleId = r.body?.data?.id;
   check('a company admin creates a role', r.status === 201, JSON.stringify(r.body));
-  check('Create/Edit imply View', ['dashboard.read', 'dashboard.update', 'agent.read', 'agent.create'].every((p) => (r.body?.data?.permissions || []).includes(p)), JSON.stringify(r.body?.data));
+  check('Create/Edit imply View', ['dashboard.read', 'dashboard.update', 'agent.read', 'agent.create'].every((p) => keysIn(r.body?.data?.permissionIds).includes(p)), JSON.stringify(r.body?.data));
 
-  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Analyst', permissions: [] });
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Analyst', permissionIds: [] });
   check('a duplicate role name is refused', r.status === 409, JSON.stringify(r.body));
-  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Company Admin', permissions: [] });
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Company Admin', permissionIds: [] });
   check('a built-in role name is refused', r.status === 400, JSON.stringify(r.body));
-  r = await alphaAdmin.call('POST', '/api/roles', { name: 'People', permissions: ['user.create'] });
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'People', permissionIds: pids('user.create') });
   check('a custom role cannot manage people', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR', JSON.stringify(r.body));
-  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Owner', permissions: ['company.features'] });
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Owner', permissionIds: pids('company.features') });
   check('a custom role cannot hold a platform permission', r.status === 400, JSON.stringify(r.body));
 
-  r = await owner.call('POST', '/api/roles', { companyId: companyC, name: 'Dash', permissions: ['dashboard.read'] });
+  r = await owner.call('POST', '/api/roles', { companyId: companyC, name: 'Dash', permissionIds: pids('dashboard.read') });
   check('a role cannot hold a feature its company lacks', r.status === 403 && r.body?.error?.code === 'FEATURE_NOT_ENABLED', JSON.stringify(r.body));
   check('the refusal does not name the feature', !r.body?.error?.details && !/dashboard/i.test(r.body?.error?.message || ''), JSON.stringify(r.body));
 
   r = await owner.call('GET', `/api/roles/permissions?companyId=${companyC}`);
   check('the role grid leaves out features the company lacks', r.status === 200
-    && !(r.body?.data?.permissions || []).some((p: any) => /^(dashboard|data|access|scope|analyst|playbook)\./.test(p.id))
-    && (r.body?.data?.permissions || []).some((p: any) => p.id === 'agent.read'), JSON.stringify((r.body?.data?.permissions || []).map((p: any) => p.id)));
+    && !(r.body?.data?.permissions || []).some((p: any) => /^(dashboard|data|access|scope|analyst|playbook)\./.test(p.key))
+    && (r.body?.data?.permissions || []).some((p: any) => p.key === 'agent.read'), JSON.stringify((r.body?.data?.permissions || []).map((p: any) => p.key)));
 
   r = await owner.call('GET', `/api/roles?companyId=${companyC}`);
   check('a new company has its own Member role, following the defaults', r.status === 200
@@ -494,7 +500,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate('/svc/mojo/sessions', 'GET'));
   check('the retired Mojo service is refused outright', r.status === 403, String(r.status));
 
-  r = await alphaAdmin.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: 999999 });
+  r = await alphaAdmin.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: '00000000-0000-4000-8000-000000000001' });
   check('an unknown role cannot be assigned', r.status === 404, JSON.stringify(r.body));
   r = await alphaAdmin.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: analystRoleId });
   check('a company admin gives a member the role', r.status === 200 && r.body?.data?.customRoleId === analystRoleId, JSON.stringify(r.body));
@@ -518,9 +524,12 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaAdmin.call('DELETE', `/api/roles/${analystRoleId}`);
   check('an unused role is deleted', r.status === 200, JSON.stringify(r.body));
 
-  r = await alphaAdmin.call('PUT', '/api/roles/built-in/COMPANY_ADMIN', { permissions: [] });
+  r = await alphaAdmin.call('GET', '/api/roles');
+  const alphaMemberRoleId = r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.id;
+  check('the company Member role has its own UUID', typeof alphaMemberRoleId === 'string' && alphaMemberRoleId !== SYSTEM_ROLE_ID.USER, String(alphaMemberRoleId));
+  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${SYSTEM_ROLE_ID.COMPANY_ADMIN}`, { permissionIds: [] });
   check('the company admin role cannot be changed by a company', r.status === 400, JSON.stringify(r.body));
-  r = await alphaAdmin.call('PUT', '/api/roles/built-in/USER', { permissions: ['agent.read'] });
+  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${alphaMemberRoleId}`, { permissionIds: pids('agent.read') });
   check('a company admin tailors the Member role', r.status === 200
     && r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.customized === true, JSON.stringify(r.body?.data?.builtIn));
   r = await alphaUser.call('GET', '/api/auth/me');
@@ -529,11 +538,26 @@ function activationTokenFrom(email: string | null): string | null {
   r = await betaAdmin.call('GET', '/api/roles');
   check('...and only that company', r.status === 200
     && r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.customized === false, JSON.stringify(r.body?.data?.builtIn));
-  r = await alphaAdmin.call('DELETE', '/api/roles/built-in/USER');
+  r = await alphaAdmin.call('DELETE', `/api/roles/built-in/${alphaMemberRoleId}`);
   check('Member resets to the platform defaults', r.status === 200
     && r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.customized === false, JSON.stringify(r.body));
   r = await alphaUser.call('GET', '/api/dashboard/default');
   check('the reset restores the defaults', r.status === 200, `${r.status} ${JSON.stringify(r.body?.error)}`);
+
+  section('Extra permissions for one member');
+
+  r = await alphaAdmin.call('PUT', `/api/users/${alphaUserId}/permissions`, { permissionIds: pids('playbook.delete') });
+  check('a company admin gives one member an extra permission', r.status === 200
+    && keysIn(r.body?.data?.extraPermissionIds).includes('playbook.delete'), JSON.stringify(r.body));
+  r = await alphaUser.call('GET', '/api/auth/me');
+  check('the extra permission reaches that member', r.status === 200
+    && (r.body?.data?.user?.permissions || []).includes('playbook.delete'), JSON.stringify(r.body?.data?.user?.permissions));
+  r = await alphaAdmin.call('PUT', `/api/users/${alphaUserId}/permissions`, { permissionIds: pids('user.create') });
+  check('an admin-only permission cannot be given to one member', r.status === 400, JSON.stringify(r.body));
+  r = await alphaAdmin.call('PUT', `/api/users/${alphaUserId}/permissions`, { permissionIds: [] });
+  r = await alphaUser.call('GET', '/api/auth/me');
+  check('removing it takes it away again', r.status === 200
+    && !(r.body?.data?.user?.permissions || []).includes('playbook.delete'), JSON.stringify(r.body?.data?.user?.permissions));
 
   section('Audit trail: stored in the database, scoped by role');
 

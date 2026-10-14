@@ -1,40 +1,45 @@
 import * as roleRepository from '../repositories/roleRepository';
 import { fail } from '../tools/AppError';
+import { requireUuid } from '../validators/commonValidator';
 import { assertRolePermissionsAllowed } from './authorizationService';
 import { followDefaults } from './builtInRolesService';
 import { audit, EVENTS } from './auditService';
 import {
   ALL_PERMISSIONS,
-  ALL_PERMISSION_IDS,
-  PERMISSION_IDS,
+  PERMISSION_BY_ID,
   PLATFORM_ONLY_PERMISSIONS,
+  CUSTOM_ROLE_EXCLUDED,
   ROLE_SCOPES,
   ROLE_SCOPE_BY_NAME,
   SUPER_ADMIN,
+  permissionIdsOf,
+  permissionKeysOf,
 } from '../constants/permissions';
-import { FEATURE_OF_PERMISSION } from '../constants/features';
+import { FEATURE_OF_PERMISSION, FEATURE_BY_KEY } from '../constants/features';
 import type { Actor } from '../types/actor';
 
-function rolePermissionList(roleName: string, storedIds: readonly string[] | null | undefined): string[] {
-  if (roleName === SUPER_ADMIN) return [...PERMISSION_IDS];
-  return (storedIds || []).filter((id) => PERMISSION_IDS.includes(id));
+function parsePermissionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw fail('VALIDATION_ERROR', 'permissionIds must be an array of permission ids.');
+  }
+  const ids = [...new Set(value.map((v) => String(v).trim().toLowerCase()))];
+  const unknown = ids.filter((id) => !PERMISSION_BY_ID.has(id));
+  if (unknown.length) {
+    throw fail('VALIDATION_ERROR', `Unknown permission id(s): ${unknown.join(', ')}`, { permissionIds: unknown });
+  }
+  return permissionKeysOf(ids);
 }
 
-async function getRolePermissions(roleName: string | null | undefined): Promise<string[]> {
-  if (!roleName) return [];
-  if (roleName === SUPER_ADMIN) return [...PERMISSION_IDS];
-  return rolePermissionList(roleName, await roleRepository.permissionIds(roleName));
-}
-
-async function findRole(name: unknown) {
-  if (typeof name !== 'string' || !name.trim()) return null;
-  return roleRepository.findByName(name.trim());
-}
-
-async function requireRole(name: unknown) {
-  const role = await findRole(name);
-  if (!role) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
-  return role;
+function describePermission(key: string) {
+  const permission = ALL_PERMISSIONS.find((p) => p.key === key)!;
+  const feature = FEATURE_OF_PERMISSION.get(key) || null;
+  return {
+    ...permission,
+    platformOnly: PLATFORM_ONLY_PERMISSIONS.has(key),
+    adminOnly: CUSTOM_ROLE_EXCLUDED.has(key),
+    feature,
+    featureId: feature ? FEATURE_BY_KEY.get(feature)!.id : null,
+  };
 }
 
 function assertRoleCompanyPairing(roleName: string, companyId: number | null | undefined) {
@@ -51,72 +56,73 @@ function assertRoleCompanyPairing(roleName: string, companyId: number | null | u
 }
 
 function permissionCatalogue() {
-  return ALL_PERMISSIONS.map((p) => ({
-    ...p,
-    platformOnly: PLATFORM_ONLY_PERMISSIONS.has(p.id),
-    feature: FEATURE_OF_PERMISSION.get(p.id) || null,
-  }));
+  return ALL_PERMISSIONS.map((p) => describePermission(p.key));
 }
 
 async function listRoles() {
-  const rows = await roleRepository.listWithCounts();
-  return rows.map((r: Record<string, any>) => ({ ...r, userCount: Number(r.userCount) }));
+  const rows = await roleRepository.listSystemWithCounts();
+  return rows.map((r: Record<string, any>) => ({
+    id: r.id,
+    name: r.tier,
+    label: r.name,
+    scope: ROLE_SCOPE_BY_NAME.get(r.tier),
+    description: r.description,
+    userCount: Number(r.userCount),
+  }));
 }
 
-async function describeRolePermissions(name: unknown) {
-  const role = await requireRole(name);
-  if (role.name === SUPER_ADMIN) {
-    return { role: role.name, scope: role.scope, editable: false, permissions: [...ALL_PERMISSION_IDS] };
-  }
+async function requireSystemRole(id: unknown) {
+  const role = await roleRepository.findSystemRole(requireUuid(id, 'role id'));
+  if (!role) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
+  return role;
+}
+
+function shapeRolePermissions(role: Record<string, any>, permissionIds: readonly string[]) {
   return {
-    role: role.name,
-    scope: role.scope,
-    editable: true,
-    permissions: await roleRepository.permissionIds(role.name, { ordered: true }),
+    id: role.id,
+    role: role.tier,
+    label: role.name,
+    scope: ROLE_SCOPE_BY_NAME.get(role.tier),
+    editable: role.tier !== SUPER_ADMIN,
+    permissionIds: [...permissionIds],
   };
 }
 
-async function replaceRolePermissions(actor: Actor, name: unknown, permissions: unknown) {
-  const role = await requireRole(name);
+async function describeRolePermissions(id: unknown) {
+  const role = await requireSystemRole(id);
+  if (role.tier === SUPER_ADMIN) return shapeRolePermissions(role, ALL_PERMISSIONS.map((p) => p.id));
+  return shapeRolePermissions(role, role.permissionIds);
+}
 
-  if (role.name === SUPER_ADMIN) {
+async function replaceRolePermissions(actor: Actor, id: unknown, permissionIds: unknown) {
+  const role = await requireSystemRole(id);
+
+  if (role.tier === SUPER_ADMIN) {
     throw fail(
       'VALIDATION_ERROR',
       'SUPER_ADMIN always holds every permission and cannot be edited - that is what keeps the platform recoverable from a bad permission change.'
     );
   }
 
-  if (!Array.isArray(permissions)) {
-    throw fail('VALIDATION_ERROR', 'permissions must be an array of permission ids');
-  }
+  const keys = parsePermissionIds(permissionIds);
+  assertRolePermissionsAllowed(ROLE_SCOPE_BY_NAME.get(role.tier)!, keys);
 
-  const unique = [...new Set(permissions.map(String))];
-  const unknown = unique.filter((id) => !ALL_PERMISSION_IDS.has(id));
-  if (unknown.length) {
-    throw fail('VALIDATION_ERROR', `Unknown permission id(s): ${unknown.join(', ')}`, { permissions: unknown });
-  }
-
-  assertRolePermissionsAllowed(role.scope, unique);
-
-  await roleRepository.replacePermissions(role.name, unique);
-  const following = await followDefaults(role.name);
+  const ids = permissionIdsOf(keys);
+  await roleRepository.replacePermissions(role.id, ids, actor.id);
+  const following = await followDefaults(role.tier);
 
   audit(EVENTS.ROLE_PERMISSIONS_UPDATED, actor, {
-    role: role.name,
-    permissionCount: unique.length,
+    roleId: role.id,
+    role: role.tier,
+    permissionCount: ids.length,
     companiesFollowing: following || undefined,
   });
-  return {
-    role: role.name,
-    scope: role.scope,
-    editable: role.scope !== ROLE_SCOPES.platform || role.name !== SUPER_ADMIN,
-    permissions: unique,
-  };
+  return shapeRolePermissions(role, ids);
 }
 
 export {
-  rolePermissionList,
-  getRolePermissions,
+  parsePermissionIds,
+  describePermission,
   assertRoleCompanyPairing,
   permissionCatalogue,
   listRoles,

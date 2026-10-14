@@ -14,6 +14,7 @@ import {
   TYPE_LABELS,
   GLOSSARY_FILTERS,
   CONFIDENT,
+  HIGH_CONFIDENCE,
   TERM_ORDER,
 } from '../constants/context';
 import { REVIEW_STATUS, REVIEW_DECISIONS, REVIEW_DECISION_STATUS } from '../constants/statuses';
@@ -410,13 +411,18 @@ async function tableView(connectionId: string, query: Record<string, any> = {}):
 
 async function reviewQueue(connectionId: string, query: Record<string, any> = {}): Promise<Record<string, any>> {
   const result = await guarded(() =>
-    contextRepository.pageObjects(connectionId, { ...query, versionId: query.version }, pageOf(query, 25))
+    contextRepository.pageObjects(
+      connectionId,
+      { ...query, versionId: query.version, highConfidenceAt: HIGH_CONFIDENCE },
+      pageOf(query, 25)
+    )
   );
   return {
     items: result.rows.map(shapeReviewItem),
     counts: result.counts,
     total: result.all,
     matched: result.matched,
+    highConfidence: { threshold: HIGH_CONFIDENCE, pending: result.highConfidence ?? 0 },
   };
 }
 

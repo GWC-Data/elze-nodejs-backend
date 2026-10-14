@@ -53,6 +53,8 @@ async function publishSummary(actor: Actor, connection: Connection, { version = 
   const tables = tablesCovered(approved, rows);
 
   const stats = [
+    { id: 'approved', label: 'Approved facts', value: approved.length },
+    { id: 'pending', label: 'Awaiting review', value: pending.length },
     { id: 'datasets', label: 'Datasets', value: selected.length },
     { id: 'tables', label: 'Tables', value: tables.length },
     { id: 'columns', label: 'Columns', value: counts.column_stats || 0 },

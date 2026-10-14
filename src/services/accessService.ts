@@ -1,6 +1,6 @@
 import * as accessRepository from '../repositories/accessRepository';
 import { fail } from '../tools/AppError';
-import { requireLevel } from '../validators/accessValidator';
+import { requireLevelId } from '../validators/accessValidator';
 import { dashboardSummary } from '../views/serializers/dashboardSerializer';
 import { can, strongestLevel, levelAtLeast, resolveTargetCompany } from './authorizationService';
 import { requireCompany } from './companyService';
@@ -8,7 +8,7 @@ import { requireGroupInScope } from './groupService';
 import { requireUserInScope, listUserOptions } from './userService';
 import * as dashboards from './dashboardService';
 import { audit, EVENTS } from './auditService';
-import { ACCESS_LEVELS, ACCESS_LEVEL_LABELS } from '../constants/permissions';
+import { accessLevelsFor, accessLevelId } from '../constants/accessLevels';
 import type { Actor } from '../types/actor';
 
 type GrantAction = 'read' | 'grant' | 'revoke';
@@ -140,6 +140,7 @@ async function listUserGrants(userId: number) {
       dashboardId: row.dashboardId,
       dashboardTitle: titles.get(row.dashboardId) || null,
       level: row.level,
+      levelId: row.levelId,
       origin: row.origin,
     };
     if (row.origin === 'group') Object.assign(grant, { groupId: row.groupId, groupName: row.groupName });
@@ -160,8 +161,10 @@ async function listDashboardGrants(companyId: number, dashboardId: string) {
 }
 
 function describeLevels() {
-  return ACCESS_LEVELS.map((id) => ({ id, description: ACCESS_LEVEL_LABELS[id] }));
+  return accessLevelsFor('dashboard').map(({ id, key, rank, label, description }) => ({ id, key, rank, label, description }));
 }
+
+const levelIdOf = (level: string | null) => (level ? accessLevelId('dashboard', level) : null);
 
 async function resolveGrantTarget(actor: Actor, requestedCompanyId: unknown, dashboardId: unknown) {
   const companyId = resolveTargetCompany(actor, requestedCompanyId);
@@ -234,6 +237,7 @@ async function dashboardGrants(actor: Actor, requestedCompanyId: unknown, rawDas
     you: {
       userId: actor.id,
       level: authority.level,
+      levelId: levelIdOf(authority.level),
       administrator: authority.full,
       mayRevoke: authority.full ? can(actor, 'access.revoke') : levelAtLeast(authority.level, 'admin'),
     },
@@ -246,8 +250,8 @@ async function shareablePeople(actor: Actor, requestedCompanyId: unknown, rawDas
   return listUserOptions(actor);
 }
 
-async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: number, rawLevel: string) {
-  const level = requireLevel(rawLevel);
+async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: number, rawLevelId: unknown) {
+  const level = requireLevelId(rawLevelId);
   const target = await requireUserInScope(actor, userId);
   const { dashboardId } = await resolveGrantTarget(actor, target.company_id, rawDashboardId);
   const authority = await grantAuthority(actor, dashboardId, 'grant');
@@ -260,8 +264,9 @@ async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: number
     targetUsername: target.username,
     companyId: target.company_id,
     level,
+    levelId: levelIdOf(level),
   });
-  return { dashboardId, userId, level };
+  return { dashboardId, userId, level, levelId: levelIdOf(level) };
 }
 
 async function revokeFromUser(actor: Actor, rawDashboardId: unknown, userId: number) {
@@ -283,8 +288,8 @@ async function revokeFromUser(actor: Actor, rawDashboardId: unknown, userId: num
   return { dashboardId, userId, revoked: true };
 }
 
-async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: number, rawLevel: string) {
-  const level = requireLevel(rawLevel);
+async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: number, rawLevelId: unknown) {
+  const level = requireLevelId(rawLevelId);
   const group = await requireGroupInScope(actor, groupId);
   const { dashboardId } = await resolveGrantTarget(actor, group.companyId, rawDashboardId);
 
@@ -295,8 +300,9 @@ async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: numb
     groupName: group.name,
     companyId: group.companyId,
     level,
+    levelId: levelIdOf(level),
   });
-  return { dashboardId, groupId, level };
+  return { dashboardId, groupId, level, levelId: levelIdOf(level) };
 }
 
 async function revokeFromGroup(actor: Actor, rawDashboardId: unknown, groupId: number) {
@@ -328,7 +334,7 @@ async function groupDashboards(actor: Actor, groupId: number) {
     available: assigned.map((d: DashboardRecord) => ({ id: d.id, title: d.title })),
     held: assigned
       .filter((d: DashboardRecord) => levels.has(d.id))
-      .map((d: DashboardRecord) => ({ id: d.id, title: d.title, level: levels.get(d.id) })),
+      .map((d: DashboardRecord) => ({ id: d.id, title: d.title, level: levels.get(d.id), levelId: levelIdOf(levels.get(d.id)) })),
   };
 }
 

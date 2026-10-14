@@ -5,22 +5,24 @@ import * as dashboardRepository from '../repositories/dashboardRepository';
 import * as companyRoleRepository from '../repositories/companyRoleRepository';
 import { seedExistingCompanies } from './featureService';
 import { backfillAndSync } from './builtInRolesService';
-import { FEATURE_OF_PERMISSION } from '../constants/features';
+import { seedCatalogue } from './accessCatalogueService';
+import { migrateLegacyAccessControl } from './accessMigrationService';
+import { FEATURES, FEATURE_OF_PERMISSION } from '../constants/features';
+import { ACCESS_LEVEL_CATALOGUE } from '../constants/accessLevels';
 import { hashPassword } from '../tools/password';
 import { normalizeSpec } from '../models/cardModel';
 import { pruneExpiredTokens } from './tokenService';
 import { pruneAttempts } from './loginThrottleService';
 import { verifyTransport } from './emailService';
 import {
+  ALL_PERMISSIONS,
+  PERMISSION_BY_KEY,
   SYSTEM_ROLES,
-  ROLE_NAMES,
-  PERMISSION_IDS,
+  SYSTEM_ROLE_ID,
   DEFAULT_ROLE_PERMISSIONS,
   REPLACED_PERMISSIONS,
   SUPER_ADMIN,
-  ALL_PERMISSIONS,
-  PLATFORM_ONLY_PERMISSIONS,
-  CUSTOM_ROLE_EXCLUDED,
+  permissionIdsOf,
 } from '../constants/permissions';
 
 const { bootstrapSuperAdmin } = config.auth;
@@ -39,42 +41,28 @@ function rbacError(): string | null {
   return readyError;
 }
 
-async function knownPermissions(): Promise<Set<string>> {
-  const logged: string[] = await bootstrapRepository.loggedPermissionIds();
-  if (logged.length) return new Set(logged);
-
-  const held: string[] = await bootstrapRepository.heldPermissionIds();
-  if (held.length) {
-    console.log(`[rbac] recording ${held.length} permission(s) this installation already had`);
-  }
-  return new Set(held);
-}
-
-async function grantAll(roleName: string, permissionIds: readonly string[]): Promise<void> {
-  for (const permissionId of permissionIds) {
-    await bootstrapRepository.grantRolePermission(roleName, permissionId);
-  }
+async function grantAll(roleName: string, keys: readonly string[]): Promise<void> {
+  await bootstrapRepository.addRolePermissions(SYSTEM_ROLE_ID[roleName], permissionIdsOf(keys));
 }
 
 async function migrateReplacedPermissions(): Promise<void> {
   for (const [retired, replacements] of Object.entries(REPLACED_PERMISSIONS)) {
-    const n = await bootstrapRepository.grantReplacements(retired, replacements);
-    await companyRoleRepository.grantReplacements(retired, replacements);
-    if (n) console.log(`[rbac] replaced "${retired}" with ${replacements.join(', ')} (${n} grant(s))`);
+    const n = await bootstrapRepository.grantReplacements(retired, permissionIdsOf(replacements));
+    if (n) console.log(`[rbac] replaced "${retired}" with ${replacements.join(', ')} (${n} role(s) or person(s))`);
   }
 }
 
 const REPAIRS: Array<{ id: string; covers: (permission: string) => boolean }> = [
   {
     id: 'feature-permissions-v1',
-    covers: (id) => ['metadata_lakehouse', 'data_analyst', 'agents'].includes(FEATURE_OF_PERMISSION.get(id) || ''),
+    covers: (key) => ['metadata_lakehouse', 'data_analyst', 'agents'].includes(FEATURE_OF_PERMISSION.get(key) || ''),
   },
   {
     id: 'new-permissions-v2',
-    covers: (id) =>
-      /^(analyst|playbook|agent)\./.test(id) ||
+    covers: (key) =>
+      /^(analyst|playbook|agent)\./.test(key) ||
       ['context.create', 'context.update', 'context.publish', 'context.delete',
-        'role.create', 'role.edit', 'role.delete'].includes(id),
+        'role.create', 'role.edit', 'role.delete'].includes(key),
   },
 ];
 
@@ -89,77 +77,59 @@ async function applyRepairs(): Promise<void> {
   }
 }
 
-const CATALOGUE_ROWS = ALL_PERMISSIONS.map((p) => ({
-  id: p.id,
-  feature: FEATURE_OF_PERMISSION.get(p.id) || null,
-  platformOnly: PLATFORM_ONLY_PERMISSIONS.has(p.id),
-  adminOnly: CUSTOM_ROLE_EXCLUDED.has(p.id),
-}));
-
 async function seedCompanyRoles(): Promise<void> {
   if (await bootstrapRepository.claimRepair('builtin-copies-modified-v1')) {
-    const marked = await companyRoleRepository.markExistingBuiltInCopiesModified();
+    const marked = await companyRoleRepository.markExistingCompanyDefaultsModified();
     if (marked) console.log(`[rbac] kept ${marked} company-edited Member role(s) as their company's own`);
   }
   await backfillAndSync();
-  await bootstrapRepository.prunePermissionCatalogue(PERMISSION_IDS);
-  await bootstrapRepository.createRbacIntegrity();
 }
 
 async function seedRoles(): Promise<void> {
-  const created = new Set<string>();
-  const alreadyKnown = await knownPermissions();
-
-  await bootstrapRepository.upsertPermissionCatalogue(CATALOGUE_ROWS);
+  const created = await seedCatalogue();
+  const newIds = new Set(await bootstrapRepository.newPermissionIds());
 
   await migrateReplacedPermissions();
 
-  for (const role of SYSTEM_ROLES) {
-    if (await bootstrapRepository.upsertRole(role)) created.add(role.name);
-  }
+  await bootstrapRepository.setRolePermissions(SYSTEM_ROLE_ID[SUPER_ADMIN], ALL_PERMISSIONS.map((p) => p.id));
 
   for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    if (!created.has(roleName)) continue;
-    await grantAll(roleName, permissions);
-    console.log(`[rbac] seeded ${permissions.length} default permissions for ${roleName}`);
-  }
-
-  for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    if (created.has(roleName)) continue;
-    const added = permissions.filter((id) => !alreadyKnown.has(id));
+    if (created.has(roleName)) {
+      await grantAll(roleName, permissions);
+      console.log(`[rbac] seeded ${permissions.length} default permissions for ${roleName}`);
+      continue;
+    }
+    const added = permissions.filter((key) => newIds.has(PERMISSION_BY_KEY.get(key)?.id || ''));
     if (!added.length) continue;
     await grantAll(roleName, added);
-    console.log(
-      `[rbac] granted ${roleName} ${added.length} newly added permission(s): ${added.join(', ')}`
-    );
+    console.log(`[rbac] granted ${roleName} ${added.length} newly added permission(s): ${added.join(', ')}`);
   }
 
   for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    await grantAll(roleName, permissions.filter((id) => id.startsWith('dashboard.')));
+    await grantAll(roleName, permissions.filter((key) => key.startsWith('dashboard.')));
   }
 
   await applyRepairs();
+  await bootstrapRepository.markDefaultsApplied();
 
-  for (const permissionId of PERMISSION_IDS) {
-    await bootstrapRepository.logPermission(permissionId);
+  const pruned = await bootstrapRepository.pruneCatalogue({
+    permissionIds: ALL_PERMISSIONS.map((p) => p.id),
+    featureIds: FEATURES.map((f) => f.id),
+    accessLevelIds: ACCESS_LEVEL_CATALOGUE.map((l) => l.id),
+  });
+  if (pruned.permissions || pruned.features) {
+    console.log(`[rbac] removed ${pruned.permissions} permission(s) and ${pruned.features} feature(s) no longer in the catalogue`);
   }
 
-  const purged = await bootstrapRepository.purgePermissionsNotIn(PERMISSION_IDS);
-  const purgedCustom = await companyRoleRepository.purgePermissionsNotIn(PERMISSION_IDS);
-  if (purged || purgedCustom) {
-    console.log(`[rbac] removed ${(purged || 0) + purgedCustom} permission row(s) no longer in the catalogue`);
-  }
-
-  for (const name of await bootstrapRepository.rolesNotIn(ROLE_NAMES)) {
-    const holders = await bootstrapRepository.countUsersWithRole(name);
-    if (holders > 0) {
+  for (const role of await bootstrapRepository.unknownSystemRoles(SYSTEM_ROLES.map((r) => r.id))) {
+    if (role.holders > 0) {
       throw new Error(
-        `Role "${name}" is not part of the three-role model but ${holders} account(s) still hold it. ` +
-        `Reassign them to one of ${ROLE_NAMES.join(', ')} before starting the server.`
+        `Role "${role.name}" is not part of the three-role model but ${role.holders} account(s) still hold it. ` +
+        `Reassign them to one of ${SYSTEM_ROLES.map((r) => r.name).join(', ')} before starting the server.`
       );
     }
-    await bootstrapRepository.deleteRole(name);
-    console.log(`[rbac] removed unused role "${name}"`);
+    await bootstrapRepository.deleteRole(role.id);
+    console.log(`[rbac] removed unused role "${role.name}"`);
   }
 }
 
@@ -171,7 +141,7 @@ async function seedSuperAdmin(): Promise<boolean> {
     username,
     email: String(email).toLowerCase(),
     passwordHash: hashPassword(password),
-    role: SUPER_ADMIN,
+    roleId: SYSTEM_ROLE_ID[SUPER_ADMIN],
   });
   console.log(
     `[rbac] seeded platform owner "${username}" as ${SUPER_ADMIN}, ` +
@@ -207,13 +177,19 @@ async function seedDefaultDashboards(): Promise<void> {
 
 async function bootstrapAppMeta(): Promise<boolean> {
   try {
-    await bootstrapRepository.createRbacSchema();
+    await bootstrapRepository.createCoreSchema();
+    await bootstrapRepository.createContextSchema();
+    await migrateLegacyAccessControl();
+    await bootstrapRepository.createAccessControlSchema();
     await seedRoles();
     await seedExistingCompanies();
     await seedCompanyRoles();
     await seedSuperAdmin();
     await seedDefaultDashboards();
-    await bootstrapRepository.createContextSchema();
+    await bootstrapRepository.createAccessControlViews();
+
+    const roleless = await bootstrapRepository.countUsersWithoutRole();
+    if (roleless) console.warn(`[rbac] ${roleless} account(s) have no role in access_control.user_roles and cannot sign in`);
 
     ready = true;
     readyError = null;

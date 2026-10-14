@@ -1,16 +1,17 @@
 import assert from 'assert';
 import config from '../src/config';
 const { db } = config.database;
-import { T } from '../src/models/rbacModel';
+import { T, V } from '../src/models/rbacModel';
 import { bootstrapAppMeta } from '../src/services/bootstrapService';
 import * as registry from '../src/services/dashboardService';
 import * as access from '../src/services/accessService';
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PLATFORM_ONLY_PERMISSIONS,
-  PERMISSION_IDS,
+  PERMISSION_KEYS,
   COMPANY_ADMIN,
   USER,
+  SYSTEM_ROLE_ID,
 } from '../src/constants/permissions';
 import type { Actor } from '../src/types/actor';
 
@@ -18,10 +19,10 @@ async function runTests(): Promise<void> {
   console.log('=== Starting Multi-Tenant Dashboard Architecture Tests ===\n');
 
   console.log('[1] Checking Permission Catalogue Role Bindings:');
-  assert(PERMISSION_IDS.includes('dashboard.create'), 'Catalogue must include dashboard.create');
-  assert(PERMISSION_IDS.includes('dashboard.update'), 'Catalogue must include dashboard.update');
-  assert(PERMISSION_IDS.includes('dashboard.delete'), 'Catalogue must include dashboard.delete');
-  assert(PERMISSION_IDS.includes('dashboard.assign'), 'Catalogue must include dashboard.assign');
+  assert(PERMISSION_KEYS.includes('dashboard.create'), 'Catalogue must include dashboard.create');
+  assert(PERMISSION_KEYS.includes('dashboard.update'), 'Catalogue must include dashboard.update');
+  assert(PERMISSION_KEYS.includes('dashboard.delete'), 'Catalogue must include dashboard.delete');
+  assert(PERMISSION_KEYS.includes('dashboard.assign'), 'Catalogue must include dashboard.assign');
   console.log('  ✓ Catalogue defines dashboard.create, dashboard.update, dashboard.delete, dashboard.assign');
 
   const companyAdminPerms = DEFAULT_ROLE_PERMISSIONS[COMPANY_ADMIN];
@@ -60,17 +61,19 @@ async function runTests(): Promise<void> {
   console.log('  ✓ dashboards table has company_id, created_by, spec columns');
 
   const rolePermRows = await db.query(
-    `SELECT role_name, permission_id FROM ${T.rolePermissions} WHERE permission_id IN ('dashboard.create', 'dashboard.update', 'dashboard.delete')`
+    `SELECT role_id, permissions FROM ${V.rolePermissionSummary} WHERE role_id IN (?, ?)`,
+    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
   );
-  const adminPermsInDb = rolePermRows.rows.filter((r) => r.role_name === COMPANY_ADMIN).map((r) => r.permission_id);
-  const userPermsInDb = rolePermRows.rows.filter((r) => r.role_name === USER).map((r) => r.permission_id);
+  const permsOf = (roleId: string): string[] => rolePermRows.rows.find((r) => r.role_id === roleId)?.permissions || [];
+  const adminPermsInDb = permsOf(SYSTEM_ROLE_ID[COMPANY_ADMIN]);
+  const userPermsInDb = permsOf(SYSTEM_ROLE_ID[USER]);
   assert(adminPermsInDb.includes('dashboard.create'), 'COMPANY_ADMIN must have dashboard.create in DB');
   assert(adminPermsInDb.includes('dashboard.update'), 'COMPANY_ADMIN must have dashboard.update in DB');
   assert(adminPermsInDb.includes('dashboard.delete'), 'COMPANY_ADMIN must have dashboard.delete in DB');
   assert(userPermsInDb.includes('dashboard.create'), 'USER must have dashboard.create in DB');
   assert(userPermsInDb.includes('dashboard.update'), 'USER must have dashboard.update in DB');
   assert(!userPermsInDb.includes('dashboard.delete'), 'USER must NOT have dashboard.delete in DB');
-  console.log('  ✓ Database role_permissions table verified for COMPANY_ADMIN and USER');
+  console.log('  ✓ access_control.role_permissions verified for COMPANY_ADMIN and USER');
 
   console.log('\n[3] Testing Registry Scoping:');
   const allDashboards = await registry.listDashboards();
@@ -97,12 +100,18 @@ async function runTests(): Promise<void> {
      ON CONFLICT (id) DO NOTHING`
   );
   await db.query(
-    `INSERT INTO ${T.users} (id, company_id, username, email, role, status)
+    `INSERT INTO ${T.users} (id, company_id, username, email, status)
      VALUES
-       (8881, 9991, 'testuser_a', 'user_a@test.com', 'COMPANY_ADMIN', 'active'),
-       (8882, 9992, 'testuser_b', 'user_b@test.com', 'COMPANY_ADMIN', 'active'),
-       (8883, 9991, 'testuser_user_a', 'user_user_a@test.com', 'USER', 'active')
+       (8881, 9991, 'testuser_a', 'user_a@test.com', 'active'),
+       (8882, 9992, 'testuser_b', 'user_b@test.com', 'active'),
+       (8883, 9991, 'testuser_user_a', 'user_user_a@test.com', 'active')
      ON CONFLICT (id) DO NOTHING`
+  );
+  await db.query(
+    `INSERT INTO ${T.userRoles} (user_id, role_id)
+     VALUES (8881, ?), (8882, ?), (8883, ?)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
   );
 
   await registry.deleteDashboard(dashA_Id).catch(() => {});

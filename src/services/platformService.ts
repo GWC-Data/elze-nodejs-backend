@@ -2,6 +2,8 @@ import config from '../config';
 import * as companyRepository from '../repositories/companyRepository';
 import { countDashboards } from './dashboardService';
 import { describeTransport } from './emailService';
+import { factTotals } from './connectionService';
+import type { Actor } from '../types/actor';
 
 const { QUERY_CONCURRENCY } = config.app;
 const {
@@ -17,12 +19,17 @@ const {
   COOKIE_SAMESITE,
 } = config.auth;
 
-async function overview() {
-  const [numeric, dashboards] = await Promise.all([companyRepository.platformOverview(), countDashboards()]);
+async function overview(actor: Actor) {
+  const [numeric, dashboards, facts] = await Promise.all([
+    companyRepository.platformOverview(),
+    countDashboards(),
+    factTotals(actor),
+  ]);
   return {
     ...numeric,
     companiesInactive: numeric.companies - numeric.companiesActive,
     dashboards,
+    ...facts,
   };
 }
 

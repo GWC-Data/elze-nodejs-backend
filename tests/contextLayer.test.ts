@@ -17,7 +17,13 @@ import store = require('../src/services/contextService');
 import publish = require('../src/services/publishService');
 import sharing = require('../src/services/contextSharingService');
 import agentGate = require('../src/services/agentGateService');
+import permissionConstants = require('../src/constants/permissions');
+const { SYSTEM_ROLE_ID } = permissionConstants;
+import accessLevelConstants = require('../src/constants/accessLevels');
+const { accessLevelId } = accessLevelConstants;
 import type { Actor } from '../src/types/actor';
+
+const level = (key: string) => ({ levelId: accessLevelId('context', key) });
 
 type FetchInit = { headers?: Record<string, string> } & Record<string, any>;
 type SeenRequest = { host: string; path: string; query: string; token: string | undefined; init: FetchInit; search?: string };
@@ -158,10 +164,11 @@ async function makeCompany(name: string): Promise<number> {
 
 async function makeAdmin(companyId: number, username: string): Promise<Actor> {
   const { rows } = await db.query(
-    `INSERT INTO users (company_id, username, email, password_hash, role, status)
-     VALUES (?, ?, ?, 'x', 'COMPANY_ADMIN', 'active') RETURNING id`,
+    `INSERT INTO users (company_id, username, email, password_hash, status)
+     VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, SYSTEM_ROLE_ID.COMPANY_ADMIN]);
   made.users.push(rows[0].id);
   return {
     id: rows[0].id, username, companyId, isPlatform: false, role: 'COMPANY_ADMIN',
@@ -172,10 +179,11 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
 
 async function makeMember(companyId: number, username: string): Promise<Actor> {
   const { rows } = await db.query(
-    `INSERT INTO users (company_id, username, email, password_hash, role, status)
-     VALUES (?, ?, ?, 'x', 'USER', 'active') RETURNING id`,
+    `INSERT INTO users (company_id, username, email, password_hash, status)
+     VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, SYSTEM_ROLE_ID.USER]);
   made.users.push(rows[0].id);
   return {
     id: rows[0].id, username, companyId, isPlatform: false, role: 'USER',
@@ -308,7 +316,7 @@ async function cleanup(): Promise<void> {
   const asOtherAdmin = await service.requireConnection(otherAdminA, connectionId);
   check('another company admin has full access', asOtherAdmin.access.level === 'full');
   check('but may not share it', asOtherAdmin.access.canShare === false);
-  const adminShares = await codeOf(() => sharing.shareWithUser(otherAdminA, connectionId, memberA.id, { level: 'view' }));
+  const adminShares = await codeOf(() => sharing.shareWithUser(otherAdminA, connectionId, memberA.id, level('view')));
   check('a non-owner admin sharing is refused', adminShares === 'INSUFFICIENT_PERMISSION', adminShares);
 
   const people = await sharing.shareablePeople(adminA, connectionId);
@@ -317,7 +325,7 @@ async function cleanup(): Promise<void> {
       && !people.some((p: any) => p.userId === adminB.id),
     JSON.stringify(people.map((p: any) => p.userId)));
 
-  let shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'view' });
+  let shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, level('view'));
   check('sharing lists the person with their level',
     shared.people.length === 1 && shared.people[0].userId === memberA.id && shared.people[0].level === 'view',
     JSON.stringify(shared.people));
@@ -328,24 +336,24 @@ async function cleanup(): Promise<void> {
   check('view cannot change the draft', viewerEdits === 'INSUFFICIENT_PERMISSION', viewerEdits);
   const viewerDeletes = await codeOf(() => service.deleteConnection(memberA, connectionId));
   check('view cannot delete it', viewerDeletes === 'INSUFFICIENT_PERMISSION', viewerDeletes);
-  const viewerShares = await codeOf(() => sharing.shareWithUser(memberA, connectionId, otherAdminA.id, { level: 'view' }));
+  const viewerShares = await codeOf(() => sharing.shareWithUser(memberA, connectionId, otherAdminA.id, level('view')));
   check('a sharee cannot share it on', viewerShares === 'INSUFFICIENT_PERMISSION', viewerShares);
   check('the gate lets view read the description editor', (await gate(memberA, '/description-editor/sessions', 'GET')) === null);
   const viewerChats = await gate(memberA, '/description-editor/sessions', 'POST');
   check('the gate keeps view out of description edits', viewerChats === 'INSUFFICIENT_PERMISSION', viewerChats);
 
-  shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'edit' });
+  shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, level('edit'));
   check('changing the level replaces it', shared.people.length === 1 && shared.people[0].level === 'edit');
   check('edit can change the draft', (await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'))) === null);
   check('the gate lets edit use the description editor', (await gate(memberA, '/description-editor/sessions/s1/messages', 'POST')) === null);
   const editorDeletes = await codeOf(() => service.requireConnection(memberA, connectionId, 'full'));
   check('edit still cannot delete', editorDeletes === 'INSUFFICIENT_PERMISSION', editorDeletes);
 
-  const toOwner = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminA.id, { level: 'view' }));
+  const toOwner = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminA.id, level('view')));
   check('the owner cannot be given a level', toOwner === 'VALIDATION_ERROR', toOwner);
-  const crossCompany = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminB.id, { level: 'view' }));
+  const crossCompany = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminB.id, level('view')));
   check("another company's person cannot be added", crossCompany === 'RESOURCE_NOT_FOUND', crossCompany);
-  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { level: 'admin' }));
+  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { levelId: accessLevelConstants.accessLevelId('dashboard', 'admin') }));
   check('an unknown level is refused', badLevel === 'VALIDATION_ERROR', badLevel);
 
   shared = await sharing.unshareWithUser(adminA, connectionId, memberA.id);

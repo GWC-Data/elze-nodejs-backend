@@ -43,27 +43,39 @@ async function distinctValues(dimension: ScopeDimension): Promise<string[]> {
 
 async function userScopeRows(userId: number) {
   const { rows } = await db.query(
-    `SELECT dimension, value FROM ${T.userDataScope} WHERE user_id = ? ORDER BY dimension, value`,
+    `SELECT d.key AS dimension, v.value
+       FROM ${T.userDataScopes} s
+       CROSS JOIN LATERAL jsonb_each(s.scopes) AS d
+       CROSS JOIN LATERAL jsonb_array_elements_text(d.value) AS v(value)
+      WHERE s.user_id = ?
+      ORDER BY d.key, v.value`,
     [userId]
   );
   return rows;
 }
 
-async function replaceUserScopes(userId: number, scopes: Record<string, readonly string[]>): Promise<void> {
+async function replaceUserScopes(userId: number, scopes: Record<string, readonly string[]>, actorId: number | null = null): Promise<void> {
   await withTransaction(async (conn: Queryable) => {
+    const { rows } = await conn.query(
+      `SELECT scopes FROM ${T.userDataScopes} WHERE user_id = ? FOR UPDATE`,
+      [userId]
+    );
+    const next: Record<string, string[]> = { ...((rows[0] && rows[0].scopes) || {}) };
     for (const [dimension, values] of Object.entries(scopes)) {
-      await conn.query(
-        `DELETE FROM ${T.userDataScope} WHERE user_id = ? AND dimension = ?`,
-        [userId, dimension]
-      );
-      if (values.length) {
-        const placeholders = values.map(() => '(?, ?, ?)').join(', ');
-        await conn.query(
-          `INSERT INTO ${T.userDataScope} (user_id, dimension, value) VALUES ${placeholders}`,
-          values.flatMap((v) => [userId, dimension, v])
-        );
-      }
+      if (values.length) next[dimension] = [...values].sort();
+      else delete next[dimension];
     }
+    if (!Object.keys(next).length) {
+      await conn.query(`DELETE FROM ${T.userDataScopes} WHERE user_id = ?`, [userId]);
+      return;
+    }
+    await conn.query(
+      `INSERT INTO ${T.userDataScopes} (user_id, scopes, updated_by)
+       VALUES (?, ?::jsonb, ?)
+       ON CONFLICT (user_id) DO UPDATE
+         SET scopes = EXCLUDED.scopes, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [userId, JSON.stringify(next), actorId]
+    );
   });
 }
 

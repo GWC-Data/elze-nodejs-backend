@@ -30,4 +30,8 @@ async function members(req: Request, res: Response): Promise<void> {
   ok(res, await groupService.listMembers(req.actor, groupId(req)));
 }
 
-export { list, create, get, update, remove, members };
+async function contexts(req: Request, res: Response): Promise<void> {
+  ok(res, await groupService.listGroupContexts(req.actor, groupId(req)));
+}
+
+export { list, create, get, update, remove, members, contexts };

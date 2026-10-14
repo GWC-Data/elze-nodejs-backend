@@ -17,6 +17,8 @@ router.post('/:id/activate', requirePermission('user.activate'), user.activate);
 router.post('/:id/activation', requirePermission('user.update'), user.reissueActivation);
 router.delete('/:id', requirePermission('user.delete'), user.remove);
 router.get('/:id/access', requirePermission('access.read'), user.access);
+router.get('/:id/permissions', requirePermission('user.read'), user.getPermissions);
+router.put('/:id/permissions', requirePermission('user.update'), user.replacePermissions);
 router.get('/:id/scope', requirePermission('scope.read'), user.getScope);
 router.put('/:id/scope', requirePermission('scope.update'), user.replaceScope);
 

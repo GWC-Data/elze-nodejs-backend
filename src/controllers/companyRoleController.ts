@@ -28,11 +28,11 @@ async function remove(req: Request, res: Response): Promise<void> {
 }
 
 async function saveBuiltIn(req: Request, res: Response): Promise<void> {
-  ok(res, await companyRoleService.saveBuiltInRole(req.actor, req.params.name, req.body || {}));
+  ok(res, await companyRoleService.saveBuiltInRole(req.actor, req.params.id, req.body || {}));
 }
 
 async function resetBuiltIn(req: Request, res: Response): Promise<void> {
-  ok(res, await companyRoleService.resetBuiltInRole(req.actor, req.params.name, req.query.companyId));
+  ok(res, await companyRoleService.resetBuiltInRole(req.actor, req.params.id, req.query.companyId));
 }
 
 export { permissions, list, get, create, update, remove, saveBuiltIn, resetBuiltIn };

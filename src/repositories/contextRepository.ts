@@ -128,14 +128,22 @@ async function loadObject(connectionId: string, objectId: string) {
   return rows[0] || null;
 }
 
+function confidenceFloor(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const floor = Number(value);
+  return Number.isFinite(floor) ? floor : null;
+}
+
 async function pageObjects(
   connectionId: string,
-  { runVersionId, versionId, type, status, search }: {
+  { runVersionId, versionId, type, status, search, minConfidence, highConfidenceAt }: {
     runVersionId?: string | null;
     versionId?: string | null;
     type?: unknown;
     status?: unknown;
     search?: unknown;
+    minConfidence?: unknown;
+    highConfidenceAt?: number;
   },
   paging: { pageSize: number; offset: number }
 ) {
@@ -150,6 +158,11 @@ async function pageObjects(
     where.push(`${STATUS_SQL} = ?`);
     params.push(String(status));
   }
+  const floor = confidenceFloor(minConfidence);
+  if (floor !== null) {
+    where.push('o.confidence IS NOT NULL AND o.confidence >= ?');
+    params.push(floor);
+  }
   const needle = String(search || '').trim().slice(0, 100);
   if (needle) {
     where.push('(o.qualified_name ILIKE ? OR o.payload::text ILIKE ?)');
@@ -157,7 +170,19 @@ async function pageObjects(
     params.push(pattern, pattern);
   }
 
-  const [pageResult, countResult] = await Promise.all([
+  const highConfidenceQuery =
+    highConfidenceAt === undefined
+      ? Promise.resolve(null)
+      : db.query(
+          `SELECT COUNT(*)::int AS n
+             FROM ${src.from}
+            WHERE ${src.where}${type ? ' AND o.object_type = ?' : ''}
+              AND ${STATUS_SQL} = 'pending'
+              AND o.confidence IS NOT NULL AND o.confidence >= ?`,
+          [...src.params, ...(type ? [String(type)] : []), highConfidenceAt]
+        );
+
+  const [pageResult, countResult, highConfidenceResult] = await Promise.all([
     db.query(
       `SELECT o.id, o.version_id, o.object_type, o.qualified_name, o.source_type,
               o.verified, o.confidence, o.payload, o.created_at,
@@ -177,6 +202,7 @@ async function pageObjects(
         ORDER BY o.object_type`,
       src.params
     ),
+    highConfidenceQuery,
   ]);
 
   const rows = pageResult.rows;
@@ -200,8 +226,28 @@ async function pageObjects(
     counts,
     all,
     matched,
+    highConfidence: highConfidenceResult ? Number(highConfidenceResult.rows[0].n) : null,
     runVersionId: countResult.rows.length ? countResult.rows[0].version_id : null,
   };
+}
+
+async function factTotals(connectionIds: readonly string[]): Promise<{ factsGenerated: number; factsPending: number }> {
+  if (connectionIds.length === 0) return { factsGenerated: 0, factsPending: 0 };
+  const { rows } = await db.query(
+    `WITH latest AS (
+       SELECT DISTINCT ON (o.context_id) o.context_id, o.version_id
+         FROM ${OBJECTS} o
+        WHERE o.context_id = ANY(?::uuid[])
+        ORDER BY o.context_id, o.created_at DESC
+     )
+     SELECT COUNT(*)::int AS generated,
+            (COUNT(*) FILTER (WHERE ${STATUS_SQL} = 'pending'))::int AS pending
+       FROM ${OBJECTS} o
+       JOIN latest l ON l.context_id = o.context_id AND l.version_id = o.version_id
+       LEFT JOIN ${REVIEWS} r ON r.object_id = o.id`,
+    [connectionIds]
+  );
+  return { factsGenerated: Number(rows[0]?.generated ?? 0), factsPending: Number(rows[0]?.pending ?? 0) };
 }
 
 async function requireObject(connectionId: string, objectId: string) {
@@ -332,6 +378,7 @@ export {
   loadObjects,
   loadObject,
   pageObjects,
+  factTotals,
   requireObject,
   writeDecision,
   mergePayload,

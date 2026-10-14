@@ -1,33 +1,49 @@
 import * as companyRoleRepository from '../repositories/companyRoleRepository';
 import * as roleRepository from '../repositories/roleRepository';
 import { fail } from '../tools/AppError';
-import { requireId, requireString } from '../validators/commonValidator';
+import { requireUuid, requireString } from '../validators/commonValidator';
 import { resolveTargetCompany } from './authorizationService';
 import { requireCompany } from './companyService';
 import { enabledFor } from './featureService';
 import { defaultsFor } from './builtInRolesService';
+import { parsePermissionIds, describePermission } from './roleService';
 import { audit, EVENTS } from './auditService';
 import {
   ALL_PERMISSIONS,
-  ALL_PERMISSION_IDS,
+  ALL_PERMISSION_KEYS,
   PLATFORM_ONLY_PERMISSIONS,
   CUSTOM_ROLE_EXCLUDED,
   COMPANY_ADMIN,
   USER,
   ROLE_NAMES,
+  SYSTEM_ROLES,
+  SYSTEM_ROLE_ID,
+  permissionIdsOf,
+  permissionKeysOf,
 } from '../constants/permissions';
-import { FEATURE_OF_PERMISSION, isPermissionEnabled, maskPermissions } from '../constants/features';
+import { isPermissionEnabled, maskPermissions } from '../constants/features';
 import { UNIQUE_VIOLATION, FOREIGN_KEY_VIOLATION } from '../constants/pgErrors';
 import type { Actor } from '../types/actor';
+import type { Queryable } from '../config/pgPool';
 
 type Row = Record<string, any>;
+
+const RESERVED_NAMES = new Set([
+  ...ROLE_NAMES.map((name) => name.toLowerCase()),
+  ...SYSTEM_ROLES.map((role) => role.label.toLowerCase().replace(/\s+/g, '_')),
+  companyRoleRepository.COMPANY_DEFAULT_NAME.toLowerCase(),
+]);
+
+function keysOf(row: Row): string[] {
+  return permissionKeysOf(row.permissionIds || []);
+}
 
 function shapeRole(row: Row, features: readonly string[]) {
   return {
     id: row.id,
     name: row.name,
     description: row.description || null,
-    permissions: maskPermissions(row.permissions || [], features),
+    permissionIds: permissionIdsOf(maskPermissions(keysOf(row), features)),
     userCount: Number(row.userCount || 0),
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null,
@@ -49,30 +65,25 @@ function assignable(actor: Actor, permission: string): boolean {
 
 function withImpliedReads(permissions: readonly string[]): string[] {
   const out = new Set(permissions);
-  for (const id of permissions) {
-    const read = `${id.split('.')[0]}.read`;
-    if (read !== id && ALL_PERMISSION_IDS.has(read)) out.add(read);
+  for (const key of permissions) {
+    const read = `${key.split('.')[0]}.read`;
+    if (read !== key && ALL_PERMISSION_KEYS.has(read)) out.add(read);
   }
   return [...out];
 }
 
 function parsePermissions(actor: Actor, features: readonly string[], value: unknown): string[] {
-  if (!Array.isArray(value)) throw fail('VALIDATION_ERROR', 'permissions must be an array of permission ids.');
-  const unique = withImpliedReads([...new Set(value.map(String))]);
+  const unique = withImpliedReads(parsePermissionIds(value));
 
-  const unknown = unique.filter((id) => !ALL_PERMISSION_IDS.has(id));
-  if (unknown.length) {
-    throw fail('VALIDATION_ERROR', `Unknown permission id(s): ${unknown.join(', ')}`, { permissions: unknown });
-  }
-  if (unique.some((id) => !isPermissionEnabled(id, features))) {
+  if (unique.some((key) => !isPermissionEnabled(key, features))) {
     throw fail('FEATURE_NOT_ENABLED', 'Some of these permissions are not available to your company.');
   }
-  const refused = unique.filter((id) => !assignable(actor, id));
+  const refused = unique.filter((key) => !assignable(actor, key));
   if (refused.length) {
     throw fail(
       'VALIDATION_ERROR',
-      `These permissions cannot be given to a company role: ${refused.join(', ')}`,
-      { permissions: refused }
+      `These permissions cannot be given to a company role or a member: ${refused.join(', ')}`,
+      { permissionIds: permissionIdsOf(refused) }
     );
   }
   return unique.sort();
@@ -80,7 +91,7 @@ function parsePermissions(actor: Actor, features: readonly string[], value: unkn
 
 function parseName(value: unknown): string {
   const name = requireString(value, 'Role name', { min: 2, max: 50 });
-  if (ROLE_NAMES.some((builtIn) => builtIn.toLowerCase() === name.toLowerCase().replace(/\s+/g, '_'))) {
+  if (RESERVED_NAMES.has(name.toLowerCase().replace(/\s+/g, '_')) || RESERVED_NAMES.has(name.toLowerCase())) {
     throw fail('VALIDATION_ERROR', `"${name}" is the name of a built-in role.`);
   }
   return name;
@@ -91,102 +102,117 @@ function parseDescription(value: unknown): string | null {
   return requireString(value, 'Description', { max: 255 });
 }
 
+function permissionOptionsFor(actor: Actor, features: readonly string[]) {
+  return ALL_PERMISSIONS.filter(
+    (p) => !PLATFORM_ONLY_PERMISSIONS.has(p.key) && isPermissionEnabled(p.key, features)
+  ).map((p) => ({
+    ...describePermission(p.key),
+    featureEnabled: isPermissionEnabled(p.key, features),
+    assignable: assignable(actor, p.key) && isPermissionEnabled(p.key, features),
+  }));
+}
+
 async function permissionOptions(actor: Actor, requestedCompanyId: unknown) {
   const companyId = await companyFor(actor, requestedCompanyId);
   const features = await enabledFor(companyId);
+  return { companyId, features, permissions: permissionOptionsFor(actor, features) };
+}
+
+async function memberRole(companyId: number) {
+  const row = await companyRoleRepository.findCompanyDefault(companyId);
   return {
-    companyId,
-    features,
-    permissions: ALL_PERMISSIONS.filter(
-      (p) => !PLATFORM_ONLY_PERMISSIONS.has(p.id) && isPermissionEnabled(p.id, features)
-    ).map((p) => {
-      const feature = FEATURE_OF_PERMISSION.get(p.id) || null;
-      return {
-        ...p,
-        feature,
-        featureEnabled: isPermissionEnabled(p.id, features),
-        assignable: assignable(actor, p.id) && isPermissionEnabled(p.id, features),
-        adminOnly: CUSTOM_ROLE_EXCLUDED.has(p.id),
-      };
-    }),
+    id: row ? row.id : SYSTEM_ROLE_ID[USER],
+    keys: row ? keysOf(row) : await defaultsFor(USER),
+    modifiedAt: row?.modifiedAt || null,
+    modifiedBy: row?.modifiedBy || null,
   };
 }
 
-const EDITABLE_BUILT_IN = new Set([USER]);
-
 async function listRoles(actor: Actor, requestedCompanyId: unknown) {
   const companyId = await companyFor(actor, requestedCompanyId);
-  const [features, rows, counts, adminPermissions, memberCopy] = await Promise.all([
+  const [features, rows, counts, adminIds, member] = await Promise.all([
     enabledFor(companyId),
     companyRoleRepository.listForCompany(companyId),
     companyRoleRepository.builtInCounts(companyId),
-    roleRepository.permissionIds(COMPANY_ADMIN, { ordered: true }),
-    companyRoleRepository.findBuiltInOverride(companyId, USER),
+    roleRepository.permissionIds(SYSTEM_ROLE_ID[COMPANY_ADMIN]),
+    memberRole(companyId),
   ]);
-  const memberPermissions: string[] = memberCopy ? memberCopy.permissions : await defaultsFor(USER);
 
   const mayEdit = actor.isPlatform || actor.permissions.includes('role.edit');
 
   const builtIn = [
-    { name: COMPANY_ADMIN, label: 'Company admin', permissions: adminPermissions, modifiedAt: null, modifiedBy: null },
     {
+      id: SYSTEM_ROLE_ID[COMPANY_ADMIN],
+      name: COMPANY_ADMIN,
+      label: 'Company admin',
+      keys: permissionKeysOf(adminIds),
+      modifiedAt: null,
+      modifiedBy: null,
+      editable: false,
+    },
+    {
+      id: member.id,
       name: USER,
       label: 'Member',
-      permissions: memberPermissions,
-      modifiedAt: memberCopy?.modifiedAt || null,
-      modifiedBy: memberCopy?.modifiedBy || null,
+      keys: member.keys,
+      modifiedAt: member.modifiedAt,
+      modifiedBy: member.modifiedBy,
+      editable: mayEdit,
     },
-  ].map((r) => ({
+  ].map(({ keys, ...r }) => ({
     ...r,
-    permissions: maskPermissions(r.permissions, features),
+    permissionIds: permissionIdsOf(maskPermissions(keys, features)),
     customized: Boolean(r.modifiedAt),
     userCount: counts[r.name] || 0,
-    editable: mayEdit && EDITABLE_BUILT_IN.has(r.name),
   }));
 
   return { companyId, features, builtIn, custom: rows.map((row: Row) => shapeRole(row, features)) };
 }
 
-function requireEditableBuiltIn(name: unknown): string {
-  const roleName = String(name || '');
-  if (!EDITABLE_BUILT_IN.has(roleName)) {
-    throw fail(
-      'VALIDATION_ERROR',
-      roleName === COMPANY_ADMIN
-        ? 'The company admin role cannot be changed here, so a company can never lock itself out.'
-        : `"${roleName}" is not a built-in role a company can change.`
-    );
+async function requireEditableBuiltIn(id: unknown, companyId: number) {
+  const roleId = requireUuid(id, 'role id');
+  if (roleId === SYSTEM_ROLE_ID[COMPANY_ADMIN]) {
+    throw fail('VALIDATION_ERROR', 'The company admin role cannot be changed here, so a company can never lock itself out.');
   }
-  return roleName;
+  const current = await companyRoleRepository.findCompanyDefault(companyId);
+  if (!current || current.id !== roleId) {
+    throw fail('RESOURCE_NOT_FOUND', 'That is not a built-in role of this company.');
+  }
+  return current;
 }
 
-async function saveBuiltInRole(actor: Actor, name: unknown, body: Row) {
-  const roleName = requireEditableBuiltIn(name);
+async function saveBuiltInRole(actor: Actor, id: unknown, body: Row) {
   const companyId = await companyFor(actor, body.companyId);
+  const current = await requireEditableBuiltIn(id, companyId);
   const features = await enabledFor(companyId);
-  const next = parsePermissions(actor, features, body.permissions);
+  const next = parsePermissions(actor, features, body.permissionIds);
 
-  const current = await companyRoleRepository.findBuiltInOverride(companyId, roleName);
-  const base: string[] = current ? current.permissions : await defaultsFor(roleName);
-  const dormant = base.filter((p) => !isPermissionEnabled(p, features) && !CUSTOM_ROLE_EXCLUDED.has(p));
-  const permissions = [...new Set([...next, ...dormant])].sort();
+  const dormant = keysOf(current).filter((p) => !isPermissionEnabled(p, features) && !CUSTOM_ROLE_EXCLUDED.has(p));
+  const keys = [...new Set([...next, ...dormant])].sort();
 
-  await companyRoleRepository.saveBuiltInCopy(companyId, roleName, permissions, actor.id);
-  audit(EVENTS.ROLE_UPDATED, actor, { companyId, role: roleName, builtIn: true, permissionCount: permissions.length });
+  await companyRoleRepository.saveCompanyDefault(companyId, permissionIdsOf(keys), actor.id);
+  audit(EVENTS.ROLE_UPDATED, actor, {
+    companyId,
+    roleId: current.id,
+    role: USER,
+    builtIn: true,
+    permissionCount: keys.length,
+  });
   return listRoles(actor, companyId);
 }
 
-async function resetBuiltInRole(actor: Actor, name: unknown, requestedCompanyId: unknown) {
-  const roleName = requireEditableBuiltIn(name);
+async function resetBuiltInRole(actor: Actor, id: unknown, requestedCompanyId: unknown) {
   const companyId = await companyFor(actor, requestedCompanyId);
-  if (await companyRoleRepository.resetBuiltInCopy(companyId, roleName, await defaultsFor(roleName))) {
-    audit(EVENTS.ROLE_UPDATED, actor, { companyId, role: roleName, builtIn: true, reset: true });
+  const current = await requireEditableBuiltIn(id, companyId);
+  const defaults = permissionIdsOf(await defaultsFor(USER));
+  if (await companyRoleRepository.resetCompanyDefault(companyId, defaults, actor.id)) {
+    audit(EVENTS.ROLE_UPDATED, actor, { companyId, roleId: current.id, role: USER, builtIn: true, reset: true });
   }
   return listRoles(actor, companyId);
 }
 
 async function requireRoleInScope(actor: Actor, id: unknown) {
-  const roleId = requireId(id, 'role id');
+  const roleId = requireUuid(id, 'role id');
   const row = await companyRoleRepository.findInCompany(roleId, actor.isPlatform ? null : actor.companyId);
   if (!row) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
   return row;
@@ -202,17 +228,23 @@ async function createRole(actor: Actor, body: Row) {
   const features = await enabledFor(companyId);
   const name = parseName(body.name);
   const description = parseDescription(body.description);
-  const permissions = parsePermissions(actor, features, body.permissions ?? []);
+  const keys = parsePermissions(actor, features, body.permissionIds ?? []);
 
-  let id: number;
+  let id: string;
   try {
-    id = await companyRoleRepository.insert({ companyId, name, description, permissions, createdBy: actor.id });
+    id = await companyRoleRepository.insert({
+      companyId,
+      name,
+      description,
+      permissionIds: permissionIdsOf(keys),
+      createdBy: actor.id,
+    });
   } catch (err: any) {
     if (err.code === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
     throw err;
   }
 
-  audit(EVENTS.ROLE_CREATED, actor, { companyId, roleId: id, role: name, permissionCount: permissions.length });
+  audit(EVENTS.ROLE_CREATED, actor, { companyId, roleId: id, role: name, permissionCount: keys.length });
   return getRole(actor, id);
 }
 
@@ -220,13 +252,13 @@ async function updateRole(actor: Actor, id: unknown, body: Row) {
   const before = await requireRoleInScope(actor, id);
   const features = await enabledFor(before.companyId);
 
-  const changes: { name?: string; description?: string | null; permissions?: string[] } = {};
+  const changes: { name?: string; description?: string | null; permissionIds?: string[] } = {};
   if (body.name !== undefined) changes.name = parseName(body.name);
   if (body.description !== undefined) changes.description = parseDescription(body.description);
-  if (body.permissions !== undefined) {
-    const next = parsePermissions(actor, features, body.permissions);
-    const dormant = (before.permissions as string[]).filter((p) => !isPermissionEnabled(p, features));
-    changes.permissions = [...new Set([...next, ...dormant])].sort();
+  if (body.permissionIds !== undefined) {
+    const next = parsePermissions(actor, features, body.permissionIds);
+    const dormant = keysOf(before).filter((p) => !isPermissionEnabled(p, features));
+    changes.permissionIds = permissionIdsOf([...new Set([...next, ...dormant])].sort());
   }
   if (!Object.keys(changes).length) throw fail('VALIDATION_ERROR', 'Nothing to update');
 
@@ -242,7 +274,7 @@ async function updateRole(actor: Actor, id: unknown, body: Row) {
     roleId: before.id,
     role: changes.name || before.name,
     renamed: changes.name !== undefined && changes.name !== before.name,
-    permissionCount: changes.permissions ? changes.permissions.length : undefined,
+    permissionCount: changes.permissionIds ? changes.permissionIds.length : undefined,
   });
   return getRole(actor, before.id);
 }
@@ -265,10 +297,16 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
   audit(EVENTS.ROLE_DELETED, actor, { companyId: role.companyId, roleId: role.id, role: role.name });
 }
 
-async function resolveAssignableRole(actor: Actor, value: unknown, companyId: number | null): Promise<number | null> {
+async function builtInRoleId(tier: string, companyId: number | null, conn?: Queryable): Promise<string> {
+  if (tier !== USER || !companyId) return SYSTEM_ROLE_ID[tier];
+  const member = await companyRoleRepository.findCompanyDefault(companyId, conn);
+  return member ? member.id : SYSTEM_ROLE_ID[USER];
+}
+
+async function resolveAssignableRole(actor: Actor, value: unknown, companyId: number | null): Promise<string | null> {
   if (value === null || value === undefined || value === '') return null;
   if (!companyId) throw fail('VALIDATION_ERROR', 'A platform account cannot hold a company role.');
-  const roleId = requireId(value, 'customRoleId');
+  const roleId = requireUuid(value, 'customRoleId');
   const row = await companyRoleRepository.findInCompany(roleId, companyId);
   if (!row) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
   if (!actor.isPlatform && Number(actor.companyId) !== Number(companyId)) {
@@ -279,6 +317,9 @@ async function resolveAssignableRole(actor: Actor, value: unknown, companyId: nu
 
 export {
   withImpliedReads,
+  assignable,
+  parsePermissions,
+  permissionOptionsFor,
   permissionOptions,
   listRoles,
   saveBuiltInRole,
@@ -288,4 +329,5 @@ export {
   updateRole,
   deleteRole,
   resolveAssignableRole,
+  builtInRoleId,
 };

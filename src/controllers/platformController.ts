@@ -4,7 +4,7 @@ import * as platformService from '../services/platformService';
 import * as featureService from '../services/featureService';
 
 async function overview(req: Request, res: Response): Promise<void> {
-  ok(res, await platformService.overview());
+  ok(res, await platformService.overview(req.actor));
 }
 
 async function settings(req: Request, res: Response): Promise<void> {

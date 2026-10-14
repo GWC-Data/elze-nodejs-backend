@@ -23,20 +23,22 @@ function expiryDate(seconds: number): Date {
 
 async function issueRefreshToken(
   userId: number,
-  { familyId, replaces }: { familyId?: string; replaces?: string } = {},
+  { familyId, replaces, notAfter }: { familyId?: string; replaces?: string; notAfter?: Date } = {},
   conn?: Queryable
 ): Promise<IssuedRefreshToken> {
   const id = crypto.randomUUID();
   const family = familyId || crypto.randomUUID();
   const raw = randomToken();
+  const fullTerm = expiryDate(REFRESH_TOKEN_TTL_SECONDS);
+  const expiresAt = notAfter && notAfter.getTime() < fullTerm.getTime() ? notAfter : fullTerm;
 
   await tokenRepository.insertRefresh(
-    { id, familyId: family, userId, tokenHash: hashToken(raw), expiresAt: expiryDate(REFRESH_TOKEN_TTL_SECONDS) },
+    { id, familyId: family, userId, tokenHash: hashToken(raw), expiresAt },
     conn
   );
   if (replaces) await tokenRepository.markRotated(replaces, id, conn);
 
-  return { id, familyId: family, token: raw, expiresAt: expiryDate(REFRESH_TOKEN_TTL_SECONDS) };
+  return { id, familyId: family, token: raw, expiresAt };
 }
 
 async function consumeRefreshToken(raw: unknown) {

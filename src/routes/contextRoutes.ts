@@ -49,5 +49,8 @@ router.get('/connections/:id/access/people', read, context.accessPeople);
 router.put('/connections/:id/access/general', read, context.setGeneralAccess);
 router.put('/connections/:id/access/users/:userId', read, context.shareWithUser);
 router.delete('/connections/:id/access/users/:userId', read, context.unshareWithUser);
+router.get('/connections/:id/access/groups', read, context.accessGroups);
+router.put('/connections/:id/access/groups/:groupId', read, context.shareWithGroup);
+router.delete('/connections/:id/access/groups/:groupId', read, context.unshareWithGroup);
 
 export = router;

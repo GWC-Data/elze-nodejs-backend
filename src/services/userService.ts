@@ -4,15 +4,15 @@ import { fail } from '../tools/AppError';
 import { likePattern } from '../tools/listQuery';
 import { publicUser, userListItem } from '../views/serializers/userSerializer';
 import { resolveTargetCompany, assertCanAssignRole, assertCanManageUser } from './authorizationService';
-import { rolePermissionList, assertRoleCompanyPairing } from './roleService';
+import { assertRoleCompanyPairing } from './roleService';
 import { requireActiveCompany } from './companyService';
-import { resolveAssignableRole } from './companyRoleService';
+import { resolveAssignableRole, builtInRoleId } from './companyRoleService';
 import { createAndInvite, prepareInvitation } from './onboardingService';
 import { sendEmail } from './emailService';
 import { revokeAllForUser } from './tokenService';
 import { audit, EVENTS } from './auditService';
 import { ROLE_SCOPE_BY_NAME, USER } from '../constants/permissions';
-import { FEATURE_IDS, effectiveFeatures, maskPermissions } from '../constants/features';
+import { FEATURE_KEYS, effectiveFeatures, featureKeysOf } from '../constants/features';
 import { USER_STATUS, USER_STATUSES } from '../constants/statuses';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
@@ -25,11 +25,10 @@ async function findActor(id: number) {
   if (!row) return null;
   const scopes: Record<string, unknown[]> = {};
   for (const [dimension, value] of row.scopes) (scopes[dimension] = scopes[dimension] || []).push(value);
-  const features = row.company_id ? effectiveFeatures(row.features) : [...FEATURE_IDS];
-  const permissions = rolePermissionList(row.role, row.permissions);
+  const features = row.company_id ? effectiveFeatures(featureKeysOf(row.feature_ids)) : [...FEATURE_KEYS];
   return {
     user: row,
-    permissions: row.company_id ? maskPermissions(permissions, features) : permissions,
+    permissions: [...(row.permissions as string[])],
     features,
     scopes,
   };
@@ -68,7 +67,7 @@ async function listUsers(
   }
   if (role) {
     if (!ROLE_SCOPE_BY_NAME.has(String(role))) throw fail('VALIDATION_ERROR', `Unknown role: "${role}"`);
-    where.push('u.role = ?');
+    where.push('r.tier = ?');
     params.push(String(role));
   }
   if (status) {
@@ -109,6 +108,7 @@ async function createUser(
   const customRoleId = targetRole === USER
     ? await resolveAssignableRole(actor, requestedCustomRole, companyId)
     : null;
+  const roleId = customRoleId ?? (await builtInRoleId(targetRole, companyId));
 
   const user = await createAndInvite(actor, {
     companyId,
@@ -116,7 +116,7 @@ async function createUser(
     email,
     displayName,
     role: targetRole,
-    customRoleId,
+    roleId,
   });
 
   audit(EVENTS.USER_CREATED, actor, {
@@ -124,7 +124,8 @@ async function createUser(
     targetUsername: user.username,
     targetEmail: user.email,
     role: user.role,
-    customRoleId: customRoleId ?? undefined,
+    roleId,
+    roleName: user.role_name,
     companyId,
   });
   return publicUser(user);
@@ -139,32 +140,34 @@ async function updateUser(
 
   const updates: Record<string, unknown> = {};
   let roleChanged = false;
-  let customRoleChanged = false;
+  let finalRole: string = target.role;
 
   if (role !== undefined && role !== target.role) {
-    const newRole = String(role).trim();
-    assertCanAssignRole(actor, newRole);
-    assertRoleCompanyPairing(newRole, target.company_id);
-    updates.role = newRole;
+    finalRole = String(role).trim();
+    assertCanAssignRole(actor, finalRole);
+    assertRoleCompanyPairing(finalRole, target.company_id);
     roleChanged = true;
   }
 
-  const finalRole = (updates.role as string | undefined) ?? target.role;
+  let nextRoleId: string = target.role_id;
   if (finalRole !== USER) {
-    if (target.custom_role_id) updates.custom_role_id = null;
+    if (roleChanged) nextRoleId = await builtInRoleId(finalRole, target.company_id);
   } else if (customRoleId !== undefined) {
-    const next = await resolveAssignableRole(actor, customRoleId, target.company_id);
-    if (next !== (target.custom_role_id ?? null)) {
-      updates.custom_role_id = next;
-      customRoleChanged = true;
-    }
+    const custom = await resolveAssignableRole(actor, customRoleId, target.company_id);
+    nextRoleId = custom ?? (await builtInRoleId(USER, target.company_id));
+  } else if (roleChanged) {
+    nextRoleId = await builtInRoleId(USER, target.company_id);
   }
+  const roleIdChanged = nextRoleId !== target.role_id;
+  const customRoleChanged = roleIdChanged && !roleChanged;
+
   if (displayName !== undefined) {
     updates.display_name = displayName ? String(displayName).trim().slice(0, 120) : null;
   }
 
-  if (!Object.keys(updates).length) throw fail('VALIDATION_ERROR', 'Nothing to update');
+  if (!Object.keys(updates).length && !roleIdChanged) throw fail('VALIDATION_ERROR', 'Nothing to update');
   await userRepository.updateColumns(id, updates);
+  if (roleIdChanged) await userRepository.setRole(id, nextRoleId, actor.id);
 
   if (roleChanged) await revokeAllForUser(id, 'role_changed');
 
@@ -172,9 +175,9 @@ async function updateUser(
     userId: id,
     targetUsername: target.username,
     roleChanged,
-    newRole: roleChanged ? updates.role : undefined,
+    newRole: roleChanged ? finalRole : undefined,
     customRoleChanged: customRoleChanged || undefined,
-    customRoleId: customRoleChanged ? updates.custom_role_id : undefined,
+    roleId: roleIdChanged ? nextRoleId : undefined,
   });
   return currentUser(id);
 }
@@ -243,6 +246,7 @@ export {
   USER_SORTS,
   findActor,
   requireUserInScope,
+  requireManageable,
   listUsers,
   listUserOptions,
   createUser,

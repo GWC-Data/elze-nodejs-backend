@@ -157,6 +157,18 @@ async function unshareWithUser(req: Request, res: Response): Promise<void> {
   ok(res, await sharing.unshareWithUser(req.actor, req.params.id as string, req.params.userId));
 }
 
+async function accessGroups(req: Request, res: Response): Promise<void> {
+  ok(res, await sharing.shareableGroups(req.actor, req.params.id as string));
+}
+
+async function shareWithGroup(req: Request, res: Response): Promise<void> {
+  ok(res, await sharing.shareWithGroup(req.actor, req.params.id as string, req.params.groupId, body(req)));
+}
+
+async function unshareWithGroup(req: Request, res: Response): Promise<void> {
+  ok(res, await sharing.unshareWithGroup(req.actor, req.params.id as string, req.params.groupId));
+}
+
 async function setGeneralAccess(req: Request, res: Response): Promise<void> {
   ok(res, await sharing.setGeneralAccess(req.actor, req.params.id as string, body(req)));
 }
@@ -200,5 +212,8 @@ export {
   accessPeople,
   shareWithUser,
   unshareWithUser,
+  accessGroups,
+  shareWithGroup,
+  unshareWithGroup,
   setGeneralAccess,
 };

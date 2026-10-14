@@ -1,8 +1,10 @@
 import * as contextAccessRepository from '../repositories/contextAccessRepository';
 import { fail } from '../tools/AppError';
 import { requireId } from '../validators/commonValidator';
-import { CONTEXT_ACCESS_LEVELS, GENERAL_ACCESS } from '../constants/context';
+import { GENERAL_ACCESS } from '../constants/context';
 import type { ContextAccessLevel, GeneralAccess } from '../constants/context';
+import { accessLevelsFor, accessLevelId } from '../constants/accessLevels';
+import { requireLevelId } from '../validators/accessValidator';
 import * as connections from './connectionService';
 import { assertMayShare } from './contextAccessService';
 import { audit, EVENTS } from './auditService';
@@ -25,11 +27,11 @@ function onContext(connection: Connection): Record<string, unknown> {
 }
 
 function requireContextLevel(value: unknown): ContextAccessLevel {
-  const level = String(value || '') as ContextAccessLevel;
-  if (!CONTEXT_ACCESS_LEVELS.includes(level)) {
-    throw fail('VALIDATION_ERROR', `Access must be one of: ${CONTEXT_ACCESS_LEVELS.join(', ')}.`);
-  }
-  return level;
+  return requireLevelId(value, 'context') as ContextAccessLevel;
+}
+
+function describeContextLevels() {
+  return accessLevelsFor('context').map(({ id, key, rank, label, description }) => ({ id, key, rank, label, description }));
 }
 
 function requireGeneralAccess(value: unknown): GeneralAccess {
@@ -40,19 +42,39 @@ function requireGeneralAccess(value: unknown): GeneralAccess {
   return general;
 }
 
+function shapeGroup(row: Row) {
+  return {
+    groupId: Number(row.group_id ?? row.id),
+    name: row.name,
+    memberCount: Number(row.member_count ?? 0),
+  };
+}
+
 async function describe(connection: Connection): Promise<Record<string, any>> {
-  const grants = await contextAccessRepository.listGrants(connection.id);
+  const [grants, groupGrants] = await Promise.all([
+    contextAccessRepository.listGrants(connection.id),
+    contextAccessRepository.listGroupGrants(connection.id),
+  ]);
   const { level, owner, isOwner, canShare, generalAccess } = connection.access;
   return {
     owner,
     generalAccess,
+    levels: describeContextLevels(),
     people: grants.map((row: Row) => ({
       ...shapePerson(row),
       level: row.access_level,
+      levelId: row.access_level_id,
       grantedAt: row.granted_at,
       active: row.status === 'active',
     })),
-    you: { level, isOwner, canShare },
+    groups: groupGrants.map((row: Row) => ({
+      ...shapeGroup(row),
+      level: row.access_level,
+      levelId: row.access_level_id,
+      grantedAt: row.granted_at,
+      active: Boolean(row.active),
+    })),
+    you: { level, levelId: level ? accessLevelId('context', level) : null, isOwner, canShare },
   };
 }
 
@@ -74,7 +96,7 @@ async function shareWithUser(actor: Actor, id: unknown, rawUserId: unknown, body
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const userId = requireId(rawUserId, 'user id');
-  const level = requireContextLevel(body.level);
+  const level = requireContextLevel(body.levelId);
 
   if (userId === connection.access.owner?.id) {
     throw fail('VALIDATION_ERROR', 'That person created this context, so they already have full access.');
@@ -88,6 +110,7 @@ async function shareWithUser(actor: Actor, id: unknown, rawUserId: unknown, body
     ...onContext(connection),
     userId,
     level,
+    levelId: accessLevelId('context', level),
     previousLevel: previous,
   });
   return describe(await connections.requireConnectionId(actor, id));
@@ -101,6 +124,47 @@ async function unshareWithUser(actor: Actor, id: unknown, rawUserId: unknown): P
   const previous = await contextAccessRepository.findGrant(connection.id, userId);
   if (await contextAccessRepository.deleteGrant(connection.id, userId)) {
     audit(EVENTS.CONTEXT_ACCESS_REVOKED, actor, { ...onContext(connection), userId, previousLevel: previous });
+  }
+  return describe(await connections.requireConnectionId(actor, id));
+}
+
+async function shareableGroups(actor: Actor, id: unknown): Promise<Record<string, any>[]> {
+  const connection = await connections.requireConnectionId(actor, id);
+  assertMayShare(actor, connection.row);
+  const rows = await contextAccessRepository.shareableGroups(connection.companyId);
+  return rows.map(shapeGroup);
+}
+
+async function shareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown, body: Record<string, any> = {}): Promise<Record<string, any>> {
+  const connection = await connections.requireConnectionId(actor, id);
+  assertMayShare(actor, connection.row);
+  const groupId = requireId(rawGroupId, 'group id');
+  const level = requireContextLevel(body.levelId);
+
+  const group = await contextAccessRepository.findActiveCompanyGroup(connection.companyId, groupId);
+  if (!group) throw fail('RESOURCE_NOT_FOUND', 'Group not found');
+
+  const previous = await contextAccessRepository.findGroupGrant(connection.id, groupId);
+  await contextAccessRepository.upsertGroupGrant(connection.id, groupId, level, actor.id);
+  audit(previous ? EVENTS.CONTEXT_ACCESS_UPDATED : EVENTS.CONTEXT_ACCESS_GRANTED, actor, {
+    ...onContext(connection),
+    groupId,
+    groupName: group.name,
+    level,
+    levelId: accessLevelId('context', level),
+    previousLevel: previous,
+  });
+  return describe(await connections.requireConnectionId(actor, id));
+}
+
+async function unshareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown): Promise<Record<string, any>> {
+  const connection = await connections.requireConnectionId(actor, id);
+  assertMayShare(actor, connection.row);
+  const groupId = requireId(rawGroupId, 'group id');
+
+  const previous = await contextAccessRepository.findGroupGrant(connection.id, groupId);
+  if (await contextAccessRepository.deleteGroupGrant(connection.id, groupId)) {
+    audit(EVENTS.CONTEXT_ACCESS_REVOKED, actor, { ...onContext(connection), groupId, previousLevel: previous });
   }
   return describe(await connections.requireConnectionId(actor, id));
 }
@@ -121,4 +185,13 @@ async function setGeneralAccess(actor: Actor, id: unknown, body: Record<string, 
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-export { contextAccess, shareablePeople, shareWithUser, unshareWithUser, setGeneralAccess };
+export {
+  contextAccess,
+  shareablePeople,
+  shareWithUser,
+  unshareWithUser,
+  shareableGroups,
+  shareWithGroup,
+  unshareWithGroup,
+  setGeneralAccess,
+};

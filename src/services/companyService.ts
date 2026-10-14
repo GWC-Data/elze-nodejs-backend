@@ -12,10 +12,10 @@ import { createAccount, prepareInvitation } from './onboardingService';
 import { sendEmail } from './emailService';
 import { revokeAllForCompany } from './tokenService';
 import { audit, EVENTS } from './auditService';
-import { parseFeatureList, setInitialFeatures } from './featureService';
+import { parseFeatureIds, setInitialFeatures } from './featureService';
 import { seedForCompany } from './builtInRolesService';
-import { TOGGLEABLE_FEATURE_IDS, effectiveFeatures } from '../constants/features';
-import { COMPANY_ADMIN } from '../constants/permissions';
+import { TOGGLEABLE_FEATURE_KEYS, effectiveFeatures, featureIdsOf } from '../constants/features';
+import { COMPANY_ADMIN, SYSTEM_ROLE_ID } from '../constants/permissions';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
@@ -90,7 +90,7 @@ async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug
 
 async function createCompany(
   actor: Actor,
-  { name, slug, admin, features }: { name: unknown; slug?: unknown; admin?: any; features?: unknown }
+  { name, slug, admin, featureIds }: { name: unknown; slug?: unknown; admin?: any; featureIds?: unknown }
 ) {
   if (!admin || typeof admin !== 'object') {
     throw fail(
@@ -101,11 +101,11 @@ async function createCompany(
 
   assertCanAssignRole(actor, COMPANY_ADMIN);
 
-  const featureIds = features === undefined ? [...TOGGLEABLE_FEATURE_IDS] : parseFeatureList(features);
+  const featureKeys = featureIds === undefined ? [...TOGGLEABLE_FEATURE_KEYS] : parseFeatureIds(featureIds);
 
   const { company, user, invitation } = await withTransaction(async (conn: Queryable) => {
     const companyRow = await insertCompany(actor, { name, slug }, conn);
-    await setInitialFeatures(actor, companyRow.id, featureIds, conn);
+    await setInitialFeatures(actor, companyRow.id, featureKeys, conn);
     await seedForCompany(companyRow.id, conn);
     const userRow = await createAccount(
       {
@@ -114,6 +114,7 @@ async function createCompany(
         email: admin.email,
         displayName: admin.displayName,
         role: COMPANY_ADMIN,
+        roleId: SYSTEM_ROLE_ID[COMPANY_ADMIN],
       },
       conn
     );
@@ -136,17 +137,19 @@ async function createCompany(
   audit(EVENTS.COMPANY_CREATED, actor, {
     companyId: company.id,
     name: company.name,
-    features: effectiveFeatures(featureIds),
+    features: effectiveFeatures(featureKeys),
+    featureIds: featureIdsOf(effectiveFeatures(featureKeys)),
   });
   audit(EVENTS.USER_CREATED, actor, {
     userId: user.id,
     targetUsername: user.username,
     targetEmail: user.email,
     role: user.role,
+    roleId: SYSTEM_ROLE_ID[COMPANY_ADMIN],
     companyId: company.id,
   });
 
-  return { ...shapeCompany(company), features: effectiveFeatures(featureIds), admin: publicUser(user) };
+  return { ...shapeCompany(company), features: effectiveFeatures(featureKeys), admin: publicUser(user) };
 }
 
 async function updateCompany(actor: Actor, id: number, { name, active }: { name?: unknown; active?: unknown }) {

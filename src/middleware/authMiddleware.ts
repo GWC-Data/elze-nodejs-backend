@@ -12,6 +12,7 @@ import { denied } from '../services/auditService';
 import { requireCsrf } from './csrfMiddleware';
 import { SAFE_METHODS } from '../constants/session';
 import { USER_STATUS } from '../constants/statuses';
+import { PERMISSION_BY_KEY } from '../constants/permissions';
 
 function requestPath(req: Request): string {
   return req.originalUrl.split('?')[0];
@@ -91,7 +92,13 @@ function requirePermission(permission: string): RequestHandler {
       next();
     } catch (err: any) {
       if (req.actor && (err.code === 'INSUFFICIENT_PERMISSION' || err.code === 'FEATURE_NOT_ENABLED')) {
-        denied(req.actor, { permission, reason: err.code, method: req.method, path: requestPath(req) });
+        denied(req.actor, {
+          permission,
+          permissionId: PERMISSION_BY_KEY.get(permission)?.id,
+          reason: err.code,
+          method: req.method,
+          path: requestPath(req),
+        });
       }
       next(err);
     }

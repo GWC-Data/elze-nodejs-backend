@@ -12,7 +12,7 @@ const CONNECTORS = [
         id: 'name',
         label: 'Connection name',
         type: 'text',
-        placeholder: 'Domo — Sales',
+        placeholder: 'Sales',
         help: 'How this connection appears in your workspace.',
       },
       {

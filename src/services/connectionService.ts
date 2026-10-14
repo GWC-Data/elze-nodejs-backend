@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import * as connectionRepository from '../repositories/connectionRepository';
+import * as contextRepository from '../repositories/contextRepository';
 import { fail } from '../tools/AppError';
 import { seal, open, hint } from '../tools/secretBox';
 import { requireString } from '../validators/commonValidator';
@@ -40,6 +41,15 @@ function assertIdShape(id: unknown): asserts id is string {
 async function listConnections(actor: Actor): Promise<any[]> {
   const rows = await connectionRepository.listForActor(actor, isContextAdmin(actor));
   return rows.map((row: Row) => shapeConnection(row, undefined, accessOf(actor, row)));
+}
+
+async function factTotals(actor: Actor): Promise<{ factsGenerated: number | null; factsPending: number | null }> {
+  try {
+    const rows = await connectionRepository.listForActor(actor, isContextAdmin(actor));
+    return await contextRepository.factTotals(rows.map((row: Row) => String(row.id)));
+  } catch {
+    return { factsGenerated: null, factsPending: null };
+  }
 }
 
 async function listPublishedConnections(actor: Actor): Promise<{ id: any; name: any }[]> {
@@ -225,6 +235,7 @@ async function deleteConnection(actor: Actor, id: unknown): Promise<{ provider: 
 
 export {
   listConnections,
+  factTotals,
   listPublishedConnections,
   listPublishedVersionOptions,
   requireConnection,

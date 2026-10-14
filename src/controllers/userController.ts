@@ -6,6 +6,7 @@ import { publicUser } from '../views/serializers/userSerializer';
 import * as userService from '../services/userService';
 import * as scopeService from '../services/scopeService';
 import * as accessService from '../services/accessService';
+import * as userPermissionService from '../services/userPermissionService';
 
 const userId = (req: Request) => requireId(req.params.id, 'user id');
 
@@ -60,6 +61,14 @@ async function access(req: Request, res: Response): Promise<void> {
   ok(res, await accessService.listUserGrants(user.id));
 }
 
+async function getPermissions(req: Request, res: Response): Promise<void> {
+  ok(res, await userPermissionService.describeUserPermissions(req.actor, userId(req)));
+}
+
+async function replacePermissions(req: Request, res: Response): Promise<void> {
+  ok(res, await userPermissionService.replaceUserPermissions(req.actor, userId(req), (req.body || {}).permissionIds));
+}
+
 async function getScope(req: Request, res: Response): Promise<void> {
   const user = await userService.requireUserInScope(req.actor, userId(req));
   ok(res, await scopeService.describeUserScopes(user));
@@ -71,6 +80,8 @@ async function replaceScope(req: Request, res: Response): Promise<void> {
 }
 
 export {
+  getPermissions,
+  replacePermissions,
   options,
   scopeOptions,
   list,

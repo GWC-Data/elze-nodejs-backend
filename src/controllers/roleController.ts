@@ -11,11 +11,11 @@ async function list(req: Request, res: Response): Promise<void> {
 }
 
 async function rolePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await roleService.describeRolePermissions(req.params.name as string));
+  ok(res, await roleService.describeRolePermissions(req.params.id as string));
 }
 
 async function replacePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.name as string, (req.body || {}).permissions));
+  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, (req.body || {}).permissionIds));
 }
 
 export { permissions, list, rolePermissions, replacePermissions };

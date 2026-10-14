@@ -18,11 +18,11 @@ interface NewAccountFields {
   email: unknown;
   displayName?: unknown;
   role: string;
-  customRoleId?: number | null;
+  roleId: string;
 }
 
 async function createAccount(
-  { companyId, username, email, displayName, role, customRoleId = null }: NewAccountFields,
+  { companyId, username, email, displayName, role, roleId }: NewAccountFields,
   conn?: Queryable
 ) {
   assertRoleCompanyPairing(role, companyId);
@@ -36,8 +36,7 @@ async function createAccount(
         username: String(username).trim(),
         email: String(email).trim().toLowerCase(),
         displayName: displayName ? String(displayName).trim().slice(0, 120) : null,
-        role,
-        customRoleId,
+        roleId,
       },
       conn
     );

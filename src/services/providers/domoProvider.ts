@@ -22,6 +22,9 @@ const datasetDetailPath = (datasetId: string): string =>
 const queryExecutePath = (datasetId: string): string =>
   `/api/query/v1/execute/${encodeURIComponent(datasetId)}`;
 
+const dataVersionsPath = (datasetId: string): string =>
+  `/api/data/v3/datasources/${encodeURIComponent(datasetId)}/dataversions/details`;
+
 const PROFILE_SAMPLE_ROWS = 500;
 
 const SAMPLE_ROWS_SHOWN = 20;
@@ -262,13 +265,30 @@ function profileColumns(names: any[], types: any[], rows: any[]): Record<string,
   });
 }
 
+async function storedSizeBytes(host: string, token: string, datasetId: string): Promise<number | null> {
+  try {
+    const versions = await callDomo(host, token, dataVersionsPath(datasetId));
+    if (!Array.isArray(versions)) return null;
+    const sizes = versions
+      .filter((v: any) => v && String(v.status || '').toLowerCase() === 'success')
+      .map((v: any) => Number(v.sizeBytes))
+      .filter((n: number) => Number.isFinite(n) && n >= 0);
+    return sizes.length ? sizes.reduce((total: number, n: number) => total + n, 0) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getTableProfile({ host, token, datasetId }: { host: string; token: string; datasetId: string }): Promise<Record<string, any>> {
   const detail = await callDomo(host, token, datasetDetailPath(datasetId));
 
-  const sample = await callDomo(host, token, queryExecutePath(datasetId), {
-    method: 'POST',
-    body: { sql: `SELECT * FROM table LIMIT ${PROFILE_SAMPLE_ROWS}` },
-  });
+  const [sample, versionsSize] = await Promise.all([
+    callDomo(host, token, queryExecutePath(datasetId), {
+      method: 'POST',
+      body: { sql: `SELECT * FROM table LIMIT ${PROFILE_SAMPLE_ROWS}` },
+    }),
+    storedSizeBytes(host, token, datasetId),
+  ]);
 
   const names: any[] = Array.isArray(sample && sample.columns) ? sample.columns : [];
   const types = (Array.isArray(sample && sample.metadata) ? sample.metadata : []).map(
@@ -293,7 +313,8 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
     sizeBytes: firstFiniteNumber(
       detail && detail.sizeInBytes,
       detail && detail.dataSourceSize,
-      detail && detail.sizeBytes
+      detail && detail.sizeBytes,
+      versionsSize
     ),
     qualityScore: null,
     lastRefreshedAt: (detail && (detail.lastTouched ?? detail.lastUpdated ?? detail.updatedAt)) || null,
@@ -316,6 +337,7 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
 
 function firstFiniteNumber(...candidates: unknown[]): number | null {
   for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined || candidate === '') continue;
     const value = Number(candidate);
     if (Number.isFinite(value) && value >= 0) return value;
   }

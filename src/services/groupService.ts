@@ -1,5 +1,6 @@
 import config from '../config';
 import * as groupRepository from '../repositories/groupRepository';
+import * as contextAccessRepository from '../repositories/contextAccessRepository';
 import { fail } from '../tools/AppError';
 import { requireString, requireArray } from '../validators/commonValidator';
 import { shapeGroup } from '../views/serializers/groupSerializer';
@@ -149,6 +150,21 @@ async function listMembers(actor: Actor, id: number) {
   return groupRepository.listMembers(group.id);
 }
 
+async function listGroupContexts(actor: Actor, id: number) {
+  const group = await requireGroupInScope(actor, id);
+  const rows = await contextAccessRepository.listContextsForGroup(group.id);
+  return rows.map((row: Record<string, any>) => ({
+    connectionId: row.connection_id,
+    connectionName: row.name,
+    provider: row.provider,
+    name: row.published_name || row.name,
+    publishedVersion: row.published_version === null ? null : Number(row.published_version),
+    level: row.access_level,
+    levelId: row.access_level_id,
+    grantedAt: row.granted_at,
+  }));
+}
+
 export {
   listGroups,
   requireGroupInScope,
@@ -157,4 +173,5 @@ export {
   updateGroup,
   deleteGroup,
   listMembers,
+  listGroupContexts,
 };

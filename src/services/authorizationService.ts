@@ -1,14 +1,14 @@
 import { fail } from '../tools/AppError';
 import {
   ROLE_SCOPES,
-  PERMISSION_IDS,
+  ALL_PERMISSION_KEYS,
   PLATFORM_ONLY_PERMISSIONS,
   ROLE_SCOPE_BY_NAME,
   SUPER_ADMIN,
   LEVEL_RANK,
   USER,
 } from '../constants/permissions';
-import { FEATURE_IDS, FEATURE_OF_PERMISSION } from '../constants/features';
+import { FEATURE_KEYS, FEATURE_OF_PERMISSION } from '../constants/features';
 import type { Actor } from '../types/actor';
 
 type UserRow = Record<string, any>;
@@ -16,7 +16,7 @@ type UserRow = Record<string, any>;
 function buildActor(
   userRow: UserRow | null | undefined,
   permissions: Iterable<string>,
-  features: readonly string[] = FEATURE_IDS
+  features: readonly string[] = FEATURE_KEYS
 ): Actor {
   if (!userRow || !userRow.id) {
     throw new Error('buildActor requires a user row');
@@ -49,8 +49,9 @@ function buildActor(
     status: userRow.status,
     mustChangePassword: Boolean(userRow.must_change_password),
     permissions: Object.freeze([...permissions]),
-    features: Object.freeze(isPlatform ? [...FEATURE_IDS] : [...features]),
-    customRoleId: isPlatform ? null : userRow.custom_role_id ?? null,
+    features: Object.freeze(isPlatform ? [...FEATURE_KEYS] : [...features]),
+    roleId: userRow.role_id ?? null,
+    roleName: userRow.role_name ?? null,
   };
 }
 
@@ -62,8 +63,8 @@ function missingFeature(actor: Actor, permission: string): string | null {
 
 function can(actor: Actor | null | undefined, permission: string): boolean {
   if (!actor) return false;
-  if (!PERMISSION_IDS.includes(permission)) {
-    throw new Error(`Unknown permission "${permission}". Add it to constants/permissions.js.`);
+  if (!ALL_PERMISSION_KEYS.has(permission)) {
+    throw new Error(`Unknown permission "${permission}". Add it to constants/permissions.ts.`);
   }
   if (actor.role === SUPER_ADMIN) return true;
   return actor.permissions.includes(permission);

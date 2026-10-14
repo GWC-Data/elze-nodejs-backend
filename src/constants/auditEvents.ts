@@ -21,6 +21,7 @@ const EVENTS = {
   USER_DEACTIVATED: 'user_deactivated',
   USER_ACTIVATION_RESENT: 'user_activation_resent',
   USER_SCOPE_UPDATED: 'user_scope_updated',
+  USER_PERMISSIONS_UPDATED: 'user_permissions_updated',
 
   ROLE_PERMISSIONS_UPDATED: 'role_permissions_updated',
   ROLE_CREATED: 'role_created',

@@ -8,7 +8,6 @@ import { publicUser } from '../views/serializers/userSerializer';
 import * as tokens from './tokenService';
 import * as throttle from './loginThrottleService';
 import { resolveActivationToken, consumeActivationToken } from './activationService';
-import { getRolePermissions } from './roleService';
 import { findActor } from './userService';
 import { usableFeatures } from '../constants/features';
 import { listAccessibleDashboards } from './accessService';
@@ -34,7 +33,7 @@ function stateOf(user: UserRow) {
 
 async function sessionPayload(user: UserRow) {
   const found = await findActor(user.id);
-  const permissions = found ? found.permissions : await getRolePermissions(user.role);
+  const permissions: string[] = found ? found.permissions : [];
   return {
     expiresIn: ACCESS_TOKEN_TTL_SECONDS,
     user: {
@@ -46,7 +45,11 @@ async function sessionPayload(user: UserRow) {
 }
 
 function sessionTokens(user: UserRow, refresh: IssuedRefreshToken) {
-  return { accessToken: tokens.issueAccessToken(user, refresh.familyId), refreshToken: refresh.token };
+  return {
+    accessToken: tokens.issueAccessToken(user, refresh.familyId),
+    refreshToken: refresh.token,
+    refreshExpiresAt: refresh.expiresAt,
+  };
 }
 
 async function startSession(user: UserRow) {
@@ -118,7 +121,11 @@ async function refresh(presented: unknown) {
     throw err;
   }
 
-  const rotated = await tokens.issueRefreshToken(user.id, { familyId: row.family_id, replaces: row.id });
+  const rotated = await tokens.issueRefreshToken(user.id, {
+    familyId: row.family_id,
+    replaces: row.id,
+    notAfter: new Date(row.expires_at),
+  });
   const payload = await sessionPayload(user);
   return { cookies: sessionTokens(user, rotated), body: { ...payload, state: stateOf(user) } };
 }

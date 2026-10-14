@@ -2,6 +2,7 @@ import * as companyRepository from '../repositories/companyRepository';
 import { fail } from '../tools/AppError';
 import { requireCompany } from './companyService';
 import { countAccessibleDashboards } from './accessService';
+import { factTotals } from './connectionService';
 import type { Actor } from '../types/actor';
 
 function tenantId(actor: Actor): number {
@@ -20,11 +21,12 @@ async function company(actor: Actor) {
 
 async function overview(actor: Actor) {
   const companyId = tenantId(actor);
-  const [numeric, dashboardsGranted] = await Promise.all([
+  const [numeric, dashboardsGranted, facts] = await Promise.all([
     companyRepository.workspaceOverview(companyId),
     countAccessibleDashboards(actor),
+    factTotals(actor),
   ]);
-  return { ...numeric, dashboardsGranted };
+  return { ...numeric, dashboardsGranted, ...facts };
 }
 
 export { company, overview };

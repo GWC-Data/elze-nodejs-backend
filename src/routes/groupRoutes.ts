@@ -12,5 +12,6 @@ router.get('/:id', requirePermission('group.read'), group.get);
 router.put('/:id', requirePermission('group.update'), group.update);
 router.delete('/:id', requirePermission('group.delete'), group.remove);
 router.get('/:id/members', requirePermission('group.read'), group.members);
+router.get('/:id/contexts', requirePermission('group.read'), group.contexts);
 
 export = router;

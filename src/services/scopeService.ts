@@ -77,7 +77,7 @@ async function replaceUserScopes(
   const unique = Object.fromEntries(
     Object.entries(scopes).map(([dimension, values]) => [dimension, [...new Set(values.map((v) => String(v)))]])
   );
-  await scopeRepository.replaceUserScopes(user.id, unique);
+  await scopeRepository.replaceUserScopes(user.id, unique, actor.id);
 
   audit(EVENTS.USER_SCOPE_UPDATED, actor, {
     userId: user.id,
