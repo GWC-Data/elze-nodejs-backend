@@ -1,45 +1,16 @@
 import config from '../config';
-import { ACCESS_SCHEMA, T, TABLES, INDEXES } from '../models/rbacModel';
-import * as access from '../models/accessControlModel';
-import * as context from '../models/contextModel';
-import { quoteQualified } from '../tools/sql';
+import { T } from '../models/rbacModel';
 import type { Queryable } from '../config/pgPool';
 
 const { db } = config.database;
 
-async function runAll(statements: readonly string[], conn: Queryable = db): Promise<void> {
-  for (const ddl of statements) await conn.raw(ddl);
-}
-
-async function createCoreSchema(): Promise<void> {
-  await runAll(TABLES);
-  await runAll(INDEXES);
-}
-
-async function createContextSchema(): Promise<void> {
-  await runAll(context.TABLES);
-  await runAll(context.INDEXES);
-  await db.raw(context.BACKFILL);
-}
-
-async function createAccessControlSchema(conn: Queryable = db): Promise<void> {
-  await runAll(access.SCHEMA, conn);
-  await runAll(access.TABLES, conn);
-  await runAll(access.INDEXES, conn);
-  await runAll(access.TRIGGERS, conn);
-}
-
-async function createAccessControlViews(conn: Queryable = db): Promise<void> {
-  await runAll(access.VIEWS, conn);
-  const { rows } = await conn.query(
-    `SELECT table_name, array_agg(column_name::text ORDER BY ordinal_position) AS columns
-       FROM information_schema.columns WHERE table_schema = ? GROUP BY table_name`,
-    [ACCESS_SCHEMA]
+async function appliedMigrations(): Promise<string[]> {
+  const { rows } = await db.query(`SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`);
+  if (!rows[0].present) return [];
+  const applied = await db.query(
+    `SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
   );
-  const byRelation = new Map<string, string[]>(
-    rows.map((r) => [quoteQualified(ACCESS_SCHEMA, r.table_name), r.columns])
-  );
-  await runAll(access.commentStatements((relation) => byRelation.get(relation) || []), conn);
+  return applied.rows.map((r) => r.migration_name);
 }
 
 async function upsertFeatures(
@@ -247,10 +218,7 @@ async function insertDashboardIfMissing({ id, title, description, spec }: {
 }
 
 export {
-  createCoreSchema,
-  createContextSchema,
-  createAccessControlSchema,
-  createAccessControlViews,
+  appliedMigrations,
   upsertFeatures,
   upsertPermissions,
   upsertAccessLevels,

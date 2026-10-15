@@ -1,4 +1,6 @@
 import './env';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client';
 import { createPool } from './pgPool';
 import type { Queryable } from './pgPool';
 import { required, optional, integer, boolean } from './configError';
@@ -22,8 +24,10 @@ const pool = createPool({
   idleTimeoutMillis: 30000,
 });
 
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool.pool) });
+
 function withTransaction<T>(work: (tx: Queryable) => Promise<T>): Promise<T> {
   return pool.transaction(work);
 }
 
-export { pool as db, withTransaction, DB_NAME };
+export { pool as db, prisma, withTransaction, DB_NAME };

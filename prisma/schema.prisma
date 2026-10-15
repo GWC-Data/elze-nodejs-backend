@@ -1,0 +1,601 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["access_control", "public"]
+}
+
+model Company {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique(map: "uq_companies_name") @db.VarChar(150)
+  slug      String   @unique(map: "uq_companies_slug") @db.VarChar(64)
+  active    Boolean  @default(true)
+  createdBy Int?     @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  users                User[]
+  groups               Group[]
+  dashboards           Dashboard[]
+  dashboardAssignments CompanyDashboard[]
+  features             CompanyFeatures?
+  roles                Role[]
+  connections          Connection[]
+  contextVersions      ContextLayerVersion[]
+  contextProfiles      ContextProfile[]
+  contextPublications  ContextPublication[]
+
+  @@map("companies")
+  @@schema("public")
+}
+
+model User {
+  id                 Int       @id @default(autoincrement())
+  companyId          Int?      @map("company_id")
+  username           String    @unique(map: "uq_users_username") @db.VarChar(50)
+  email              String    @unique(map: "uq_users_email") @db.VarChar(190)
+  displayName        String?   @map("display_name") @db.VarChar(120)
+  passwordHash       String?   @map("password_hash") @db.VarChar(100)
+  status             String    @default("pending") @db.VarChar(16)
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  lastLoginAt        DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  role                        UserRole?             @relation("UserRoleHolder")
+  roleAssignments             UserRole[]            @relation("UserRoleAssigner")
+  extraPermissions            UserPermissions?      @relation("UserPermissionsHolder")
+  extraPermissionUpdates      UserPermissions[]     @relation("UserPermissionsUpdater")
+  dataScopes                  UserDataScope?        @relation("UserDataScopeHolder")
+  dataScopeUpdates            UserDataScope[]       @relation("UserDataScopeUpdater")
+  rolesCreated                Role[]                @relation("RoleCreator")
+  rolesModified               Role[]                @relation("RoleModifier")
+  rolePermissionUpdates       RolePermissions[]
+  companyFeatureUpdates       CompanyFeatures[]
+  dashboardAssignments        CompanyDashboard[]
+  dashboardAccess             DashboardUserAccess[] @relation("DashboardUserAccessHolder")
+  dashboardAccessGranted      DashboardUserAccess[] @relation("DashboardUserAccessGranter")
+  dashboardGroupAccessGranted DashboardGroupAccess[]
+  contextAccess               ContextUserAccess[]   @relation("ContextUserAccessHolder")
+  contextAccessGranted        ContextUserAccess[]   @relation("ContextUserAccessGranter")
+  contextGroupAccessGranted   ContextGroupAccess[]
+  groupMemberships            GroupUser[]
+  groupsCreated               Group[]
+  dashboardsCreated           Dashboard[]
+  connectionsCreated          Connection[]
+  datasetsSelected            Dataset[]
+  contextVersionsCreated      ContextLayerVersion[] @relation("ContextVersionCreator")
+  contextVersionsPublished    ContextLayerVersion[] @relation("ContextVersionPublisher")
+  contextReviews              ContextObjectReview[]
+  contextProfilesCreated      ContextProfile[]
+  contextPublications         ContextPublication[]
+  refreshTokens               RefreshToken[]
+  userTokens                  UserToken[]
+
+  @@index([companyId], map: "idx_users_company")
+  @@map("users")
+  @@schema("public")
+}
+
+model Group {
+  id        Int      @id @default(autoincrement())
+  companyId Int      @map("company_id")
+  name      String   @db.VarChar(100)
+  active    Boolean  @default(true)
+  creatorId Int?     @map("creator_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator User?   @relation(fields: [creatorId], references: [id], onUpdate: NoAction)
+
+  members         GroupUser[]
+  dashboardAccess DashboardGroupAccess[]
+  contextAccess   ContextGroupAccess[]
+
+  @@unique([companyId, name], map: "uq_groups_company_name")
+  @@index([creatorId], map: "idx_groups_creator")
+  @@map("groups")
+  @@schema("public")
+}
+
+model GroupUser {
+  groupId   Int      @map("group_id")
+  userId    Int      @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([groupId, userId])
+  @@index([userId], map: "idx_group_users_user")
+  @@map("group_users")
+  @@schema("public")
+}
+
+model Dashboard {
+  id          String   @id @db.VarChar(64)
+  title       String   @db.VarChar(150)
+  description String?
+  companyId   Int?     @map("company_id")
+  createdBy   Int?     @map("created_by")
+  spec        Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator User?    @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
+
+  companyAssignments CompanyDashboard[]
+  userAccess         DashboardUserAccess[]
+  groupAccess        DashboardGroupAccess[]
+
+  @@index([companyId], map: "idx_dashboards_company")
+  @@index([createdBy], map: "idx_dashboards_creator")
+  @@map("dashboards")
+  @@schema("public")
+}
+
+model RefreshToken {
+  id            String    @id @db.Uuid
+  familyId      String    @map("family_id") @db.Uuid
+  userId        Int       @map("user_id")
+  tokenHash     String    @unique(map: "uq_refresh_tokens_hash") @map("token_hash") @db.Char(64)
+  issuedAt      DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedReason String?   @map("revoked_reason") @db.VarChar(40)
+  replacedBy    String?   @map("replaced_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expiresAt], map: "idx_refresh_tokens_expiry")
+  @@index([familyId], map: "idx_refresh_tokens_family")
+  @@index([userId], map: "idx_refresh_tokens_user")
+  @@map("refresh_tokens")
+  @@schema("public")
+}
+
+model UserToken {
+  id         String    @id @db.Uuid
+  userId     Int       @map("user_id")
+  purpose    String    @db.VarChar(24)
+  tokenHash  String    @unique(map: "uq_user_tokens_hash") @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdBy  Int?      @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId, purpose], map: "idx_user_tokens_user")
+  @@map("user_tokens")
+  @@schema("public")
+}
+
+model LoginAttempt {
+  identifier      String    @id @db.VarChar(190)
+  attempts        Int       @default(0)
+  windowStartedAt DateTime  @default(now()) @map("window_started_at") @db.Timestamptz(6)
+  lockedUntil     DateTime? @map("locked_until") @db.Timestamptz(6)
+
+  @@map("login_attempts")
+  @@schema("public")
+}
+
+model RbacRepair {
+  id        String   @id @db.VarChar(64)
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
+
+  @@map("rbac_repairs")
+  @@schema("public")
+}
+
+model AuditLog {
+  id             BigInt   @id @default(autoincrement())
+  ts             DateTime @default(now()) @db.Timestamptz(6)
+  event          String   @db.VarChar(64)
+  actorId        Int?     @map("actor_id")
+  actor          String?  @db.VarChar(190)
+  actorCompanyId Int?     @map("actor_company_id")
+  companyId      Int?     @map("company_id")
+  targetUserId   Int?     @map("target_user_id")
+  detail         Json     @default("{}")
+
+  @@index([actorId, ts(sort: Desc)], map: "idx_audit_logs_actor")
+  @@index([companyId, ts(sort: Desc)], map: "idx_audit_logs_company")
+  @@index([targetUserId, ts(sort: Desc)], map: "idx_audit_logs_target_user")
+  @@index([ts(sort: Desc)], map: "idx_audit_logs_ts")
+  @@map("audit_logs")
+  @@schema("public")
+}
+
+model Connection {
+  id             String    @id @db.Uuid
+  companyId      Int       @map("company_id")
+  provider       String    @db.VarChar(32)
+  name           String    @db.VarChar(120)
+  host           String    @db.VarChar(190)
+  secret         String
+  secretHint     String    @map("secret_hint") @db.VarChar(24)
+  status         String    @default("connected") @db.VarChar(16)
+  lastError      String?   @map("last_error")
+  lastVerifiedAt DateTime? @map("last_verified_at") @db.Timestamptz(6)
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  generalAccess  String    @default("company") @map("general_access") @db.VarChar(16)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator User?   @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
+
+  datasets     Dataset[]
+  versions     ContextLayerVersion[]
+  reviews      ContextObjectReview[]
+  profile      ContextProfile?
+  publications ContextPublication[]
+  userAccess   ContextUserAccess[]
+  groupAccess  ContextGroupAccess[]
+
+  @@unique([companyId, provider, name], map: "uq_context_connections_name")
+  @@index([companyId], map: "idx_context_connections_company")
+  @@map("connections")
+  @@schema("public")
+}
+
+model Dataset {
+  connectionId String   @map("connection_id") @db.Uuid
+  datasetId    String   @map("dataset_id") @db.VarChar(190)
+  name         String?  @db.VarChar(255)
+  rowCount     BigInt?  @map("row_count")
+  columnCount  Int?     @map("column_count")
+  selectedAt   DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+  selectedBy   Int?     @map("selected_by")
+
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  selector   User?      @relation(fields: [selectedBy], references: [id], onUpdate: NoAction)
+
+  @@id([connectionId, datasetId])
+  @@map("datasets")
+  @@schema("public")
+}
+
+model ContextLayerVersion {
+  id                   String    @id @db.Uuid
+  connectionId         String    @map("connection_id") @db.Uuid
+  companyId            Int       @map("company_id")
+  name                 String    @db.VarChar(120)
+  version              Int
+  status               String    @default("draft") @db.VarChar(16)
+  currentStep          String?   @map("current_step") @db.VarChar(16)
+  datasetIds           Json      @default("[]") @map("dataset_ids")
+  basedOnId            String?   @map("based_on_id") @db.Uuid
+  sessionId            String?   @map("session_id")
+  extractionMode       String?   @map("extraction_mode") @db.VarChar(16)
+  extractionReport     String?   @map("extraction_report")
+  extractedAt          DateTime? @map("extracted_at") @db.Timestamptz(6)
+  objectCount          Int       @default(0) @map("object_count")
+  stats                Json      @default("{}")
+  snapshot             Json      @default("[]")
+  notifyTeam           Boolean   @default(false) @map("notify_team")
+  createdBy            Int?      @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  publishedBy          Int?      @map("published_by")
+  publishedAt          DateTime? @map("published_at") @db.Timestamptz(6)
+  datasets             Json      @default("[]")
+  extractionDatasetIds Json?     @map("extraction_dataset_ids")
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator    User?      @relation("ContextVersionCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
+  publisher  User?      @relation("ContextVersionPublisher", fields: [publishedBy], references: [id], onUpdate: NoAction)
+
+  @@unique([connectionId, name, version], map: "uq_context_layer_version")
+  @@index([companyId], map: "idx_context_layer_versions_company")
+  @@index([connectionId, createdAt(sort: Desc)], map: "idx_context_layer_versions_connection")
+  @@map("context_layer_versions")
+  @@schema("public")
+}
+
+model ContextObjectReview {
+  objectId     String   @id @map("object_id") @db.Uuid
+  connectionId String   @map("connection_id") @db.Uuid
+  status       String   @db.VarChar(16)
+  note         String?
+  reviewedBy   Int?     @map("reviewed_by")
+  reviewedAt   DateTime @default(now()) @map("reviewed_at") @db.Timestamptz(6)
+  edited       Boolean  @default(false)
+
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  reviewer   User?      @relation(fields: [reviewedBy], references: [id], onUpdate: NoAction)
+
+  @@index([connectionId], map: "idx_context_object_reviews_connection")
+  @@map("context_object_reviews")
+  @@schema("public")
+}
+
+model ContextProfile {
+  id           String   @id @db.Uuid
+  connectionId String   @unique(map: "uq_context_profiles_connection") @map("connection_id") @db.Uuid
+  companyId    Int      @map("company_id")
+  name         String   @db.VarChar(120)
+  description  String?
+  createdBy    Int?     @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator    User?      @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
+
+  @@index([companyId], map: "idx_context_profiles_company")
+  @@map("context_profiles")
+  @@schema("public")
+}
+
+model ContextPublication {
+  id           String   @id @db.Uuid
+  connectionId String   @map("connection_id") @db.Uuid
+  companyId    Int      @map("company_id")
+  name         String   @db.VarChar(120)
+  version      Int
+  sessionId    String?  @map("session_id")
+  objectCount  Int      @default(0) @map("object_count")
+  stats        Json     @default("{}")
+  snapshot     Json     @default("[]")
+  notifyTeam   Boolean  @default(false) @map("notify_team")
+  publishedBy  Int?     @map("published_by")
+  publishedAt  DateTime @default(now()) @map("published_at") @db.Timestamptz(6)
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  publisher  User?      @relation(fields: [publishedBy], references: [id], onUpdate: NoAction)
+
+  @@unique([connectionId, name, version], map: "uq_context_publication_version")
+  @@index([companyId], map: "idx_context_publications_company")
+  @@index([connectionId, publishedAt(sort: Desc)], map: "idx_context_publications_connection")
+  @@map("context_publications")
+  @@schema("public")
+}
+
+model Feature {
+  id          String   @id @db.Uuid
+  key         String   @unique(map: "uq_features_key") @db.VarChar(64)
+  label       String   @db.VarChar(120)
+  description String?
+  locked      Boolean  @default(false)
+  covers      String[] @default([])
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  permissions Permission[]
+
+  @@map("features")
+  @@schema("access_control")
+}
+
+model Permission {
+  id                String    @id @db.Uuid
+  key               String    @unique(map: "uq_permissions_key") @db.VarChar(100)
+  label             String    @db.VarChar(120)
+  description       String?
+  featureId         String?   @map("feature_id") @db.Uuid
+  platformOnly      Boolean   @default(false) @map("platform_only")
+  adminOnly         Boolean   @default(false) @map("admin_only")
+  sortOrder         Int       @default(0) @map("sort_order")
+  defaultsAppliedAt DateTime? @map("defaults_applied_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  feature Feature? @relation(fields: [featureId], references: [id], onUpdate: NoAction, map: "fk_permissions_feature_id")
+
+  @@index([featureId], map: "idx_permissions_feature_id")
+  @@map("permissions")
+  @@schema("access_control")
+}
+
+model AccessLevel {
+  id          String  @id @db.Uuid
+  resource    String  @db.VarChar(16)
+  key         String  @db.VarChar(16)
+  rank        Int
+  label       String  @db.VarChar(60)
+  description String?
+
+  dashboardUserAccess  DashboardUserAccess[]
+  dashboardGroupAccess DashboardGroupAccess[]
+  contextUserAccess    ContextUserAccess[]
+  contextGroupAccess   ContextGroupAccess[]
+
+  @@unique([resource, key], map: "uq_access_levels_resource_key")
+  @@map("access_levels")
+  @@schema("access_control")
+}
+
+model Role {
+  id          String    @id @db.Uuid
+  companyId   Int?      @map("company_id")
+  kind        String    @db.VarChar(16)
+  tier        String    @db.VarChar(16)
+  name        String    @db.VarChar(50)
+  description String?   @db.VarChar(255)
+  createdBy   Int?      @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  modifiedBy  Int?      @map("modified_by")
+  modifiedAt  DateTime? @map("modified_at") @db.Timestamptz(6)
+
+  company  Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_roles_company_id")
+  creator  User?    @relation("RoleCreator", fields: [createdBy], references: [id], onUpdate: NoAction, map: "fk_roles_created_by")
+  modifier User?    @relation("RoleModifier", fields: [modifiedBy], references: [id], onUpdate: NoAction, map: "fk_roles_modified_by")
+
+  permissions RolePermissions?
+  holders     UserRole[]
+
+  @@unique([companyId, name], map: "uq_roles_company_name")
+  @@index([companyId], map: "idx_roles_company_id")
+  @@map("roles")
+  @@schema("access_control")
+}
+
+model RolePermissions {
+  roleId        String   @id @map("role_id") @db.Uuid
+  permissionIds String[] @default([]) @map("permission_ids") @db.Uuid
+  updatedBy     Int?     @map("updated_by")
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  role    Role  @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role_id")
+  updater User? @relation(fields: [updatedBy], references: [id], onUpdate: NoAction, map: "fk_role_permissions_updated_by")
+
+  @@index([permissionIds], map: "idx_role_permissions_permission_ids", type: Gin)
+  @@map("role_permissions")
+  @@schema("access_control")
+}
+
+model CompanyFeatures {
+  companyId  Int      @id @map("company_id")
+  featureIds String[] @default([]) @map("feature_ids") @db.Uuid
+  updatedBy  Int?     @map("updated_by")
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_company_features_company_id")
+  updater User?   @relation(fields: [updatedBy], references: [id], onUpdate: NoAction, map: "fk_company_features_updated_by")
+
+  @@index([featureIds], map: "idx_company_features_feature_ids", type: Gin)
+  @@map("company_features")
+  @@schema("access_control")
+}
+
+model UserRole {
+  userId     Int      @id @map("user_id")
+  roleId     String   @map("role_id") @db.Uuid
+  assignedBy Int?     @map("assigned_by")
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  user     User  @relation("UserRoleHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_roles_user_id")
+  role     Role  @relation(fields: [roleId], references: [id], onUpdate: NoAction, map: "fk_user_roles_role_id")
+  assigner User? @relation("UserRoleAssigner", fields: [assignedBy], references: [id], onUpdate: NoAction, map: "fk_user_roles_assigned_by")
+
+  @@index([roleId], map: "idx_user_roles_role_id")
+  @@map("user_roles")
+  @@schema("access_control")
+}
+
+model UserPermissions {
+  userId        Int      @id @map("user_id")
+  permissionIds String[] @default([]) @map("permission_ids") @db.Uuid
+  updatedBy     Int?     @map("updated_by")
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user    User  @relation("UserPermissionsHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_permissions_user_id")
+  updater User? @relation("UserPermissionsUpdater", fields: [updatedBy], references: [id], onUpdate: NoAction, map: "fk_user_permissions_updated_by")
+
+  @@index([permissionIds], map: "idx_user_permissions_permission_ids", type: Gin)
+  @@map("user_permissions")
+  @@schema("access_control")
+}
+
+model UserDataScope {
+  userId    Int      @id @map("user_id")
+  scopes    Json     @default("{}")
+  updatedBy Int?     @map("updated_by")
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user    User  @relation("UserDataScopeHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_data_scopes_user_id")
+  updater User? @relation("UserDataScopeUpdater", fields: [updatedBy], references: [id], onUpdate: NoAction, map: "fk_user_data_scopes_updated_by")
+
+  @@map("user_data_scopes")
+  @@schema("access_control")
+}
+
+model CompanyDashboard {
+  companyId   Int      @map("company_id")
+  dashboardId String   @map("dashboard_id") @db.VarChar(64)
+  assignedBy  Int?     @map("assigned_by")
+  assignedAt  DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_company_dashboards_company_id")
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_company_dashboards_dashboard_id")
+  assigner  User?     @relation(fields: [assignedBy], references: [id], onUpdate: NoAction, map: "fk_company_dashboards_assigned_by")
+
+  @@id([companyId, dashboardId])
+  @@index([dashboardId], map: "idx_company_dashboards_dashboard_id")
+  @@map("company_dashboards")
+  @@schema("access_control")
+}
+
+model DashboardUserAccess {
+  userId        Int      @map("user_id")
+  dashboardId   String   @map("dashboard_id") @db.VarChar(64)
+  accessLevelId String   @map("access_level_id") @db.Uuid
+  grantedBy     Int?     @map("granted_by")
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  user        User        @relation("DashboardUserAccessHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_user_access_user_id")
+  dashboard   Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_user_access_dashboard_id")
+  accessLevel AccessLevel @relation(fields: [accessLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_dashboard_user_access_access_level_id")
+  granter     User?       @relation("DashboardUserAccessGranter", fields: [grantedBy], references: [id], onUpdate: NoAction, map: "fk_dashboard_user_access_granted_by")
+
+  @@id([userId, dashboardId])
+  @@index([dashboardId], map: "idx_dashboard_user_access_dashboard_id")
+  @@map("dashboard_user_access")
+  @@schema("access_control")
+}
+
+model DashboardGroupAccess {
+  groupId       Int      @map("group_id")
+  dashboardId   String   @map("dashboard_id") @db.VarChar(64)
+  accessLevelId String   @map("access_level_id") @db.Uuid
+  grantedBy     Int?     @map("granted_by")
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_group_access_group_id")
+  dashboard   Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_group_access_dashboard_id")
+  accessLevel AccessLevel @relation(fields: [accessLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_dashboard_group_access_access_level_id")
+  granter     User?       @relation(fields: [grantedBy], references: [id], onUpdate: NoAction, map: "fk_dashboard_group_access_granted_by")
+
+  @@id([groupId, dashboardId])
+  @@index([dashboardId], map: "idx_dashboard_group_access_dashboard_id")
+  @@map("dashboard_group_access")
+  @@schema("access_control")
+}
+
+model ContextUserAccess {
+  connectionId  String   @map("connection_id") @db.Uuid
+  userId        Int      @map("user_id")
+  accessLevelId String   @map("access_level_id") @db.Uuid
+  grantedBy     Int?     @map("granted_by")
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  connection  Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_user_access_connection_id")
+  user        User        @relation("ContextUserAccessHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_user_access_user_id")
+  accessLevel AccessLevel @relation(fields: [accessLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_context_user_access_access_level_id")
+  granter     User?       @relation("ContextUserAccessGranter", fields: [grantedBy], references: [id], onUpdate: NoAction, map: "fk_context_user_access_granted_by")
+
+  @@id([connectionId, userId])
+  @@index([userId], map: "idx_context_user_access_user_id")
+  @@map("context_user_access")
+  @@schema("access_control")
+}
+
+model ContextGroupAccess {
+  connectionId  String   @map("connection_id") @db.Uuid
+  groupId       Int      @map("group_id")
+  accessLevelId String   @map("access_level_id") @db.Uuid
+  grantedBy     Int?     @map("granted_by")
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  connection  Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_group_access_connection_id")
+  group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_group_access_group_id")
+  accessLevel AccessLevel @relation(fields: [accessLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_context_group_access_access_level_id")
+  granter     User?       @relation(fields: [grantedBy], references: [id], onUpdate: NoAction, map: "fk_context_group_access_granted_by")
+
+  @@id([connectionId, groupId])
+  @@index([groupId], map: "idx_context_group_access_group_id")
+  @@map("context_group_access")
+  @@schema("access_control")
+}

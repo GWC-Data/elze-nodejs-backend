@@ -24,7 +24,7 @@ backend/
 │   │   ├── env.ts                   loads .env once, resolves directory roots
 │   │   ├── configError.ts           required/optional readers that fail loudly
 │   │   ├── pgPool.ts                the driver, `?` placeholders, type coercions
-│   │   ├── database.ts              the one PostgreSQL pool, withTransaction
+│   │   ├── database.ts              the one PostgreSQL pool, the Prisma client on it, withTransaction
 │   │   ├── appConfig.ts             fixed in source: TTLs, throttling, bootstrap owner
 │   │   ├── auth.ts                  tokens, cookies, password policy
 │   │   ├── email.ts                 the SMTP relay, read from the environment
@@ -48,7 +48,8 @@ backend/
 │   │   ├── email, bootstrap
 │   │   └── providers/               smtpProvider.ts, domoProvider.ts
 │   ├── repositories/                every SQL statement and file read/write (baseRepository.ts: paging, scoping)
-│   ├── models/                      rbacModel.ts, contextModel.ts (DDL + table names), cardModel.ts
+│   ├── models/                      rbacModel.ts, contextModel.ts (table names), cardModel.ts
+│   ├── generated/prisma/            Prisma client, written by `prisma generate` (gitignored)
 │   ├── views/
 │   │   ├── templates/               accountActivationTemplate.ts
 │   │   └── serializers/             row -> response shaping, per resource
@@ -59,11 +60,13 @@ backend/
 │   └── types/                       Actor, and the req.actor/req.account typing for Express
 │
 ├── tsconfig.json                    strict, CommonJS output into dist/ (gitignored)
+├── prisma.config.ts                 Prisma CLI settings; builds the database URL from DB_*
+├── prisma/schema.prisma             the application tables, as Prisma models
+├── prisma/migrations/               every schema change, applied by `npm run db:migrate`
 ├── docs/context-layer.md            read before touching warehouse connections
 │
 ├── scripts/setupIndexes.ts          creates indexes for slicer/groupBy columns
 ├── scripts/resetAccess.ts           emails an account a fresh activation link
-├── scripts/migrateDatabase.ts       copies data from a previous database
 │
 ├── tests/rbac.e2e.ts                the RBAC / tenancy / token / onboarding suite
 ├── tests/smtpSink.ts                an in-process SMTP relay the suite reads mail from
@@ -413,7 +416,8 @@ in this application that is true, and it calls Domo endpoints that are not part
 of Domo's versioned public API.
 
 ```bash
-DB_NAME=app_e2e npm run test:context   # 59 checks, against a stand-in Domo
+DB_NAME=app_e2e npm run db:migrate
+DB_NAME=app_e2e npm run test:context   # against a stand-in Domo
 ```
 
 ### Row-level data scopes
@@ -434,10 +438,15 @@ cp src/config/rbac/scope-dimensions.example.json src/config/rbac/scope-dimension
 
 ### First start
 
-`bootstrapAppMeta()` runs on every start and is idempotent: it creates the tables, the
-indexes, the three roles and — only when the users table is empty — the platform owner
-declared in `src/config/appConfig.ts`, flagged to change its password at first sign-in.
-There is no database to create: the tables go into `DB_NAME`, beside the reporting data.
+The tables come from the migrations, not from the server: run `npm run db:migrate` against
+a new database before its first start, and again after pulling a change that adds a
+migration. The server checks at startup and refuses to start while a migration is missing,
+naming it.
+
+`bootstrapAppMeta()` then runs on every start and is idempotent: it seeds the three roles and
+— only when the users table is empty — the platform owner declared in
+`src/config/appConfig.ts`, flagged to change its password at first sign-in. There is no
+database to create: the tables go into `DB_NAME`, beside the reporting data.
 
 Bootstrap failure **is fatal**. Every endpoint now resolves an actor and checks a grant, so
 a process that cannot reach the database cannot authorize anything; staying up would mean
@@ -470,6 +479,43 @@ currently hold, so that one time a previously revoked permission is treated as
 new and comes back. Nothing recorded the difference before the log existed;
 every start after it is exact.
 
+### Database schema and migrations
+
+`prisma/schema.prisma` describes every table this backend owns, in the `public` and
+`access_control` schemas. Model and field names follow Prisma's conventions (`User`,
+`companyId`); `@@map`/`@map` keep the real table and column names, so nothing in the
+database was renamed.
+
+`prisma/migrations/` holds the history:
+
+| Migration | Contents |
+|---|---|
+| `0_init` | the tables, keys, indexes and foreign keys as they stood when Prisma was introduced |
+| `1_database_objects` | what `schema.prisma` cannot express: CHECK constraints, the partial unique indexes, the PL/pgSQL triggers, the five `access_control` views and the table comments. Written to be re-runnable |
+
+The database is shared. The agent backend (`Elze-backend`) owns `context_objects`,
+`context_versions`, `context_dataset_blueprint`, `pii_classifications`, `access_policies`,
+`context_access_log`, `adk_agent_artifacts` and Google ADK's session tables, and the reporting
+tables live beside them. None of these are in `schema.prisma`, and that is deliberate. It is
+also why two Prisma commands must never be pointed at a shared database:
+
+- `prisma migrate dev` sees those tables as drift and offers to reset the database;
+- `prisma db push` offers to drop them.
+
+Either would wipe the agents' sessions and context facts. Apply changes with
+`npm run db:migrate` (`prisma migrate deploy`), which only runs the files in
+`prisma/migrations/`.
+
+To make a schema change, edit `schema.prisma`, then write the migration without touching a
+database by diffing the previous schema against the new one:
+
+```bash
+git show HEAD:prisma/schema.prisma > /tmp/before.prisma
+npx prisma migrate diff --from-schema /tmp/before.prisma --to-schema prisma/schema.prisma   --script -o prisma/migrations/2_describe_the_change/migration.sql
+```
+
+Read the SQL before applying it, then run `npm run db:migrate` and `npm run db:generate`.
+
 ### What is configured where
 
 | | Where | Why |
@@ -498,7 +544,7 @@ The engine targets PostgreSQL only. The differences that shaped the code:
 
 ## Audit trail
 
-Every audited action is a row in `audit_logs` (created at startup with the other tables),
+Every audited action is a row in `audit_logs` (created by the migrations with the other tables),
 written by `services/auditService.ts` in the background so a failed write can never fail the
 action. It is also printed to stdout. There are no foreign keys, so an entry outlives the user
 or company it names.
@@ -516,50 +562,29 @@ The response's `scope` field (`all`, `company`, `self`) says which one applied.
 ## Scripts
 
 The code is TypeScript (`tsconfig.json`, strict, CommonJS output). `npm start` and the
-three scripts run the compiled output in `dist/`, so run `npm run build` first; `npm run dev`
-and the two test suites run the `.ts` sources directly through `tsx`.
+two scripts run the compiled output in `dist/`, so run `npm run build` first; `npm run dev`
+and the test suites run the `.ts` sources directly through `tsx`. `build`, `typecheck` and
+`dev` run `prisma generate` first, because the Prisma client is generated into
+`src/generated/` rather than committed.
 
 ```bash
-npm run build             # compile src/, scripts/ and tests/ into dist/
-npm run typecheck         # tsc --noEmit
+npm run build             # generate the Prisma client, compile src/, scripts/ and tests/ into dist/
+npm run typecheck         # generate the Prisma client, tsc --noEmit
 npm run dev               # tsx src/server.ts under nodemon
 npm start                 # serve the API and the built frontend (from dist/)
 npm run setup:indexes     # create indexes from dashboard metadata (--dry-run supported)
 npm run reset:access      # email an account a new activation link, without a token
-npm run migrate:db        # copy this database into the one .env points at
+npm run db:migrate        # apply pending migrations to the database .env points at
+npm run db:status         # list applied and pending migrations
+npm run db:generate       # regenerate the Prisma client after editing schema.prisma
 npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts)
 npm run test:context      # the context layer (see tests/contextLayer.test.ts)
 ```
 
 ### Moving the database
 
-`migrate:db` copies everything — accounts, grants, dashboards, connections and the
-reporting tables — into whatever `.env` currently points at. The destination's schema is
-created by `bootstrapAppMeta()`, the same code that runs at every start, so the script
-cannot drift from the real definition.
-
-```bash
-# 1. point .env at the new database (DB_HOST/DB_NAME/DB_USER/DB_PASSWORD, DB_SSL)
-# 2. rehearse
-SOURCE_DB_URL=postgresql://postgres:root@localhost:5432/elze npm run migrate:db -- --dry-run
-# 3. run it
-SOURCE_DB_URL=postgresql://postgres:root@localhost:5432/elze npm run migrate:db
-```
-
-Three things worth knowing:
-
-- **The source always wins.** Every insert upserts. `bootstrapAppMeta()` seeds the three
-  roles and — on an empty users table — the platform owner, and those rows collide with the
-  real ones. With `DO NOTHING` the seeded row would win and the owner would silently end up
-  with the bootstrap password from `config/appConfig.ts`, discovered at the next sign-in.
-- **Re-running is safe**, and resumes: a run that failed halfway is fixed by running it again.
-- **`--skip-reporting`** copies only the application tables. The reporting tables are the
-  slow half (`cinema_analysis` is 200k rows) and are discovered rather than listed — whatever
-  is in the source and is not one of ours.
-
-Identity sequences are advanced past the copied ids at the end. Without that, the first
-account created after a migration reuses id 1 and fails on the primary key, days later,
-with nothing pointing back at the migration.
+Copy the data with `pg_dump`/`pg_restore`, which carries `_prisma_migrations` along with it,
+then check the destination with `npm run db:status`: it should report nothing pending.
 
 ### Connecting to a database elsewhere
 
@@ -571,12 +596,13 @@ encryption-without-authentication, which is why it is a second, explicit setting
 than something `DB_SSL=true` quietly implies.
 
 The suite brings its own SMTP relay and its own reporting table, so it needs a throwaway
-database and the server pointed at that relay. `DB_NAME` goes on **both** processes — the
+database and the server pointed at that relay. `DB_NAME` goes on **every** process — the
 fixture connects through the application's own pool, which otherwise reads `.env` and
 builds its table in the real database:
 
 ```bash
 # terminal 1
+DB_NAME=app_e2e npm run db:migrate
 DB_NAME=app_e2e PORT=8099 \
 SMTP_HOST=127.0.0.1 SMTP_PORT=2525 SMTP_USERNAME= SMTP_PASSWORD= \
 EMAIL_FROM=e2e@example.com npm start
@@ -585,7 +611,8 @@ EMAIL_FROM=e2e@example.com npm start
 DB_NAME=app_e2e npm run test:e2e
 ```
 
-Drop `app_e2e` between runs: the suite expects to start from an empty installation.
+Drop and recreate `app_e2e` between runs, then migrate it again: the suite expects to start
+from an empty installation.
 
 `reset:access` exists because the API needs an administrator who can sign in, and the case
 it is for is that nobody can — if the only SUPER_ADMIN loses their password, bootstrap will

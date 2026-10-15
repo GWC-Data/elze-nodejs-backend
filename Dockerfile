@@ -22,6 +22,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/backend/dist ./dist
+COPY prisma ./prisma
+COPY prisma.config.ts ./
 COPY src/config/dashboards ./src/config/dashboards
 COPY src/config/rbac ./src/config/rbac
 
@@ -29,4 +31,4 @@ USER node
 
 EXPOSE 8080
 
-CMD ["node", "dist/src/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/server.js"]

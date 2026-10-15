@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import config from '../config';
 import * as bootstrapRepository from '../repositories/bootstrapRepository';
@@ -6,7 +7,6 @@ import * as companyRoleRepository from '../repositories/companyRoleRepository';
 import { seedExistingCompanies } from './featureService';
 import { backfillAndSync } from './builtInRolesService';
 import { seedCatalogue } from './accessCatalogueService';
-import { migrateLegacyAccessControl } from './accessMigrationService';
 import { FEATURES, FEATURE_OF_PERMISSION } from '../constants/features';
 import { ACCESS_LEVEL_CATALOGUE } from '../constants/accessLevels';
 import { hashPassword } from '../tools/password';
@@ -26,7 +26,7 @@ import {
 } from '../constants/permissions';
 
 const { bootstrapSuperAdmin } = config.auth;
-const { DASHBOARD_CONFIG_DIR } = config.env;
+const { DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR } = config.env;
 
 const HOUSEKEEPING_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -175,18 +175,31 @@ async function seedDefaultDashboards(): Promise<void> {
   }
 }
 
+function migrationNames(): string[] {
+  return fs.readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+async function assertMigrated(): Promise<void> {
+  const applied = new Set(await bootstrapRepository.appliedMigrations());
+  const pending = migrationNames().filter((name) => !applied.has(name));
+  if (pending.length) {
+    throw new Error(
+      `the database is missing migration(s) ${pending.join(', ')}. Run "npm run db:migrate" before starting the server.`
+    );
+  }
+}
+
 async function bootstrapAppMeta(): Promise<boolean> {
   try {
-    await bootstrapRepository.createCoreSchema();
-    await bootstrapRepository.createContextSchema();
-    await migrateLegacyAccessControl();
-    await bootstrapRepository.createAccessControlSchema();
+    await assertMigrated();
     await seedRoles();
     await seedExistingCompanies();
     await seedCompanyRoles();
     await seedSuperAdmin();
     await seedDefaultDashboards();
-    await bootstrapRepository.createAccessControlViews();
 
     const roleless = await bootstrapRepository.countUsersWithoutRole();
     if (roleless) console.warn(`[rbac] ${roleless} account(s) have no role in access_control.user_roles and cannot sign in`);

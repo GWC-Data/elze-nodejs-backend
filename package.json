@@ -4,13 +4,16 @@
   "description": "Metadata-driven BI dashboard query engine (Express + PostgreSQL + Redis)",
   "main": "dist/src/server.js",
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "prisma generate && tsc",
+    "typecheck": "prisma generate && tsc --noEmit",
     "start": "node dist/src/server.js",
+    "predev": "prisma generate",
     "dev": "nodemon",
     "setup:indexes": "node dist/scripts/setupIndexes.js",
     "reset:access": "node dist/scripts/resetAccess.js",
-    "migrate:db": "node dist/scripts/migrateDatabase.js",
+    "db:migrate": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
+    "db:generate": "prisma generate",
     "test:e2e": "tsx tests/rbac.e2e.ts",
     "test:context": "tsx tests/contextLayer.test.ts"
   },
@@ -19,6 +22,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
@@ -27,7 +32,8 @@
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^10.0.10",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "prisma": "7.10.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
