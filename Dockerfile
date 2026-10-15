@@ -25,7 +25,6 @@ COPY --from=build /app/backend/dist ./dist
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 COPY src/config/dashboards ./src/config/dashboards
-COPY src/config/rbac ./src/config/rbac
 
 USER node
 

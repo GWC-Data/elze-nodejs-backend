@@ -3,45 +3,15 @@ import { fail } from '../tools/AppError';
 import { scopeProblem } from '../validators/scopeValidator';
 import { audit, EVENTS } from './auditService';
 import type { Actor } from '../types/actor';
+import type { ScopeDimension } from '../repositories/scopeRepository';
 
-type ScopeDimension = Record<string, any>;
 type UserScopes = Record<string, string[]>;
-
-const DIMENSION_RE = /^[a-z0-9_]{1,64}$/;
 
 const ENFORCED = false;
 
-function loadDimensions(): ScopeDimension[] {
-  let parsed;
-  try {
-    parsed = scopeRepository.readDimensionsFile();
-  } catch (err: any) {
-    console.warn(`[rbac] ignoring ${scopeRepository.configFileName()}: ${err.message}`);
-    return [];
-  }
-  if (parsed === null) return [];
-
-  const list: ScopeDimension[] = Array.isArray(parsed && parsed.dimensions) ? parsed.dimensions : [];
-  return list.filter((d) => {
-    if (!d || !DIMENSION_RE.test(String(d.dimension || ''))) {
-      console.warn(`[rbac] skipping scope dimension with an invalid key: ${JSON.stringify(d)}`);
-      return false;
-    }
-    if (!d.table || !d.column) {
-      console.warn(`[rbac] scope dimension "${d.dimension}" needs both "table" and "column"`);
-      return false;
-    }
-    return true;
-  });
-}
-
-function findDimension(key: string): ScopeDimension | null {
-  return loadDimensions().find((d) => d.dimension === key) || null;
-}
-
 async function scopeOptions() {
   const out: Array<{ dimension: string; label: string; values: unknown[]; error?: string }> = [];
-  for (const dimension of loadDimensions()) {
+  for (const dimension of await scopeRepository.listDimensions()) {
     const label = dimension.label || dimension.dimension;
     try {
       out.push({ dimension: dimension.dimension, label, values: await scopeRepository.distinctValues(dimension) });
@@ -71,7 +41,8 @@ async function replaceUserScopes(
   user: { id: number; username: string },
   scopes: Record<string, unknown[]>
 ) {
-  const problem = scopeProblem(scopes, findDimension);
+  const dimensions = new Map<string, ScopeDimension>((await scopeRepository.listDimensions()).map((d) => [d.dimension, d]));
+  const problem = scopeProblem(scopes, (key) => dimensions.get(key) || null);
   if (problem) throw fail('VALIDATION_ERROR', problem);
 
   const unique = Object.fromEntries(

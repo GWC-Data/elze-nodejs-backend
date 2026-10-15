@@ -30,8 +30,7 @@ backend/
 │   │   ├── email.ts                 the SMTP relay, read from the environment
 │   │   ├── engine.ts                DB_SCHEMA, Redis cache, dashboard directory
 │   │   ├── context.ts               CREDENTIAL_SECRET, CONTEXT_MCP_* settings
-│   │   ├── dashboards/default.json  runtime dashboard metadata (not source)
-│   │   └── rbac/scope-dimensions.json  columns a data scope may be assigned on
+│   │   └── dashboards/default.json  runtime dashboard metadata (not source)
 │   │
 │   ├── routes/                      definitions only; index.ts mounts every router under /api
 │   ├── middleware/                  auth, csrf, requestTimer, error (404 + terminal handler)
@@ -423,18 +422,19 @@ DB_NAME=app_e2e npm run test:context   # against a stand-in Domo
 
 ### Row-level data scopes
 
-`user_data_scope` records which slices of the data a user may see. It is **stored and
+`access_control.user_data_scopes` records which slices of the data a user may see. It is **stored and
 configurable, but nothing filters on it yet** — every endpoint that touches scopes reports
 `enforced: false`. Turning it on means doing *both* halves: injecting the predicates during
 planning, **and** folding the acting user's scope into the cache key in
 `tools/queryCache.ts`. Doing only the first would serve one user's rows to another out of
 the cache.
 
-Which columns a scope may be assigned on is runtime configuration, so it sits beside the
-dashboard JSON:
+Which columns a scope may be assigned on is a row in `access_control.scope_dimensions`, read
+per request, so a new dimension needs no restart:
 
-```bash
-cp src/config/rbac/scope-dimensions.example.json src/config/rbac/scope-dimensions.json
+```sql
+INSERT INTO access_control.scope_dimensions (dimension, label, source_table, source_column)
+VALUES ('theater', 'Theater', 'cinema_analysis', 'Theater Name');
 ```
 
 ### First start

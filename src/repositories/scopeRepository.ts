@@ -1,31 +1,29 @@
-import fs from 'fs';
-import path from 'path';
 import config from '../config';
 import { T } from '../models/rbacModel';
 import { quoteIdentifier } from '../tools/sql';
 import type { Queryable } from '../config/pgPool';
 
-const { db, withTransaction } = config.database;
-const { RBAC_CONFIG_DIR } = config.env;
+const { db, prisma, withTransaction } = config.database;
 
-type ScopeDimension = Record<string, any>;
-
-const CONFIG_FILE = path.join(RBAC_CONFIG_DIR, 'scope-dimensions.json');
+interface ScopeDimension {
+  dimension: string;
+  label: string | null;
+  database: string | null;
+  table: string;
+  column: string;
+}
 
 const MAX_DISTINCT_VALUES = 500;
 
-function readDimensionsFile(): any {
-  let raw;
-  try {
-    raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-  } catch {
-    return null;
-  }
-  return JSON.parse(raw.replace(/^﻿/, ''));
-}
-
-function configFileName(): string {
-  return path.basename(CONFIG_FILE);
+async function listDimensions(): Promise<ScopeDimension[]> {
+  const rows = await prisma.scopeDimension.findMany({ orderBy: [{ sortOrder: 'asc' }, { dimension: 'asc' }] });
+  return rows.map((r) => ({
+    dimension: r.dimension,
+    label: r.label,
+    database: r.sourceSchema,
+    table: r.sourceTable,
+    column: r.sourceColumn,
+  }));
 }
 
 async function distinctValues(dimension: ScopeDimension): Promise<string[]> {
@@ -79,5 +77,5 @@ async function replaceUserScopes(userId: number, scopes: Record<string, readonly
   });
 }
 
-export { readDimensionsFile, configFileName, distinctValues, userScopeRows, replaceUserScopes };
+export { listDimensions, distinctValues, userScopeRows, replaceUserScopes };
 export type { ScopeDimension };

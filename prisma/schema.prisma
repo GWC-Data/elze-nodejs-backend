@@ -536,6 +536,20 @@ model UserDataScope {
   @@schema("access_control")
 }
 
+model ScopeDimension {
+  dimension    String   @id @db.VarChar(64)
+  label        String?  @db.VarChar(120)
+  sourceSchema String?  @map("source_schema") @db.VarChar(63)
+  sourceTable  String   @map("source_table") @db.VarChar(63)
+  sourceColumn String   @map("source_column") @db.VarChar(63)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("scope_dimensions")
+  @@schema("access_control")
+}
+
 model CompanyDashboard {
   companyId   Int      @map("company_id")
   dashboardId String   @map("dashboard_id") @db.VarChar(64)

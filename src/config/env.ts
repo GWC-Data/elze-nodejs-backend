@@ -20,7 +20,6 @@ dotenv.config({ path: path.join(BACKEND_ROOT, '.env') });
 
 const DIST_DIR = path.join(PROJECT_ROOT, 'frontend', 'dist');
 const DASHBOARD_CONFIG_DIR = path.join(CONFIG_DIR, 'dashboards');
-const RBAC_CONFIG_DIR = path.join(CONFIG_DIR, 'rbac');
 const MIGRATIONS_DIR = path.join(BACKEND_ROOT, 'prisma', 'migrations');
 
-export { DIST_DIR, DASHBOARD_CONFIG_DIR, RBAC_CONFIG_DIR, MIGRATIONS_DIR };
+export { DIST_DIR, DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR };
