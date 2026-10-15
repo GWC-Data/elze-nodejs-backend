@@ -46,30 +46,30 @@ model User {
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  role                        UserRole?             @relation("UserRoleHolder")
-  roleAssignments             UserRole[]            @relation("UserRoleAssigner")
-  extraPermissions            UserPermissions?      @relation("UserPermissionsHolder")
-  extraPermissionUpdates      UserPermissions[]     @relation("UserPermissionsUpdater")
-  dataScopes                  UserDataScope?        @relation("UserDataScopeHolder")
-  dataScopeUpdates            UserDataScope[]       @relation("UserDataScopeUpdater")
-  rolesCreated                Role[]                @relation("RoleCreator")
-  rolesModified               Role[]                @relation("RoleModifier")
+  role                        UserRole?              @relation("UserRoleHolder")
+  roleAssignments             UserRole[]             @relation("UserRoleAssigner")
+  extraPermissions            UserPermissions?       @relation("UserPermissionsHolder")
+  extraPermissionUpdates      UserPermissions[]      @relation("UserPermissionsUpdater")
+  dataScopes                  UserDataScope?         @relation("UserDataScopeHolder")
+  dataScopeUpdates            UserDataScope[]        @relation("UserDataScopeUpdater")
+  rolesCreated                Role[]                 @relation("RoleCreator")
+  rolesModified               Role[]                 @relation("RoleModifier")
   rolePermissionUpdates       RolePermissions[]
   companyFeatureUpdates       CompanyFeatures[]
   dashboardAssignments        CompanyDashboard[]
-  dashboardAccess             DashboardUserAccess[] @relation("DashboardUserAccessHolder")
-  dashboardAccessGranted      DashboardUserAccess[] @relation("DashboardUserAccessGranter")
+  dashboardAccess             DashboardUserAccess[]  @relation("DashboardUserAccessHolder")
+  dashboardAccessGranted      DashboardUserAccess[]  @relation("DashboardUserAccessGranter")
   dashboardGroupAccessGranted DashboardGroupAccess[]
-  contextAccess               ContextUserAccess[]   @relation("ContextUserAccessHolder")
-  contextAccessGranted        ContextUserAccess[]   @relation("ContextUserAccessGranter")
+  contextAccess               ContextUserAccess[]    @relation("ContextUserAccessHolder")
+  contextAccessGranted        ContextUserAccess[]    @relation("ContextUserAccessGranter")
   contextGroupAccessGranted   ContextGroupAccess[]
   groupMemberships            GroupUser[]
   groupsCreated               Group[]
   dashboardsCreated           Dashboard[]
   connectionsCreated          Connection[]
   datasetsSelected            Dataset[]
-  contextVersionsCreated      ContextLayerVersion[] @relation("ContextVersionCreator")
-  contextVersionsPublished    ContextLayerVersion[] @relation("ContextVersionPublisher")
+  contextVersionsCreated      ContextLayerVersion[]  @relation("ContextVersionCreator")
+  contextVersionsPublished    ContextLayerVersion[]  @relation("ContextVersionPublisher")
   contextReviews              ContextObjectReview[]
   contextProfilesCreated      ContextProfile[]
   contextPublications         ContextPublication[]
@@ -186,14 +186,6 @@ model LoginAttempt {
   @@schema("public")
 }
 
-model RbacRepair {
-  id        String   @id @db.VarChar(64)
-  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
-
-  @@map("rbac_repairs")
-  @@schema("public")
-}
-
 model AuditLog {
   id             BigInt   @id @default(autoincrement())
   ts             DateTime @default(now()) @db.Timestamptz(6)
@@ -205,11 +197,43 @@ model AuditLog {
   targetUserId   Int?     @map("target_user_id")
   detail         Json     @default("{}")
 
+  eventType AuditEventType @relation(fields: [event], references: [key], onUpdate: NoAction)
+
   @@index([actorId, ts(sort: Desc)], map: "idx_audit_logs_actor")
   @@index([companyId, ts(sort: Desc)], map: "idx_audit_logs_company")
   @@index([targetUserId, ts(sort: Desc)], map: "idx_audit_logs_target_user")
   @@index([ts(sort: Desc)], map: "idx_audit_logs_ts")
   @@map("audit_logs")
+  @@schema("public")
+}
+
+model AuditEventType {
+  key        String   @id @db.VarChar(64)
+  label      String   @db.VarChar(120)
+  categories String[] @default([])
+  action     String?  @db.VarChar(16)
+  sortOrder  Int      @default(0) @map("sort_order")
+
+  entries AuditLog[]
+
+  @@map("audit_event_types")
+  @@schema("public")
+}
+
+model Connector {
+  id          String   @id @db.VarChar(32)
+  name        String   @db.VarChar(120)
+  status      String   @db.VarChar(16)
+  description String?
+  docsUrl     String?  @map("docs_url")
+  credentials Json     @default("[]")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  connections Connection[]
+
+  @@map("connectors")
   @@schema("public")
 }
 
@@ -228,8 +252,9 @@ model Connection {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   generalAccess  String    @default("company") @map("general_access") @db.VarChar(16)
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  creator User?   @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  creator   User?     @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
+  connector Connector @relation(fields: [provider], references: [id], onUpdate: NoAction)
 
   datasets     Dataset[]
   versions     ContextLayerVersion[]
@@ -379,17 +404,16 @@ model Feature {
 }
 
 model Permission {
-  id                String    @id @db.Uuid
-  key               String    @unique(map: "uq_permissions_key") @db.VarChar(100)
-  label             String    @db.VarChar(120)
-  description       String?
-  featureId         String?   @map("feature_id") @db.Uuid
-  platformOnly      Boolean   @default(false) @map("platform_only")
-  adminOnly         Boolean   @default(false) @map("admin_only")
-  sortOrder         Int       @default(0) @map("sort_order")
-  defaultsAppliedAt DateTime? @map("defaults_applied_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id           String   @id @db.Uuid
+  key          String   @unique(map: "uq_permissions_key") @db.VarChar(100)
+  label        String   @db.VarChar(120)
+  description  String?
+  featureId    String?  @map("feature_id") @db.Uuid
+  platformOnly Boolean  @default(false) @map("platform_only")
+  adminOnly    Boolean  @default(false) @map("admin_only")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   feature Feature? @relation(fields: [featureId], references: [id], onUpdate: NoAction, map: "fk_permissions_feature_id")
 

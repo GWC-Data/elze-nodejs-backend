@@ -2,9 +2,7 @@ import { startSmtpSink } from './smtpSink';
 import type { SmtpSink } from './smtpSink';
 import { createReportingFixture } from './reportingFixture';
 import config from '../src/config';
-import { SYSTEM_ROLE_ID, permissionIdsOf, permissionKeysOf } from '../src/constants/permissions';
-import { featureIdsOf } from '../src/constants/features';
-import { accessLevelId } from '../src/constants/accessLevels';
+import { accessLevelId, featureIdsOf, loadCatalogue, permissionIdsOf, permissionKeysOf, systemRoleId } from '../src/services/catalogueService';
 
 const pids = (...keys: string[]) => permissionIdsOf(keys);
 const keysIn = (ids: unknown) => permissionKeysOf(Array.isArray(ids) ? ids : []);
@@ -101,6 +99,7 @@ function activationTokenFrom(email: string | null): string | null {
 }
 
 (async () => {
+  await loadCatalogue();
   sink = await startSmtpSink({ port: SINK_PORT });
   console.log(`SMTP sink listening on 127.0.0.1:${SINK_PORT}`);
 
@@ -317,7 +316,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/platform/companies');
   check('user cannot reach the platform namespace', r.status === 403 && r.body?.error?.code === 'TENANT_ACCESS_DENIED', JSON.stringify(r.body));
 
-  r = await alphaUser.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.USER}/permissions`, { permissionIds: [] });
+  r = await alphaUser.call('PUT', `/api/platform/roles/${systemRoleId('USER')}/permissions`, { permissionIds: [] });
   check('user cannot edit role permissions', r.status === 403);
 
   r = await alphaUser.call('PATCH', '/api/dashboard/default/config', { index: 0, card: {} });
@@ -393,15 +392,15 @@ function activationTokenFrom(email: string | null): string | null {
 
   section('Role permissions and the platform boundary');
 
-  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.COMPANY_ADMIN}/permissions`, {
+  r = await owner.call('PUT', `/api/platform/roles/${systemRoleId('COMPANY_ADMIN')}/permissions`, {
     permissionIds: pids('user.read', 'company.create'),
   });
   check('a company role cannot be given a platform permission', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR', JSON.stringify(r.body));
 
-  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.SUPER_ADMIN}/permissions`, { permissionIds: [] });
+  r = await owner.call('PUT', `/api/platform/roles/${systemRoleId('SUPER_ADMIN')}/permissions`, { permissionIds: [] });
   check('SUPER_ADMIN permissions cannot be edited', r.status === 400, JSON.stringify(r.body));
 
-  r = await owner.call('PUT', `/api/platform/roles/${SYSTEM_ROLE_ID.USER}/permissions`, { permissionIds: pids('dashboard.read', 'data.read') });
+  r = await owner.call('PUT', `/api/platform/roles/${systemRoleId('USER')}/permissions`, { permissionIds: pids('dashboard.read', 'data.read') });
   check('USER permissions can be edited', r.status === 200, JSON.stringify(r.body));
 
   section('Company features: set by the platform owner, a ceiling on every role');
@@ -526,8 +525,8 @@ function activationTokenFrom(email: string | null): string | null {
 
   r = await alphaAdmin.call('GET', '/api/roles');
   const alphaMemberRoleId = r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.id;
-  check('the company Member role has its own UUID', typeof alphaMemberRoleId === 'string' && alphaMemberRoleId !== SYSTEM_ROLE_ID.USER, String(alphaMemberRoleId));
-  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${SYSTEM_ROLE_ID.COMPANY_ADMIN}`, { permissionIds: [] });
+  check('the company Member role has its own UUID', typeof alphaMemberRoleId === 'string' && alphaMemberRoleId !== systemRoleId('USER'), String(alphaMemberRoleId));
+  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${systemRoleId('COMPANY_ADMIN')}`, { permissionIds: [] });
   check('the company admin role cannot be changed by a company', r.status === 400, JSON.stringify(r.body));
   r = await alphaAdmin.call('PUT', `/api/roles/built-in/${alphaMemberRoleId}`, { permissionIds: pids('agent.read') });
   check('a company admin tailors the Member role', r.status === 200

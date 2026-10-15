@@ -1,6 +1,6 @@
 import { fail } from '../tools/AppError';
 import { can } from './authorizationService';
-import { CONTEXT_ACCESS_LEVELS, CONTEXT_LEVEL_RANK } from '../constants/context';
+import { accessLevelKeys, levelRank } from './catalogueService';
 import type { ContextAccessLevel } from '../constants/context';
 import type { Actor } from '../types/actor';
 
@@ -24,10 +24,11 @@ function ownerIdOf(row: Row): number | null {
 
 function strongest(...levels: unknown[]): ContextAccessLevel | null {
   let best: ContextAccessLevel | null = null;
+  const known = accessLevelKeys('context');
   for (const level of levels) {
-    if (!CONTEXT_ACCESS_LEVELS.includes(level as ContextAccessLevel)) continue;
+    if (!known.includes(level as string)) continue;
     const candidate = level as ContextAccessLevel;
-    if (!best || CONTEXT_LEVEL_RANK[candidate] > CONTEXT_LEVEL_RANK[best]) best = candidate;
+    if (!best || levelRank('context', candidate) > levelRank('context', best)) best = candidate;
   }
   return best;
 }
@@ -39,7 +40,7 @@ function levelOf(actor: Actor, row: Row): ContextAccessLevel | null {
 }
 
 function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessLevel): boolean {
-  return Boolean(level) && CONTEXT_LEVEL_RANK[level!] >= CONTEXT_LEVEL_RANK[required];
+  return Boolean(level) && levelRank('context', level) >= levelRank('context', required);
 }
 
 function mayShare(actor: Actor, row: Row): boolean {

@@ -1,4 +1,4 @@
-import { effectiveFeatures, featureKeysOf } from '../../constants/features';
+import { effectiveFeatures, featureKeysOf } from '../../services/catalogueService';
 
 type Row = Record<string, any>;
 

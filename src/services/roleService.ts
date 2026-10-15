@@ -4,18 +4,8 @@ import { requireUuid } from '../validators/commonValidator';
 import { assertRolePermissionsAllowed } from './authorizationService';
 import { followDefaults } from './builtInRolesService';
 import { audit, EVENTS } from './auditService';
-import {
-  ALL_PERMISSIONS,
-  PERMISSION_BY_ID,
-  PLATFORM_ONLY_PERMISSIONS,
-  CUSTOM_ROLE_EXCLUDED,
-  ROLE_SCOPES,
-  ROLE_SCOPE_BY_NAME,
-  SUPER_ADMIN,
-  permissionIdsOf,
-  permissionKeysOf,
-} from '../constants/permissions';
-import { FEATURE_OF_PERMISSION, FEATURE_BY_KEY } from '../constants/features';
+import { ROLE_SCOPES, SUPER_ADMIN, scopeOfTier } from '../constants/roles';
+import { allPermissions, permissionByKey, permissionIdsOf, permissionKeysOf } from './catalogueService';
 import type { Actor } from '../types/actor';
 
 function parsePermissionIds(value: unknown): string[] {
@@ -23,7 +13,8 @@ function parsePermissionIds(value: unknown): string[] {
     throw fail('VALIDATION_ERROR', 'permissionIds must be an array of permission ids.');
   }
   const ids = [...new Set(value.map((v) => String(v).trim().toLowerCase()))];
-  const unknown = ids.filter((id) => !PERMISSION_BY_ID.has(id));
+  const known = new Set(allPermissions().map((p) => p.id));
+  const unknown = ids.filter((id) => !known.has(id));
   if (unknown.length) {
     throw fail('VALIDATION_ERROR', `Unknown permission id(s): ${unknown.join(', ')}`, { permissionIds: unknown });
   }
@@ -31,19 +22,21 @@ function parsePermissionIds(value: unknown): string[] {
 }
 
 function describePermission(key: string) {
-  const permission = ALL_PERMISSIONS.find((p) => p.key === key)!;
-  const feature = FEATURE_OF_PERMISSION.get(key) || null;
+  const permission = permissionByKey(key)!;
   return {
-    ...permission,
-    platformOnly: PLATFORM_ONLY_PERMISSIONS.has(key),
-    adminOnly: CUSTOM_ROLE_EXCLUDED.has(key),
-    feature,
-    featureId: feature ? FEATURE_BY_KEY.get(feature)!.id : null,
+    id: permission.id,
+    key: permission.key,
+    label: permission.label,
+    description: permission.description,
+    platformOnly: permission.platformOnly,
+    adminOnly: permission.adminOnly,
+    feature: permission.featureKey,
+    featureId: permission.featureId,
   };
 }
 
 function assertRoleCompanyPairing(roleName: string, companyId: number | null | undefined) {
-  const scope = ROLE_SCOPE_BY_NAME.get(roleName);
+  const scope = scopeOfTier(roleName);
   if (!scope) throw fail('VALIDATION_ERROR', `Unknown role: "${roleName}"`);
 
   if (scope === ROLE_SCOPES.platform && companyId) {
@@ -56,7 +49,7 @@ function assertRoleCompanyPairing(roleName: string, companyId: number | null | u
 }
 
 function permissionCatalogue() {
-  return ALL_PERMISSIONS.map((p) => describePermission(p.key));
+  return allPermissions().map((p) => describePermission(p.key));
 }
 
 async function listRoles() {
@@ -65,7 +58,7 @@ async function listRoles() {
     id: r.id,
     name: r.tier,
     label: r.name,
-    scope: ROLE_SCOPE_BY_NAME.get(r.tier),
+    scope: scopeOfTier(r.tier),
     description: r.description,
     userCount: Number(r.userCount),
   }));
@@ -82,7 +75,7 @@ function shapeRolePermissions(role: Record<string, any>, permissionIds: readonly
     id: role.id,
     role: role.tier,
     label: role.name,
-    scope: ROLE_SCOPE_BY_NAME.get(role.tier),
+    scope: scopeOfTier(role.tier),
     editable: role.tier !== SUPER_ADMIN,
     permissionIds: [...permissionIds],
   };
@@ -90,7 +83,7 @@ function shapeRolePermissions(role: Record<string, any>, permissionIds: readonly
 
 async function describeRolePermissions(id: unknown) {
   const role = await requireSystemRole(id);
-  if (role.tier === SUPER_ADMIN) return shapeRolePermissions(role, ALL_PERMISSIONS.map((p) => p.id));
+  if (role.tier === SUPER_ADMIN) return shapeRolePermissions(role, allPermissions().map((p) => p.id));
   return shapeRolePermissions(role, role.permissionIds);
 }
 
@@ -105,7 +98,7 @@ async function replaceRolePermissions(actor: Actor, id: unknown, permissionIds: 
   }
 
   const keys = parsePermissionIds(permissionIds);
-  assertRolePermissionsAllowed(ROLE_SCOPE_BY_NAME.get(role.tier)!, keys);
+  assertRolePermissionsAllowed(scopeOfTier(role.tier)!, keys);
 
   const ids = permissionIdsOf(keys);
   await roleRepository.replacePermissions(role.id, ids, actor.id);

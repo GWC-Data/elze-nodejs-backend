@@ -3,27 +3,13 @@ import path from 'path';
 import config from '../config';
 import * as bootstrapRepository from '../repositories/bootstrapRepository';
 import * as dashboardRepository from '../repositories/dashboardRepository';
-import * as companyRoleRepository from '../repositories/companyRoleRepository';
-import { seedExistingCompanies } from './featureService';
-import { backfillAndSync } from './builtInRolesService';
-import { seedCatalogue } from './accessCatalogueService';
-import { FEATURES, FEATURE_OF_PERMISSION } from '../constants/features';
-import { ACCESS_LEVEL_CATALOGUE } from '../constants/accessLevels';
+import { loadCatalogue, systemRoleId } from './catalogueService';
+import { SUPER_ADMIN } from '../constants/roles';
 import { hashPassword } from '../tools/password';
 import { normalizeSpec } from '../models/cardModel';
 import { pruneExpiredTokens } from './tokenService';
 import { pruneAttempts } from './loginThrottleService';
 import { verifyTransport } from './emailService';
-import {
-  ALL_PERMISSIONS,
-  PERMISSION_BY_KEY,
-  SYSTEM_ROLES,
-  SYSTEM_ROLE_ID,
-  DEFAULT_ROLE_PERMISSIONS,
-  REPLACED_PERMISSIONS,
-  SUPER_ADMIN,
-  permissionIdsOf,
-} from '../constants/permissions';
 
 const { bootstrapSuperAdmin } = config.auth;
 const { DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR } = config.env;
@@ -41,98 +27,6 @@ function rbacError(): string | null {
   return readyError;
 }
 
-async function grantAll(roleName: string, keys: readonly string[]): Promise<void> {
-  await bootstrapRepository.addRolePermissions(SYSTEM_ROLE_ID[roleName], permissionIdsOf(keys));
-}
-
-async function migrateReplacedPermissions(): Promise<void> {
-  for (const [retired, replacements] of Object.entries(REPLACED_PERMISSIONS)) {
-    const n = await bootstrapRepository.grantReplacements(retired, permissionIdsOf(replacements));
-    if (n) console.log(`[rbac] replaced "${retired}" with ${replacements.join(', ')} (${n} role(s) or person(s))`);
-  }
-}
-
-const REPAIRS: Array<{ id: string; covers: (permission: string) => boolean }> = [
-  {
-    id: 'feature-permissions-v1',
-    covers: (key) => ['metadata_lakehouse', 'data_analyst', 'agents'].includes(FEATURE_OF_PERMISSION.get(key) || ''),
-  },
-  {
-    id: 'new-permissions-v2',
-    covers: (key) =>
-      /^(analyst|playbook|agent)\./.test(key) ||
-      ['context.create', 'context.update', 'context.publish', 'context.delete',
-        'role.create', 'role.edit', 'role.delete'].includes(key),
-  },
-];
-
-async function applyRepairs(): Promise<void> {
-  for (const repair of REPAIRS) {
-    if (!(await bootstrapRepository.claimRepair(repair.id))) continue;
-    for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-      const owned = permissions.filter(repair.covers);
-      await grantAll(roleName, owned);
-      console.log(`[rbac] repair ${repair.id}: ensured ${owned.length} default permission(s) for ${roleName}`);
-    }
-  }
-}
-
-async function seedCompanyRoles(): Promise<void> {
-  if (await bootstrapRepository.claimRepair('builtin-copies-modified-v1')) {
-    const marked = await companyRoleRepository.markExistingCompanyDefaultsModified();
-    if (marked) console.log(`[rbac] kept ${marked} company-edited Member role(s) as their company's own`);
-  }
-  await backfillAndSync();
-}
-
-async function seedRoles(): Promise<void> {
-  const created = await seedCatalogue();
-  const newIds = new Set(await bootstrapRepository.newPermissionIds());
-
-  await migrateReplacedPermissions();
-
-  await bootstrapRepository.setRolePermissions(SYSTEM_ROLE_ID[SUPER_ADMIN], ALL_PERMISSIONS.map((p) => p.id));
-
-  for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    if (created.has(roleName)) {
-      await grantAll(roleName, permissions);
-      console.log(`[rbac] seeded ${permissions.length} default permissions for ${roleName}`);
-      continue;
-    }
-    const added = permissions.filter((key) => newIds.has(PERMISSION_BY_KEY.get(key)?.id || ''));
-    if (!added.length) continue;
-    await grantAll(roleName, added);
-    console.log(`[rbac] granted ${roleName} ${added.length} newly added permission(s): ${added.join(', ')}`);
-  }
-
-  for (const [roleName, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    await grantAll(roleName, permissions.filter((key) => key.startsWith('dashboard.')));
-  }
-
-  await applyRepairs();
-  await bootstrapRepository.markDefaultsApplied();
-
-  const pruned = await bootstrapRepository.pruneCatalogue({
-    permissionIds: ALL_PERMISSIONS.map((p) => p.id),
-    featureIds: FEATURES.map((f) => f.id),
-    accessLevelIds: ACCESS_LEVEL_CATALOGUE.map((l) => l.id),
-  });
-  if (pruned.permissions || pruned.features) {
-    console.log(`[rbac] removed ${pruned.permissions} permission(s) and ${pruned.features} feature(s) no longer in the catalogue`);
-  }
-
-  for (const role of await bootstrapRepository.unknownSystemRoles(SYSTEM_ROLES.map((r) => r.id))) {
-    if (role.holders > 0) {
-      throw new Error(
-        `Role "${role.name}" is not part of the three-role model but ${role.holders} account(s) still hold it. ` +
-        `Reassign them to one of ${SYSTEM_ROLES.map((r) => r.name).join(', ')} before starting the server.`
-      );
-    }
-    await bootstrapRepository.deleteRole(role.id);
-    console.log(`[rbac] removed unused role "${role.name}"`);
-  }
-}
-
 async function seedSuperAdmin(): Promise<boolean> {
   if ((await bootstrapRepository.countUsers()) > 0) return false;
 
@@ -141,7 +35,7 @@ async function seedSuperAdmin(): Promise<boolean> {
     username,
     email: String(email).toLowerCase(),
     passwordHash: hashPassword(password),
-    roleId: SYSTEM_ROLE_ID[SUPER_ADMIN],
+    roleId: systemRoleId(SUPER_ADMIN),
   });
   console.log(
     `[rbac] seeded platform owner "${username}" as ${SUPER_ADMIN}, ` +
@@ -195,9 +89,7 @@ async function assertMigrated(): Promise<void> {
 async function bootstrapAppMeta(): Promise<boolean> {
   try {
     await assertMigrated();
-    await seedRoles();
-    await seedExistingCompanies();
-    await seedCompanyRoles();
+    await loadCatalogue();
     await seedSuperAdmin();
     await seedDefaultDashboards();
 

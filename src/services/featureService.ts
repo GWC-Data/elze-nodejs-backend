@@ -2,18 +2,18 @@ import * as featureRepository from '../repositories/featureRepository';
 import { fail } from '../tools/AppError';
 import { audit, EVENTS } from './auditService';
 import {
-  FEATURES,
-  FEATURE_BY_ID,
-  TOGGLEABLE_FEATURE_KEYS,
+  allFeatures,
   effectiveFeatures,
+  featureById,
   featureIdsOf,
   featureKeysOf,
-} from '../constants/features';
+  toggleableFeatureKeys,
+} from './catalogueService';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
 
 function catalogue() {
-  return FEATURES.map(({ id, key, label, description, locked, covers }) => ({ id, key, label, description, locked, covers }));
+  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({ id, key, label, description, locked, covers }));
 }
 
 function parseFeatureIds(featureIds: unknown): string[] {
@@ -21,11 +21,12 @@ function parseFeatureIds(featureIds: unknown): string[] {
     throw fail('VALIDATION_ERROR', 'featureIds must be an array of feature ids.');
   }
   const unique = [...new Set(featureIds.map((v) => String(v).trim().toLowerCase()))];
-  const unknown = unique.filter((id) => !FEATURE_BY_ID.has(id));
+  const unknown = unique.filter((id) => !featureById(id));
   if (unknown.length) {
     throw fail('VALIDATION_ERROR', `Unknown feature id(s): ${unknown.join(', ')}`, { featureIds: unknown });
   }
-  return featureKeysOf(unique).filter((key) => TOGGLEABLE_FEATURE_KEYS.includes(key));
+  const toggleable = toggleableFeatureKeys();
+  return featureKeysOf(unique).filter((key) => toggleable.includes(key));
 }
 
 async function enabledFor(companyId: number, conn?: Queryable): Promise<string[]> {
@@ -33,7 +34,7 @@ async function enabledFor(companyId: number, conn?: Queryable): Promise<string[]
 }
 
 function describe(enabled: readonly string[]) {
-  return FEATURES.map(({ id, key, label, description, locked, covers }) => ({
+  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({
     id,
     key,
     label,
@@ -72,11 +73,6 @@ async function replaceCompanyFeatures(actor: Actor, companyId: number, featureId
   return { companyId, features: describe(after) };
 }
 
-async function seedExistingCompanies(): Promise<void> {
-  const n = await featureRepository.seedUnseeded(featureIdsOf(TOGGLEABLE_FEATURE_KEYS));
-  if (n) console.log(`[rbac] enabled every feature for ${n} company(ies) with no feature settings yet`);
-}
-
 export {
   catalogue,
   parseFeatureIds,
@@ -84,5 +80,4 @@ export {
   companyFeatures,
   setInitialFeatures,
   replaceCompanyFeatures,
-  seedExistingCompanies,
 };

@@ -2,7 +2,8 @@ import { fail } from '../tools/AppError';
 import { readLimit, extractionRecord } from '../validators/contextValidator';
 import { pageOf } from '../tools/pagination';
 import { listedDataset } from '../views/serializers/connectionSerializer';
-import { CONNECTORS, findConnector, STATUS } from '../constants/connectorCatalogue';
+import { connectors, findConnector } from './catalogueService';
+import type { Connector } from './catalogueService';
 import { resolveTargetCompany } from './authorizationService';
 import { requireActiveCompany } from './companyService';
 import * as connections from './connectionService';
@@ -38,8 +39,8 @@ async function versionFor(connection: Connection, versionId: unknown): Promise<a
   return versions.requirePublishedVersion(connection, String(versionId));
 }
 
-function listConnectors(): typeof CONNECTORS {
-  return CONNECTORS;
+function listConnectors(): readonly Connector[] {
+  return connectors();
 }
 
 async function listConnections(actor: Actor): Promise<Record<string, any>[]> {
@@ -71,7 +72,7 @@ async function createConnection(actor: Actor, body: Record<string, any> = {}): P
   if (!connector) {
     throw fail('VALIDATION_ERROR', `"${provider}" is not a connector this platform knows about.`);
   }
-  if (connector.status !== STATUS.available) {
+  if (connector.status !== 'available') {
     throw fail(
       'VALIDATION_ERROR',
       `The ${connector.name} connector is not built yet, so it cannot be configured.`

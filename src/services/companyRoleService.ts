@@ -8,31 +8,32 @@ import { enabledFor } from './featureService';
 import { defaultsFor } from './builtInRolesService';
 import { parsePermissionIds, describePermission } from './roleService';
 import { audit, EVENTS } from './auditService';
+import { COMPANY_ADMIN, USER, ROLE_TIERS } from '../constants/roles';
 import {
-  ALL_PERMISSIONS,
-  ALL_PERMISSION_KEYS,
-  PLATFORM_ONLY_PERMISSIONS,
-  CUSTOM_ROLE_EXCLUDED,
-  COMPANY_ADMIN,
-  USER,
-  ROLE_NAMES,
-  SYSTEM_ROLES,
-  SYSTEM_ROLE_ID,
+  allPermissions,
+  isAdminOnly,
+  isKnownPermission,
+  isPermissionEnabled,
+  isPlatformOnly,
+  maskPermissions,
   permissionIdsOf,
   permissionKeysOf,
-} from '../constants/permissions';
-import { isPermissionEnabled, maskPermissions } from '../constants/features';
+  systemRoleId,
+  systemRoles,
+} from './catalogueService';
 import { UNIQUE_VIOLATION, FOREIGN_KEY_VIOLATION } from '../constants/pgErrors';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
 
 type Row = Record<string, any>;
 
-const RESERVED_NAMES = new Set([
-  ...ROLE_NAMES.map((name) => name.toLowerCase()),
-  ...SYSTEM_ROLES.map((role) => role.label.toLowerCase().replace(/\s+/g, '_')),
-  companyRoleRepository.COMPANY_DEFAULT_NAME.toLowerCase(),
-]);
+function reservedNames(): Set<string> {
+  return new Set([
+    ...ROLE_TIERS.map((tier) => tier.toLowerCase()),
+    ...systemRoles().map((role) => role.name.toLowerCase().replace(/\s+/g, '_')),
+    companyRoleRepository.COMPANY_DEFAULT_NAME.toLowerCase(),
+  ]);
+}
 
 function keysOf(row: Row): string[] {
   return permissionKeysOf(row.permissionIds || []);
@@ -59,7 +60,7 @@ async function companyFor(actor: Actor, requested: unknown): Promise<number> {
 }
 
 function assignable(actor: Actor, permission: string): boolean {
-  if (PLATFORM_ONLY_PERMISSIONS.has(permission) || CUSTOM_ROLE_EXCLUDED.has(permission)) return false;
+  if (isPlatformOnly(permission) || isAdminOnly(permission)) return false;
   return actor.isPlatform || actor.permissions.includes(permission);
 }
 
@@ -67,7 +68,7 @@ function withImpliedReads(permissions: readonly string[]): string[] {
   const out = new Set(permissions);
   for (const key of permissions) {
     const read = `${key.split('.')[0]}.read`;
-    if (read !== key && ALL_PERMISSION_KEYS.has(read)) out.add(read);
+    if (read !== key && isKnownPermission(read)) out.add(read);
   }
   return [...out];
 }
@@ -91,7 +92,7 @@ function parsePermissions(actor: Actor, features: readonly string[], value: unkn
 
 function parseName(value: unknown): string {
   const name = requireString(value, 'Role name', { min: 2, max: 50 });
-  if (RESERVED_NAMES.has(name.toLowerCase().replace(/\s+/g, '_')) || RESERVED_NAMES.has(name.toLowerCase())) {
+  if (reservedNames().has(name.toLowerCase().replace(/\s+/g, '_')) || reservedNames().has(name.toLowerCase())) {
     throw fail('VALIDATION_ERROR', `"${name}" is the name of a built-in role.`);
   }
   return name;
@@ -103,8 +104,8 @@ function parseDescription(value: unknown): string | null {
 }
 
 function permissionOptionsFor(actor: Actor, features: readonly string[]) {
-  return ALL_PERMISSIONS.filter(
-    (p) => !PLATFORM_ONLY_PERMISSIONS.has(p.key) && isPermissionEnabled(p.key, features)
+  return allPermissions().filter(
+    (p) => !p.platformOnly && isPermissionEnabled(p.key, features)
   ).map((p) => ({
     ...describePermission(p.key),
     featureEnabled: isPermissionEnabled(p.key, features),
@@ -121,7 +122,7 @@ async function permissionOptions(actor: Actor, requestedCompanyId: unknown) {
 async function memberRole(companyId: number) {
   const row = await companyRoleRepository.findCompanyDefault(companyId);
   return {
-    id: row ? row.id : SYSTEM_ROLE_ID[USER],
+    id: row ? row.id : systemRoleId(USER),
     keys: row ? keysOf(row) : await defaultsFor(USER),
     modifiedAt: row?.modifiedAt || null,
     modifiedBy: row?.modifiedBy || null,
@@ -134,7 +135,7 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
     enabledFor(companyId),
     companyRoleRepository.listForCompany(companyId),
     companyRoleRepository.builtInCounts(companyId),
-    roleRepository.permissionIds(SYSTEM_ROLE_ID[COMPANY_ADMIN]),
+    roleRepository.permissionIds(systemRoleId(COMPANY_ADMIN)),
     memberRole(companyId),
   ]);
 
@@ -142,7 +143,7 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
 
   const builtIn = [
     {
-      id: SYSTEM_ROLE_ID[COMPANY_ADMIN],
+      id: systemRoleId(COMPANY_ADMIN),
       name: COMPANY_ADMIN,
       label: 'Company admin',
       keys: permissionKeysOf(adminIds),
@@ -171,7 +172,7 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
 
 async function requireEditableBuiltIn(id: unknown, companyId: number) {
   const roleId = requireUuid(id, 'role id');
-  if (roleId === SYSTEM_ROLE_ID[COMPANY_ADMIN]) {
+  if (roleId === systemRoleId(COMPANY_ADMIN)) {
     throw fail('VALIDATION_ERROR', 'The company admin role cannot be changed here, so a company can never lock itself out.');
   }
   const current = await companyRoleRepository.findCompanyDefault(companyId);
@@ -187,7 +188,7 @@ async function saveBuiltInRole(actor: Actor, id: unknown, body: Row) {
   const features = await enabledFor(companyId);
   const next = parsePermissions(actor, features, body.permissionIds);
 
-  const dormant = keysOf(current).filter((p) => !isPermissionEnabled(p, features) && !CUSTOM_ROLE_EXCLUDED.has(p));
+  const dormant = keysOf(current).filter((p) => !isPermissionEnabled(p, features) && !isAdminOnly(p));
   const keys = [...new Set([...next, ...dormant])].sort();
 
   await companyRoleRepository.saveCompanyDefault(companyId, permissionIdsOf(keys), actor.id);
@@ -298,9 +299,9 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
 }
 
 async function builtInRoleId(tier: string, companyId: number | null, conn?: Queryable): Promise<string> {
-  if (tier !== USER || !companyId) return SYSTEM_ROLE_ID[tier];
+  if (tier !== USER || !companyId) return systemRoleId(tier);
   const member = await companyRoleRepository.findCompanyDefault(companyId, conn);
-  return member ? member.id : SYSTEM_ROLE_ID[USER];
+  return member ? member.id : systemRoleId(USER);
 }
 
 async function resolveAssignableRole(actor: Actor, value: unknown, companyId: number | null): Promise<string | null> {

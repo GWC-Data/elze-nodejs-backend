@@ -11,8 +11,8 @@ import { createAndInvite, prepareInvitation } from './onboardingService';
 import { sendEmail } from './emailService';
 import { revokeAllForUser } from './tokenService';
 import { audit, EVENTS } from './auditService';
-import { ROLE_SCOPE_BY_NAME, USER } from '../constants/permissions';
-import { FEATURE_KEYS, effectiveFeatures, featureKeysOf } from '../constants/features';
+import { USER, scopeOfTier } from '../constants/roles';
+import { effectiveFeatures, featureKeys, featureKeysOf } from './catalogueService';
 import { USER_STATUS, USER_STATUSES } from '../constants/statuses';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
@@ -25,7 +25,7 @@ async function findActor(id: number) {
   if (!row) return null;
   const scopes: Record<string, unknown[]> = {};
   for (const [dimension, value] of row.scopes) (scopes[dimension] = scopes[dimension] || []).push(value);
-  const features = row.company_id ? effectiveFeatures(featureKeysOf(row.feature_ids)) : [...FEATURE_KEYS];
+  const features = row.company_id ? effectiveFeatures(featureKeysOf(row.feature_ids)) : featureKeys();
   return {
     user: row,
     permissions: [...(row.permissions as string[])],
@@ -66,7 +66,7 @@ async function listUsers(
     params.push(actor.companyId);
   }
   if (role) {
-    if (!ROLE_SCOPE_BY_NAME.has(String(role))) throw fail('VALIDATION_ERROR', `Unknown role: "${role}"`);
+    if (!scopeOfTier(String(role))) throw fail('VALIDATION_ERROR', `Unknown role: "${role}"`);
     where.push('r.tier = ?');
     params.push(String(role));
   }

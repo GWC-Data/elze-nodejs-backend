@@ -9,7 +9,7 @@ import * as tokens from './tokenService';
 import * as throttle from './loginThrottleService';
 import { resolveActivationToken, consumeActivationToken } from './activationService';
 import { findActor } from './userService';
-import { usableFeatures } from '../constants/features';
+import { usableFeatures } from './catalogueService';
 import { listAccessibleDashboards } from './accessService';
 import { audit, EVENTS } from './auditService';
 import { AUTH_STATE, USER_STATUS } from '../constants/statuses';

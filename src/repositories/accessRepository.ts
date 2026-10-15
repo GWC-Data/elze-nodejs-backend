@@ -1,6 +1,6 @@
 import config from '../config';
 import { T } from '../models/rbacModel';
-import { accessLevelId } from '../constants/accessLevels';
+import { accessLevelId } from '../services/catalogueService';
 import type { Queryable } from '../config/pgPool';
 import type { Actor } from '../types/actor';
 

@@ -189,12 +189,12 @@ may do, so adding a capability is a permission id plus a guard, not an audit of 
 | **Access level** | a grant on the user or a **group** | what may they do with *one dashboard*? |
 
 Permissions are business capabilities (`user.create`, `access.grant`, `dashboard.read`, …)
-listed in `src/constants/permissions.ts` — that file is the whole vocabulary, and a
+stored in `access_control.permissions` — that table is the whole vocabulary, and a
 permission missing from it cannot be granted. Access levels are ranked `view < share <
 developer < admin`; a user's effective level is the **strongest** of their direct grant and
 the grants of every *active* group they belong to, in their own company.
 
-`PLATFORM_ONLY_PERMISSIONS` can never be given to a company role — those are the
+A permission with `platform_only` set can never be given to a company role — those are the
 capabilities that would let a customer's administrator act outside their own company.
 
 ### Features and company roles
@@ -202,7 +202,7 @@ capabilities that would let a customer's administrator act outside their own com
 Two more things shape what a company account holds (full detail: `.claude/ARCHITECTURE.md`
 §2.3.1–§2.3.3):
 
-- **Features** (`src/constants/features.ts`) — the platform owner switches Data analyst agent,
+- **Features** (`access_control.features`) — the platform owner switches Data analyst agent,
   Agents and Dashboards on or off per company (`/api/platform/companies/:id/features`);
   Metadata Lakehouse is always on. A feature is a **ceiling**: effective permissions are the
   role's ∩ the enabled features' (plus core ones like `user.*`). A refused request whose
@@ -212,12 +212,13 @@ Two more things shape what a company account holds (full detail: `.claude/ARCHIT
   the built-in `USER` role; the custom role's permissions replace USER's. Custom roles never
   hold platform permissions nor the ones that manage people, groups or roles.
 - **Every company's own Member** — each company has a copy of the built-in `USER` role
-  (`company_roles` with `builtin_role = 'USER'`), created with the company. It follows the
+  (`access_control.roles` with `kind = 'company_default'`), created with the company. It follows the
   platform defaults until the company admin edits it; from then on it is that company's alone
   (`modified_by`/`modified_at`), until **Reset**.
 - **The database enforces it too**: a member's company role must be from their own company, a
   company role holds only known, non-platform, non-admin permissions, and a company's Member
-  copy can never be handed out as a custom role (constraints and triggers in `INTEGRITY`).
+  copy can never be handed out as a custom role (constraints and triggers in
+  `prisma/migrations/1_database_objects`).
 - **Responses carry only what the account can use**: `user.features` lists only features the
   account holds permissions in, and role endpoints never send a disabled feature's permissions.
 
@@ -458,26 +459,26 @@ crash naming the variable. There are no fallback secrets — a default one is
 indistinguishable at runtime from a correctly configured deployment, and forges every token
 in the system.
 
-#### New permissions on an existing installation
+#### The catalogue lives in the database
 
-Role defaults are seeded only for a role the current start actually created,
-so an administrator who deliberately narrows a role does not get the defaults
-restored under them at the next restart. On its own that also means a
-permission added in a later release never reaches the roles of an installation
-that already exists — the first company administrator to look for the new
-screen finds it missing, with nothing to say why.
+Permissions, features, access levels, the three system roles and their default
+permissions, the warehouse connectors and the audit event types are rows, not code:
+`access_control.permissions`, `features`, `access_levels`, `roles`, `role_permissions`, and
+`public.connectors`, `audit_event_types`. The server reads them once at startup
+(`services/catalogueService.ts`) and refuses to start if a system role, an access level or an
+audit event the code writes is missing.
 
-`permission_seed_log` separates the two cases. It records which permission ids
-the catalogue has contained at a previous start, whether or not anybody was
-granted them. At each start:
+Nothing at startup rewrites them any more, so an edit made through the API — narrowing a
+built-in role, for instance — stays as it was made. Changing the catalogue itself is a
+migration:
 
-- an id **in** the log that no role holds was revoked on purpose, and is left alone;
-- an id **not in** the log is new here, and the catalogue default is applied.
+- a new permission: `INSERT` it into `access_control.permissions` (with its `feature_id`,
+  `platform_only` and `admin_only`), and add it to the `role_permissions` of whichever built-in
+  roles should have it by default. The platform owner's role receives every new permission
+  automatically (`trg_permissions_platform_owner`). The code then guards a route with it.
+- a new connector or audit event: `INSERT` into `connectors` or `audit_event_types`.
 
-The first start after the log was introduced backfills it from what the roles
-currently hold, so that one time a previously revoked permission is treated as
-new and comes back. Nothing recorded the difference before the log existed;
-every start after it is exact.
+Restart the server after applying such a migration so it reloads the catalogue.
 
 ### Database schema and migrations
 

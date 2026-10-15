@@ -8,7 +8,7 @@ import { requireGroupInScope } from './groupService';
 import { requireUserInScope, listUserOptions } from './userService';
 import * as dashboards from './dashboardService';
 import { audit, EVENTS } from './auditService';
-import { accessLevelsFor, accessLevelId } from '../constants/accessLevels';
+import { accessLevelsFor, accessLevelId } from './catalogueService';
 import type { Actor } from '../types/actor';
 
 type GrantAction = 'read' | 'grant' | 'revoke';

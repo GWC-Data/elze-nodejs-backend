@@ -147,18 +147,6 @@ async function resetCompanyDefault(companyId: number, permissionIds: readonly st
   });
 }
 
-async function backfillCompanyDefaults(permissionIds: readonly string[]): Promise<number> {
-  return withTransaction(async (conn: Queryable) => {
-    const { rows } = await conn.query(
-      `SELECT c.id FROM ${T.companies} c
-        WHERE NOT EXISTS (SELECT 1 FROM ${T.roles} r
-                           WHERE r.company_id = c.id AND r.kind = 'company_default' AND r.tier = 'USER')`
-    );
-    for (const row of rows) await seedCompanyDefault(row.id, permissionIds, conn);
-    return rows.length;
-  });
-}
-
 async function syncUnmodifiedCompanyDefaults(permissionIds: readonly string[]): Promise<number> {
   return withTransaction(async (conn: Queryable) => {
     await conn.query(
@@ -175,14 +163,6 @@ async function syncUnmodifiedCompanyDefaults(permissionIds: readonly string[]): 
     );
     return rows[0].n;
   });
-}
-
-async function markExistingCompanyDefaultsModified(): Promise<number> {
-  const result = await db.query(
-    `UPDATE ${T.roles} SET modified_at = updated_at, modified_by = created_by
-      WHERE kind = 'company_default' AND modified_at IS NULL`
-  );
-  return result.rowCount || 0;
 }
 
 async function remove(id: string): Promise<boolean> {
@@ -202,7 +182,5 @@ export {
   seedCompanyDefault,
   saveCompanyDefault,
   resetCompanyDefault,
-  backfillCompanyDefaults,
   syncUnmodifiedCompanyDefaults,
-  markExistingCompanyDefaultsModified,
 };

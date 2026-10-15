@@ -27,15 +27,4 @@ async function replace(companyId: number, featureIds: readonly string[], actorId
   return withTransaction(work);
 }
 
-async function seedUnseeded(featureIds: readonly string[]): Promise<number> {
-  const result = await db.query(
-    `INSERT INTO ${T.companyFeatures} (company_id, feature_ids)
-     SELECT c.id, ?::uuid[] FROM ${T.companies} c
-      WHERE NOT EXISTS (SELECT 1 FROM ${T.companyFeatures} f WHERE f.company_id = c.id)
-     ON CONFLICT DO NOTHING`,
-    [featureIds]
-  );
-  return result.rowCount || 0;
-}
-
-export { listForCompany, replace, seedUnseeded };
+export { listForCompany, replace };

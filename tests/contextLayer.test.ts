@@ -19,10 +19,8 @@ import store = require('../src/services/contextService');
 import publish = require('../src/services/publishService');
 import sharing = require('../src/services/contextSharingService');
 import agentGate = require('../src/services/agentGateService');
-import permissionConstants = require('../src/constants/permissions');
-const { SYSTEM_ROLE_ID } = permissionConstants;
-import accessLevelConstants = require('../src/constants/accessLevels');
-const { accessLevelId } = accessLevelConstants;
+import catalogue = require('../src/services/catalogueService');
+const { accessLevelId, systemRoleId } = catalogue;
 import type { Actor } from '../src/types/actor';
 
 const level = (key: string) => ({ levelId: accessLevelId('context', key) });
@@ -180,7 +178,7 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
-  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, SYSTEM_ROLE_ID.COMPANY_ADMIN]);
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, systemRoleId('COMPANY_ADMIN')]);
   made.users.push(rows[0].id);
   return {
     id: rows[0].id, username, companyId, isPlatform: false, role: 'COMPANY_ADMIN',
@@ -195,7 +193,7 @@ async function makeMember(companyId: number, username: string): Promise<Actor> {
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
-  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, SYSTEM_ROLE_ID.USER]);
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, systemRoleId('USER')]);
   made.users.push(rows[0].id);
   return {
     id: rows[0].id, username, companyId, isPlatform: false, role: 'USER',
@@ -365,7 +363,7 @@ async function cleanup(): Promise<void> {
   check('the owner cannot be given a level', toOwner === 'VALIDATION_ERROR', toOwner);
   const crossCompany = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminB.id, level('view')));
   check("another company's person cannot be added", crossCompany === 'RESOURCE_NOT_FOUND', crossCompany);
-  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { levelId: accessLevelConstants.accessLevelId('dashboard', 'admin') }));
+  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { levelId: accessLevelId('dashboard', 'admin') }));
   check('an unknown level is refused', badLevel === 'VALIDATION_ERROR', badLevel);
 
   shared = await sharing.unshareWithUser(adminA, connectionId, memberA.id);

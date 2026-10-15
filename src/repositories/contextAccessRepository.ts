@@ -1,7 +1,7 @@
 import config from '../config';
 import { CT } from '../models/contextModel';
 import { T } from '../models/rbacModel';
-import { accessLevelId } from '../constants/accessLevels';
+import { accessLevelId } from '../services/catalogueService';
 import type { Actor } from '../types/actor';
 
 const { db } = config.database;

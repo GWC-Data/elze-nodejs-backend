@@ -1,4 +1,5 @@
-import { ENVELOPE_KEYS, EVENT_LABELS, SUMMARY_MAX } from '../../constants/auditEvents';
+import { ENVELOPE_KEYS, SUMMARY_MAX } from '../../constants/auditEvents';
+import { auditEventLabel } from '../../services/catalogueService';
 
 type AuditEntry = Record<string, any>;
 
@@ -43,7 +44,7 @@ function shapeEntry(entry: AuditEntry, meta: AuditRowMeta = {}): AuditItem {
   const item: AuditItem = {
     ts: entry.ts,
     event: entry.event,
-    label: (EVENT_LABELS[entry.event] ?? String(entry.event || '').replace(/_/g, ' ')).toLowerCase(),
+    label: (auditEventLabel(String(entry.event || '')) ?? String(entry.event || '').replace(/_/g, ' ')).toLowerCase(),
     tone: toneFor(entry.event || ''),
     summary: summary.length > SUMMARY_MAX ? `${summary.slice(0, SUMMARY_MAX - 1)}…` : summary,
     detail,

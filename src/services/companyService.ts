@@ -14,8 +14,8 @@ import { revokeAllForCompany } from './tokenService';
 import { audit, EVENTS } from './auditService';
 import { parseFeatureIds, setInitialFeatures } from './featureService';
 import { seedForCompany } from './builtInRolesService';
-import { TOGGLEABLE_FEATURE_KEYS, effectiveFeatures, featureIdsOf } from '../constants/features';
-import { COMPANY_ADMIN, SYSTEM_ROLE_ID } from '../constants/permissions';
+import { effectiveFeatures, featureIdsOf, systemRoleId, toggleableFeatureKeys } from './catalogueService';
+import { COMPANY_ADMIN } from '../constants/roles';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
 import type { Actor } from '../types/actor';
 import type { Queryable } from '../config/pgPool';
@@ -101,7 +101,7 @@ async function createCompany(
 
   assertCanAssignRole(actor, COMPANY_ADMIN);
 
-  const featureKeys = featureIds === undefined ? [...TOGGLEABLE_FEATURE_KEYS] : parseFeatureIds(featureIds);
+  const featureKeys = featureIds === undefined ? toggleableFeatureKeys() : parseFeatureIds(featureIds);
 
   const { company, user, invitation } = await withTransaction(async (conn: Queryable) => {
     const companyRow = await insertCompany(actor, { name, slug }, conn);
@@ -114,7 +114,7 @@ async function createCompany(
         email: admin.email,
         displayName: admin.displayName,
         role: COMPANY_ADMIN,
-        roleId: SYSTEM_ROLE_ID[COMPANY_ADMIN],
+        roleId: systemRoleId(COMPANY_ADMIN),
       },
       conn
     );
@@ -145,7 +145,7 @@ async function createCompany(
     targetUsername: user.username,
     targetEmail: user.email,
     role: user.role,
-    roleId: SYSTEM_ROLE_ID[COMPANY_ADMIN],
+    roleId: systemRoleId(COMPANY_ADMIN),
     companyId: company.id,
   });
 

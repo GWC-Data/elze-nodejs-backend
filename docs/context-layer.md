@@ -17,8 +17,7 @@ services/providers/domoProvider.ts      the only implemented provider
 repositories/connectionRepository.ts    SQL for connections and datasets
 repositories/contextRepository.ts       SQL for context_objects and review decisions
 repositories/versionRepository.ts       SQL for context_layer_versions
-models/contextModel.ts                  this feature's tables (DDL)
-constants/connectorCatalogue.ts          the warehouses this platform knows about
+models/contextModel.ts                  this feature's table names
 constants/context.ts                     editable keys, glossary vocabulary, MCP tool list
 validators/contextValidator.ts          limit, dataset selection and extraction payload checks
 tools/secretBox.ts                       AES-256-GCM seal/open for stored credentials
@@ -57,8 +56,9 @@ repository, and nothing in this build will catch it.
 | File | What was added |
 |---|---|
 | `src/routes/index.ts` | `router.use('/context', …)` |
-| `src/services/bootstrapService.ts` | `createContextSchema()` after the RBAC tables |
-| `src/constants/permissions.ts` | `context.read`, `context.manage` |
+| `prisma/schema.prisma`, `prisma/migrations/` | this feature's tables |
+| `access_control.permissions` | the `context.*` permissions |
+| `public.connectors` | the warehouses this platform knows about |
 | `src/constants/auditEvents.ts` | the `CONTEXT_*` event names |
 | `src/constants/errorCodes.ts` | `CONNECTOR_AUTH_FAILED`, `CONNECTOR_UNREACHABLE` |
 | `.env` | `CREDENTIAL_SECRET` |
@@ -294,6 +294,6 @@ reads what that run wrote.
    `getTableProfile({ host, token, datasetId })`. A provider without the last one is
    refused by `tableProfile` with a clear message rather than crashing.
 2. Register it in `PROVIDERS` in `services/connectionService.ts`.
-3. Flip its `status` to `available` in `constants/connectorCatalogue.ts` and describe its
-   credential fields there — the dialog is rendered from that data, so a new
-   provider needs no new component.
+3. Write a migration that sets its `status` to `available` in `public.connectors` and
+   describes its credential fields in `credentials` — the dialog is rendered from that
+   data, so a new provider needs no new component.

@@ -76,43 +76,10 @@ const SUMMARY_MAX = 240;
 
 const AUDIT_SORTS: Record<string, string> = { ts: 'a.ts', event: 'a.event', actor: 'a.actor' };
 
-const AUDIT_CATEGORIES: Record<string, string[]> = {
-  company: ['company_', 'dashboard_', 'context_', 'access_granted', 'access_revoked'],
-  lakehouse: ['context_'],
-  auth: ['login_', 'logout', 'session_', 'refresh_', 'password_', 'account_'],
-  people: ['user_', 'group_', 'role_'],
-  dashboards: ['dashboard_', 'access_'],
-  companies: ['company_'],
-};
-
-const AUDIT_ACTIONS: Record<string, string[]> = {
-  create: ['_created', '_published', '_granted', '_assigned', '_activated'],
-  update: ['_updated', '_selected', '_decided', '_changed', '_resent'],
-  delete: ['_deleted', '_revoked', '_unassigned', '_deactivated'],
-};
-
-const EVENT_LABELS: Record<string, string> = {
-  context_connection_created: 'Lakehouse connection created',
-  context_connection_deleted: 'Lakehouse connection deleted',
-  context_datasets_selected: 'Lakehouse datasets updated',
-  context_review_decided: 'Lakehouse fact reviewed',
-  context_fact_updated: 'Lakehouse fact edited',
-  context_published: 'Lakehouse context published',
-  context_version_created: 'Lakehouse version created',
-  context_version_deleted: 'Lakehouse version deleted',
-  context_extraction_run: 'Lakehouse extraction run',
-  context_access_granted: 'Lakehouse context shared',
-  context_access_updated: 'Lakehouse sharing changed',
-  context_access_revoked: 'Lakehouse access removed',
-};
-
 export {
   EVENTS,
   FORBIDDEN_DETAIL_KEYS,
   ENVELOPE_KEYS,
   SUMMARY_MAX,
   AUDIT_SORTS,
-  AUDIT_CATEGORIES,
-  AUDIT_ACTIONS,
-  EVENT_LABELS,
 };

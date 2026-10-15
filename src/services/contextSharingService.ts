@@ -3,7 +3,7 @@ import { fail } from '../tools/AppError';
 import { requireId } from '../validators/commonValidator';
 import { GENERAL_ACCESS } from '../constants/context';
 import type { ContextAccessLevel, GeneralAccess } from '../constants/context';
-import { accessLevelsFor, accessLevelId } from '../constants/accessLevels';
+import { accessLevelsFor, accessLevelId } from './catalogueService';
 import { requireLevelId } from '../validators/accessValidator';
 import * as connections from './connectionService';
 import { assertMayShare } from './contextAccessService';

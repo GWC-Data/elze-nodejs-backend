@@ -25,14 +25,12 @@ type AuditScope =
 interface AuditFilter {
   scope: AuditScope;
   event?: string | null;
-  eventPrefixes?: string[] | null;
-  eventSuffixes?: string[] | null;
+  categoryEvents?: string[] | null;
+  actionEvents?: string[] | null;
   from?: string | null;
   to?: string | null;
   search?: string | null;
 }
-
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 const COLUMNS = `a.id, a.ts, a.event, a.actor_id, a.actor, a.actor_company_id, a.company_id,
                  a.target_user_id, a.detail, c.name AS company_name`;
@@ -69,13 +67,13 @@ function whereFor(filter: AuditFilter): { sql: string; params: unknown[] } {
     where.push('a.event = ?');
     params.push(filter.event);
   }
-  if (filter.eventPrefixes && filter.eventPrefixes.length) {
-    where.push('a.event LIKE ANY (?::text[])');
-    params.push(filter.eventPrefixes.map((prefix) => `${escapeLike(prefix)}%`));
+  if (filter.categoryEvents) {
+    where.push('a.event = ANY (?::text[])');
+    params.push(filter.categoryEvents);
   }
-  if (filter.eventSuffixes && filter.eventSuffixes.length) {
-    where.push('a.event LIKE ANY (?::text[])');
-    params.push(filter.eventSuffixes.map((suffix) => `%${escapeLike(suffix)}`));
+  if (filter.actionEvents) {
+    where.push('a.event = ANY (?::text[])');
+    params.push(filter.actionEvents);
   }
   if (filter.from) {
     where.push('a.ts >= ?::date');

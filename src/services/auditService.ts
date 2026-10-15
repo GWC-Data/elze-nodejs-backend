@@ -1,9 +1,17 @@
 import * as auditRepository from '../repositories/auditRepository';
-import { EVENTS, FORBIDDEN_DETAIL_KEYS, AUDIT_CATEGORIES, AUDIT_ACTIONS } from '../constants/auditEvents';
+import { EVENTS, FORBIDDEN_DETAIL_KEYS } from '../constants/auditEvents';
 import { fail } from '../tools/AppError';
-import { COMPANY_ADMIN } from '../constants/permissions';
+import { COMPANY_ADMIN } from '../constants/roles';
 import { shapeEntry } from '../views/serializers/auditSerializer';
-import { FEATURE_OF_PERMISSION, FEATURE_BY_ID, usableFeatures } from '../constants/features';
+import {
+  auditActions,
+  auditCategories,
+  auditEventsInCategory,
+  auditEventsWithAction,
+  featureById,
+  featureOfPermission,
+  usableFeatures,
+} from './catalogueService';
 import type { AuditScope } from '../repositories/auditRepository';
 import type { Actor } from '../types/actor';
 
@@ -113,12 +121,12 @@ function visibleDetail(detail: Record<string, unknown>, visible: Set<string> | n
   for (const key of FEATURE_ID_DETAIL_KEYS) {
     const value = out[key];
     if (!Array.isArray(value)) continue;
-    const kept = value.filter((id) => visible.has(FEATURE_BY_ID.get(String(id))?.key || ''));
+    const kept = value.filter((id) => visible.has(featureById(String(id))?.key || ''));
     if (kept.length) out[key] = kept;
     else delete out[key];
   }
   const permission = typeof out.permission === 'string' ? out.permission : null;
-  const owner = permission ? FEATURE_OF_PERMISSION.get(permission) : undefined;
+  const owner = permission ? featureOfPermission(permission) : undefined;
   if (owner && !visible.has(owner)) {
     delete out.permission;
     delete out.permissionId;
@@ -133,18 +141,18 @@ async function listEntries(
 ): Promise<{ items: AuditItem[]; total: number; scope: string }> {
   const scope = scopeFor(actor);
   const { event, category, action } = filters;
-  let eventPrefixes: string[] | null = null;
+  let categoryEvents: string[] | null = null;
   if (category) {
-    eventPrefixes = AUDIT_CATEGORIES[category] ?? null;
-    if (!eventPrefixes) {
-      throw fail('VALIDATION_ERROR', `Unknown category "${category}". Use one of: ${Object.keys(AUDIT_CATEGORIES).join(', ')}.`);
+    categoryEvents = auditEventsInCategory(category);
+    if (!categoryEvents) {
+      throw fail('VALIDATION_ERROR', `Unknown category "${category}". Use one of: ${auditCategories().join(', ')}.`);
     }
   }
-  let eventSuffixes: string[] | null = null;
+  let actionEvents: string[] | null = null;
   if (action) {
-    eventSuffixes = AUDIT_ACTIONS[action] ?? null;
-    if (!eventSuffixes) {
-      throw fail('VALIDATION_ERROR', `Unknown action "${action}". Use one of: ${Object.keys(AUDIT_ACTIONS).join(', ')}.`);
+    actionEvents = auditEventsWithAction(action);
+    if (!actionEvents) {
+      throw fail('VALIDATION_ERROR', `Unknown action "${action}". Use one of: ${auditActions().join(', ')}.`);
     }
   }
   const from = day(filters.from, 'from');
@@ -153,7 +161,7 @@ async function listEntries(
 
   const visible = actor.isPlatform ? null : new Set(usableFeatures(actor.features, actor.permissions));
   const page = await auditRepository.listPage(
-    { scope, event, eventPrefixes, eventSuffixes, from, to, search: list.search },
+    { scope, event, categoryEvents, actionEvents, from, to, search: list.search },
     list,
     (row) => shapeEntry({
       ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,

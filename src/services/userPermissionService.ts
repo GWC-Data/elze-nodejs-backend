@@ -5,8 +5,8 @@ import { requireUserInScope, requireManageable } from './userService';
 import { enabledFor } from './featureService';
 import { parsePermissions, permissionOptionsFor } from './companyRoleService';
 import { audit, EVENTS } from './auditService';
-import { USER, permissionIdsOf, permissionKeysOf } from '../constants/permissions';
-import { isPermissionEnabled, maskPermissions } from '../constants/features';
+import { USER } from '../constants/roles';
+import { isPermissionEnabled, maskPermissions, permissionIdsOf, permissionKeysOf } from './catalogueService';
 import type { Actor } from '../types/actor';
 
 type Row = Record<string, any>;

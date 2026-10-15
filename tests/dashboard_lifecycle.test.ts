@@ -5,28 +5,25 @@ import { T, V } from '../src/models/rbacModel';
 import { bootstrapAppMeta } from '../src/services/bootstrapService';
 import * as registry from '../src/services/dashboardService';
 import * as access from '../src/services/accessService';
-import {
-  DEFAULT_ROLE_PERMISSIONS,
-  PLATFORM_ONLY_PERMISSIONS,
-  PERMISSION_KEYS,
-  COMPANY_ADMIN,
-  USER,
-  SYSTEM_ROLE_ID,
-} from '../src/constants/permissions';
+import * as roleRepository from '../src/repositories/roleRepository';
+import { COMPANY_ADMIN, USER } from '../src/constants/roles';
+import { isPlatformOnly, loadCatalogue, permissionKeys, permissionKeysOf, systemRoleId } from '../src/services/catalogueService';
 import type { Actor } from '../src/types/actor';
 
 async function runTests(): Promise<void> {
   console.log('=== Starting Multi-Tenant Dashboard Architecture Tests ===\n');
 
   console.log('[1] Checking Permission Catalogue Role Bindings:');
+  await loadCatalogue();
+  const PERMISSION_KEYS = permissionKeys();
   assert(PERMISSION_KEYS.includes('dashboard.create'), 'Catalogue must include dashboard.create');
   assert(PERMISSION_KEYS.includes('dashboard.update'), 'Catalogue must include dashboard.update');
   assert(PERMISSION_KEYS.includes('dashboard.delete'), 'Catalogue must include dashboard.delete');
   assert(PERMISSION_KEYS.includes('dashboard.assign'), 'Catalogue must include dashboard.assign');
   console.log('  ✓ Catalogue defines dashboard.create, dashboard.update, dashboard.delete, dashboard.assign');
 
-  const companyAdminPerms = DEFAULT_ROLE_PERMISSIONS[COMPANY_ADMIN];
-  const userPerms = DEFAULT_ROLE_PERMISSIONS[USER];
+  const companyAdminPerms = permissionKeysOf(await roleRepository.permissionIds(systemRoleId(COMPANY_ADMIN)));
+  const userPerms = permissionKeysOf(await roleRepository.permissionIds(systemRoleId(USER)));
 
   assert(companyAdminPerms.includes('dashboard.create'), 'COMPANY_ADMIN must have dashboard.create');
   assert(companyAdminPerms.includes('dashboard.update'), 'COMPANY_ADMIN must have dashboard.update');
@@ -40,8 +37,8 @@ async function runTests(): Promise<void> {
   assert(!userPerms.includes('dashboard.assign'), 'USER must NOT have dashboard.assign');
   console.log('  ✓ USER has create and update; strictly forbidden from delete and assign');
 
-  assert(PLATFORM_ONLY_PERMISSIONS.has('dashboard.assign'), 'dashboard.assign must be PLATFORM_ONLY');
-  assert(!PLATFORM_ONLY_PERMISSIONS.has('dashboard.update'), 'dashboard.update must not be platform-only');
+  assert(isPlatformOnly('dashboard.assign'), 'dashboard.assign must be PLATFORM_ONLY');
+  assert(!isPlatformOnly('dashboard.update'), 'dashboard.update must not be platform-only');
   console.log('  ✓ PLATFORM_ONLY_PERMISSIONS correctly confines cross-company assignment\n');
 
   console.log('[2] Bootstrapping Database Schema:');
@@ -62,11 +59,11 @@ async function runTests(): Promise<void> {
 
   const rolePermRows = await db.query(
     `SELECT role_id, permissions FROM ${V.rolePermissionSummary} WHERE role_id IN (?, ?)`,
-    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
+    [systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
   );
   const permsOf = (roleId: string): string[] => rolePermRows.rows.find((r) => r.role_id === roleId)?.permissions || [];
-  const adminPermsInDb = permsOf(SYSTEM_ROLE_ID[COMPANY_ADMIN]);
-  const userPermsInDb = permsOf(SYSTEM_ROLE_ID[USER]);
+  const adminPermsInDb = permsOf(systemRoleId(COMPANY_ADMIN));
+  const userPermsInDb = permsOf(systemRoleId(USER));
   assert(adminPermsInDb.includes('dashboard.create'), 'COMPANY_ADMIN must have dashboard.create in DB');
   assert(adminPermsInDb.includes('dashboard.update'), 'COMPANY_ADMIN must have dashboard.update in DB');
   assert(adminPermsInDb.includes('dashboard.delete'), 'COMPANY_ADMIN must have dashboard.delete in DB');
@@ -111,7 +108,7 @@ async function runTests(): Promise<void> {
     `INSERT INTO ${T.userRoles} (user_id, role_id)
      VALUES (8881, ?), (8882, ?), (8883, ?)
      ON CONFLICT (user_id) DO NOTHING`,
-    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
+    [systemRoleId(COMPANY_ADMIN), systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
   );
 
   await registry.deleteDashboard(dashA_Id).catch(() => {});

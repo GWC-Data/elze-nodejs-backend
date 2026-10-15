@@ -1,14 +1,6 @@
 import { fail } from '../tools/AppError';
-import {
-  ROLE_SCOPES,
-  ALL_PERMISSION_KEYS,
-  PLATFORM_ONLY_PERMISSIONS,
-  ROLE_SCOPE_BY_NAME,
-  SUPER_ADMIN,
-  LEVEL_RANK,
-  USER,
-} from '../constants/permissions';
-import { FEATURE_KEYS, FEATURE_OF_PERMISSION } from '../constants/features';
+import { ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../constants/roles';
+import { featureKeys, featureOfPermission, isKnownPermission, isPlatformOnly, levelRank } from './catalogueService';
 import type { Actor } from '../types/actor';
 
 type UserRow = Record<string, any>;
@@ -16,12 +8,12 @@ type UserRow = Record<string, any>;
 function buildActor(
   userRow: UserRow | null | undefined,
   permissions: Iterable<string>,
-  features: readonly string[] = FEATURE_KEYS
+  features: readonly string[] = featureKeys()
 ): Actor {
   if (!userRow || !userRow.id) {
     throw new Error('buildActor requires a user row');
   }
-  const roleScope = ROLE_SCOPE_BY_NAME.get(userRow.role);
+  const roleScope = scopeOfTier(userRow.role);
   if (!roleScope) {
     throw fail(
       'INTERNAL_ERROR',
@@ -49,7 +41,7 @@ function buildActor(
     status: userRow.status,
     mustChangePassword: Boolean(userRow.must_change_password),
     permissions: Object.freeze([...permissions]),
-    features: Object.freeze(isPlatform ? [...FEATURE_KEYS] : [...features]),
+    features: Object.freeze(isPlatform ? featureKeys() : [...features]),
     roleId: userRow.role_id ?? null,
     roleName: userRow.role_name ?? null,
   };
@@ -57,14 +49,14 @@ function buildActor(
 
 function missingFeature(actor: Actor, permission: string): string | null {
   if (actor.isPlatform) return null;
-  const feature = FEATURE_OF_PERMISSION.get(permission);
+  const feature = featureOfPermission(permission);
   return feature && !actor.features.includes(feature) ? feature : null;
 }
 
 function can(actor: Actor | null | undefined, permission: string): boolean {
   if (!actor) return false;
-  if (!ALL_PERMISSION_KEYS.has(permission)) {
-    throw new Error(`Unknown permission "${permission}". Add it to constants/permissions.ts.`);
+  if (!isKnownPermission(permission)) {
+    throw new Error(`Unknown permission "${permission}". Add it to access_control.permissions with a migration.`);
   }
   if (actor.role === SUPER_ADMIN) return true;
   return actor.permissions.includes(permission);
@@ -108,18 +100,18 @@ function assertCompanyMatch(actor: Actor, resourceCompanyId: unknown, what: stri
 function strongestLevel(levels: readonly string[] | null | undefined): string | null {
   let best: string | null = null;
   for (const level of levels || []) {
-    if (!LEVEL_RANK[level]) continue;
-    if (!best || LEVEL_RANK[level] > LEVEL_RANK[best]) best = level;
+    if (!levelRank('dashboard', level)) continue;
+    if (!best || levelRank('dashboard', level) > levelRank('dashboard', best)) best = level;
   }
   return best;
 }
 
 function levelAtLeast(level: string | null | undefined, required: string): boolean {
-  return Boolean(level) && (LEVEL_RANK[level!] || 0) >= (LEVEL_RANK[required] || 0);
+  return Boolean(level) && levelRank('dashboard', level) >= levelRank('dashboard', required);
 }
 
 function assertCanAssignRole(actor: Actor, targetRole: string) {
-  const scope = ROLE_SCOPE_BY_NAME.get(targetRole);
+  const scope = scopeOfTier(targetRole);
   if (!scope) throw fail('VALIDATION_ERROR', `Unknown role: "${targetRole}"`);
   if (scope === ROLE_SCOPES.platform && !actor.isPlatform) {
     throw fail('INSUFFICIENT_PERMISSION', `Only a platform administrator can assign the ${targetRole} role.`);
@@ -132,7 +124,7 @@ function assertCanManageUser(actor: Actor, target: UserRow): void {
     throw fail('VALIDATION_ERROR', 'Use your profile to change your own account.');
   }
 
-  const targetScope = ROLE_SCOPE_BY_NAME.get(target.role);
+  const targetScope = scopeOfTier(target.role);
   if (targetScope === ROLE_SCOPES.platform && !actor.isPlatform) {
     throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
   }
@@ -152,7 +144,7 @@ function assertCanManageUser(actor: Actor, target: UserRow): void {
 
 function assertRolePermissionsAllowed(roleScope: string, permissions: readonly string[]): void {
   if (roleScope === ROLE_SCOPES.platform) return;
-  const escaping = permissions.filter((p) => PLATFORM_ONLY_PERMISSIONS.has(p));
+  const escaping = permissions.filter((p) => isPlatformOnly(p));
   if (escaping.length) {
     throw fail(
       'VALIDATION_ERROR',
