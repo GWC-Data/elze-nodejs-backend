@@ -12,6 +12,8 @@ const { bootstrapAppMeta } = bootstrapService;
 import secretBox = require('../src/tools/secretBox');
 const { seal, open, hint } = secretBox;
 import domo = require('../src/services/providers/domoProvider');
+import throttleTools = require('../src/tools/throttle');
+const { Throttle } = throttleTools;
 import service = require('../src/services/connectionService');
 import store = require('../src/services/contextService');
 import publish = require('../src/services/publishService');
@@ -58,6 +60,10 @@ async function codeOf(work: () => unknown): Promise<string | null> {
 
 const GOOD_TOKEN = 'domo-token-that-works';
 const GOOD_HOST = 'acme.domo.com';
+const KNOWN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000001';
+const MISSING_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000404';
+const FORBIDDEN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000403';
+const listAll = (options: { limit?: number } = {}) => domo.listDatasets({ host: GOOD_HOST, token: GOOD_TOKEN, ...options });
 
 let datasetCount = 3;
 let seenRequests: SeenRequest[] = [];
@@ -103,6 +109,12 @@ function installFakeDomo() {
     }
 
     const detail = target.pathname.match(/^\/api\/data\/v3\/datasources\/(.+)$/);
+    if (detail && detail[1] === MISSING_DATASET_ID) {
+      return json({ status: 404, message: 'Datasource does not exist.' }, 404);
+    }
+    if (detail && detail[1] === FORBIDDEN_DATASET_ID) {
+      return json({ status: 403, message: 'Forbidden' }, 403);
+    }
     if (detail) {
       return json({
         id: detail[1],
@@ -286,7 +298,7 @@ async function cleanup(): Promise<void> {
   const crossRead = await codeOf(() => service.requireConnection(adminB, connectionId));
   check('another company gets 404, not 403', crossRead === 'RESOURCE_NOT_FOUND', crossRead);
 
-  const crossDatasets = await codeOf(() => service.fetchDatasets(adminB, connectionId));
+  const crossDatasets = await codeOf(() => service.fetchDatasetPage(adminB, connectionId));
   check('another company cannot list its datasets', crossDatasets === 'RESOURCE_NOT_FOUND', crossDatasets);
 
   const crossDelete = await codeOf(() => service.deleteConnection(adminB, connectionId));
@@ -376,7 +388,7 @@ async function cleanup(): Promise<void> {
   section('Listing datasets');
 
   datasetCount = 3;
-  const listing = await service.fetchDatasets(adminA, connectionId);
+  const listing = await listAll();
   const listed = listing.datasets;
   check('the datasets are listed', listed.length === 3, String(listed.length));
   check('each carries the id a context needs', listed.every((d: any) => typeof d.id === 'string' && d.id));
@@ -386,7 +398,7 @@ async function cleanup(): Promise<void> {
 
   datasetCount = 260;
   seenRequests = [];
-  const paged = (await service.fetchDatasets(adminA, connectionId, { limit: 260 })).datasets;
+  const paged = (await listAll({ limit: 260 })).datasets;
   check('paging reads every dataset', paged.length === 260, String(paged.length));
   const listCalls = seenRequests.filter((r) => r.path === '/api/data/v3/datasources');
   check('it took six pages of 50', listCalls.length === 6, String(listCalls.length));
@@ -409,7 +421,7 @@ async function cleanup(): Promise<void> {
   datasetCount = 0;
   check(
     'a token with no datasets is not an error',
-    (await service.fetchDatasets(adminA, connectionId)).datasets.length === 0
+    (await listAll()).datasets.length === 0
   );
 
   section('The listing limit');
@@ -417,7 +429,7 @@ async function cleanup(): Promise<void> {
   datasetCount = 260;
 
   seenRequests = [];
-  const capped = await service.fetchDatasets(adminA, connectionId);
+  const capped = await listAll();
   check('the default stops at 20', capped.datasets.length === 20, String(capped.datasets.length));
   check('the applied limit is reported', capped.limit === 20, String(capped.limit));
   check('it says there is more', capped.truncated === true);
@@ -427,7 +439,7 @@ async function cleanup(): Promise<void> {
   );
 
   seenRequests = [];
-  const ten = await service.fetchDatasets(adminA, connectionId, { limit: 10 });
+  const ten = await listAll({ limit: 10 });
   check('an explicit limit is honoured', ten.datasets.length === 10, String(ten.datasets.length));
   check(
     'it asks for one row beyond the limit, to detect more',
@@ -439,29 +451,29 @@ async function cleanup(): Promise<void> {
   check('ten of 260 is truncated', ten.truncated === true);
 
   datasetCount = 10;
-  const exact = await service.fetchDatasets(adminA, connectionId, { limit: 10 });
+  const exact = await listAll({ limit: 10 });
   check('exactly-the-limit is not truncated', exact.truncated === false, String(exact.truncated));
   check('and still returns them all', exact.datasets.length === 10, String(exact.datasets.length));
 
   datasetCount = 5;
-  const under = await service.fetchDatasets(adminA, connectionId, { limit: 50 });
+  const under = await listAll({ limit: 50 });
   check('a limit above the total returns the total', under.datasets.length === 5, String(under.datasets.length));
   check('and is not truncated', under.truncated === false);
 
   datasetCount = 137;
-  const overPage = await service.fetchDatasets(adminA, connectionId, { limit: 100 });
+  const overPage = await listAll({ limit: 100 });
   check('a limit on a page boundary still detects more',
     overPage.truncated === true, String(overPage.truncated));
   check('and returns exactly the limit',
     overPage.datasets.length === 100, String(overPage.datasets.length));
 
   datasetCount = 100;
-  const onPage = await service.fetchDatasets(adminA, connectionId, { limit: 100 });
+  const onPage = await listAll({ limit: 100 });
   check('exactly a page-boundary total is not truncated',
     onPage.truncated === false, String(onPage.truncated));
 
   datasetCount = 51;
-  const justOver = await service.fetchDatasets(adminA, connectionId, { limit: 50 });
+  const justOver = await listAll({ limit: 50 });
   check('one beyond a single page is truncated',
     justOver.truncated === true, String(justOver.truncated));
 
@@ -478,20 +490,106 @@ async function cleanup(): Promise<void> {
     ['{ searchResultsMap: { DATASET } }', (rows) => ({ searchResultsMap: { DATASET: rows } })],
   ]) {
     responseShape = wrap;
-    const got = (await service.fetchDatasets(adminA, connectionId)).datasets;
+    const got = (await listAll()).datasets;
     check(`${label} is read correctly`, got.length === 3, String(got.length));
   }
 
   responseShape = () => ({ totalResultCount: 42, somethingElse: {} });
-  const unknownShape = await codeOf(() => service.fetchDatasets(adminA, connectionId));
+  const unknownShape = await codeOf(() => listAll());
   check('an unrecognised shape is an error, not an empty list',
     unknownShape === 'CONNECTOR_UNREACHABLE', unknownShape);
 
   responseShape = () => ({ dataSources: [] });
   check('a genuinely empty list is still not an error',
-    (await service.fetchDatasets(adminA, connectionId)).datasets.length === 0);
+    (await listAll()).datasets.length === 0);
 
   responseShape = (rows) => rows;
+
+  section('One page of datasets at a time');
+
+  datasetCount = 137;
+  responseShape = (rows, total) => ({ dataSources: rows, _metaData: { totalCount: total } });
+  seenRequests = [];
+  const pageOne = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, fresh: true });
+  const pageCalls = () => seenRequests.filter((r) => r.path === '/api/data/v3/datasources');
+  check('a page holds exactly the page size', pageOne.datasets.length === 25, String(pageOne.datasets.length));
+  check('the total comes from Domo', pageOne.total === 137, String(pageOne.total));
+  check('it knows there is more', pageOne.hasMore === true);
+  check('one Domo call per page', pageCalls().length === 1, String(pageCalls().length));
+  check('it asks Domo for exactly that page',
+    new URLSearchParams(pageCalls()[0].query).get('limit') === '25'
+      && new URLSearchParams(pageCalls()[0].query).get('offset') === '0',
+    pageCalls()[0].query);
+
+  const lastPage = await service.fetchDatasetPage(adminA, connectionId, { page: 6, pageSize: 25 });
+  check('the last page holds the remainder', lastPage.datasets.length === 12, String(lastPage.datasets.length));
+  check('and says there is no more', lastPage.hasMore === false);
+  check('its offset follows the page', new URLSearchParams(pageCalls()[1].query).get('offset') === '125');
+
+  seenRequests = [];
+  const again = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25 });
+  check('a page seen recently is served without calling Domo', again.cached === true && pageCalls().length === 0);
+  const refreshed = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, fresh: true });
+  check('refresh goes back to Domo', refreshed.cached === false && pageCalls().length === 1);
+
+  seenRequests = [];
+  await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: 'Dataset 01' });
+  check('search is sent to Domo by name',
+    new URLSearchParams(pageCalls()[0].query).get('nameLike') === 'Dataset 01', pageCalls()[0].query);
+
+  seenRequests = [];
+  const byId = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: KNOWN_DATASET_ID, fresh: true });
+  check('a full dataset id is looked up directly',
+    byId.datasets.length === 1 && byId.datasets[0].id === KNOWN_DATASET_ID && byId.total === 1 && byId.hasMore === false,
+    JSON.stringify(byId.datasets.map((d: any) => d.id)));
+  check('by asking Domo for that one dataset',
+    seenRequests.some((r) => r.path === '/api/data/v3/datasources/' + KNOWN_DATASET_ID)
+      && !seenRequests.some((r) => r.path === '/api/data/v3/datasources'));
+
+  const missing = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: MISSING_DATASET_ID, fresh: true });
+  check('an id Domo does not know is an empty result, not an error', missing.datasets.length === 0 && missing.total === 0);
+  const forbidden = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: FORBIDDEN_DATASET_ID, fresh: true });
+  check('an id the token cannot see is also just empty', forbidden.datasets.length === 0 && forbidden.total === 0);
+  check('and neither marks the connection invalid',
+    (await service.requireConnection(adminA, connectionId)).status === 'connected');
+
+  const oddSize = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 30, fresh: true });
+  check('an unsupported page size falls back to 25', oddSize.pageSize === 25, String(oddSize.pageSize));
+
+  responseShape = (rows) => rows;
+  const noTotal = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 10, fresh: true });
+  check('without a total, a full page means there may be more', noTotal.total === null && noTotal.hasMore === true);
+
+  const plainFetch = global.fetch;
+  let inFlight = 0;
+  let peak = 0;
+  const starts: number[] = [];
+  global.fetch = (async (url: string, init?: RequestInit) => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    starts.push(Date.now());
+    await new Promise((done) => setTimeout(done, 150));
+    inFlight -= 1;
+    return plainFetch(url, init);
+  }) as typeof fetch;
+  await Promise.all([1, 2, 3, 4].map((page) =>
+    service.fetchDatasetPage(adminA, connectionId, { page, pageSize: 10, fresh: true })));
+  global.fetch = plainFetch;
+  check('the throttle keeps at most two Domo calls in flight', peak <= 2, String(peak));
+  const gaps = starts.slice(1).map((t, i) => t - starts[i]);
+  check('and spaces their starts', gaps.every((gap) => gap >= 240), JSON.stringify(gaps));
+
+  const tight = new Throttle({ concurrent: 1, gapMs: 0, maxWaiting: 1 });
+  let release: () => void = () => undefined;
+  const holding = tight.run('k', () => new Promise<void>((done) => { release = done; }));
+  const queued = tight.run('k', async () => 'second');
+  const overflow = await codeOf(() => tight.run('k', async () => 'third'));
+  check('a full queue is refused with RATE_LIMITED', overflow === 'RATE_LIMITED', overflow);
+  release();
+  await holding;
+  check('the queued call still runs', (await queued) === 'second');
+
+  datasetCount = 3;
 
   section('Choosing datasets');
 
@@ -599,7 +697,7 @@ async function cleanup(): Promise<void> {
     return realFetch(url, init);
   }) as typeof fetch;
 
-  const revoked = await codeOf(() => service.fetchDatasets(adminA, connectionId));
+  const revoked = await codeOf(() => service.fetchDatasetPage(adminA, connectionId, { fresh: true }));
   check('a revoked token is CONNECTOR_AUTH_FAILED', revoked === 'CONNECTOR_AUTH_FAILED', revoked);
 
   const afterRevoke = await service.requireConnection(adminA, connectionId);

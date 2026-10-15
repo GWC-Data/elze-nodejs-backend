@@ -9,6 +9,10 @@ function connectors(req: Request, res: Response): void {
   ok(res, contextLayer.listConnectors());
 }
 
+async function draftConnections(req: Request, res: Response): Promise<void> {
+  ok(res, await contextLayer.listDraftConnections(req.actor, req.query));
+}
+
 async function connections(req: Request, res: Response): Promise<void> {
   ok(res, await contextLayer.listConnections(req.actor));
 }
@@ -176,6 +180,7 @@ async function setGeneralAccess(req: Request, res: Response): Promise<void> {
 export {
   connectors,
   connections,
+  draftConnections,
   publishedVersions,
   publishedConnections,
   publishedContexts,

@@ -1,4 +1,7 @@
+import crypto from 'crypto';
 import { fail } from '../../tools/AppError';
+import { Throttle } from '../../tools/throttle';
+import TtlCache from '../../tools/ttlCache';
 
 type DomoPayload = any;
 type DomoRow = Record<string, any>;
@@ -37,19 +40,28 @@ const REQUEST_TIMEOUT_MS = 20000;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = MAX_PAGES * PAGE_SIZE;
 
+const DATASET_PAGE_SIZES = [10, 25, 50];
+const DEFAULT_DATASET_PAGE_SIZE = 25;
+const MAX_DATASET_SEARCH = 100;
+const DATASET_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const DOMO_THROTTLE = new Throttle({ concurrent: 2, gapMs: 250, maxWaiting: 20 });
+const DATASET_PAGES = new TtlCache(2 * 60 * 1000);
+
 const DATASET_PARTS = [
   'core', 'permission', 'status', 'pdp', 'rowcolcount', 'certification',
   'sharecount', 'alertcount', 'dataprovider', 'features', 'impactcounts',
   'functions', 'cryo', 'warnings', 'pharos',
 ].join(',');
 
-function datasetPageQuery(offset: number, pageSize: number): string {
+function datasetPageQuery(offset: number, pageSize: number, search = ''): string {
   return (
     `?limit=${pageSize}` +
     `&offset=${offset}` +
     `&part=${DATASET_PARTS}` +
     '&includeHidden=true' +
-    '&orderBy=createdAt'
+    '&orderBy=createdAt' +
+    (search ? `&nameLike=${encodeURIComponent(search)}` : '')
   );
 }
 
@@ -81,44 +93,48 @@ async function callDomo(host: string, token: string, path: string, { method = 'G
   const url = `https://${host}${path}`;
 
   let response: Response;
+  let text: string;
   try {
-    response = await fetch(url, {
-      method,
-      headers: {
-        'X-DOMO-Developer-Token': token,
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    [response, text] = await DOMO_THROTTLE.run(host, async () => {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'X-DOMO-Developer-Token': token,
+          Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      return [res, await res.text()] as [Response, string];
     });
   } catch (err: any) {
+    if (err && err.code === 'RATE_LIMITED') throw err;
     const reason = err.name === 'TimeoutError'
       ? `it did not respond within ${REQUEST_TIMEOUT_MS / 1000} seconds`
       : err.message;
     throw fail('CONNECTOR_UNREACHABLE', `Could not reach ${host}: ${reason}`);
   }
 
-  const text = await response.text();
   let payload: DomoPayload = null;
   if (text) {
     try { payload = JSON.parse(text); } catch { }
   }
 
   if (response.status === 401 || response.status === 403) {
-    throw fail(
+    throw Object.assign(fail(
       'CONNECTOR_AUTH_FAILED',
       `${host} rejected that access token. Check it has not been revoked or expired, ` +
       'and that it was issued by this instance.'
-    );
+    ), { upstreamStatus: response.status });
   }
 
   if (!response.ok) {
     const detail = (payload && (payload.message || payload.error)) || text.slice(0, 200) || 'no detail';
-    throw fail(
+    throw Object.assign(fail(
       'CONNECTOR_UNREACHABLE',
       `${host} answered ${response.status} for ${path}: ${detail}`
-    );
+    ), { upstreamStatus: response.status });
   }
 
   return payload;
@@ -169,6 +185,84 @@ function extractRows(payload: DomoPayload): any[] | null {
   return null;
 }
 
+function unrecognised(host: string, payload: DomoPayload): Error {
+  const shape = payload && typeof payload === 'object'
+    ? Object.keys(payload).join(', ') || '(no keys)'
+    : typeof payload;
+  console.error(
+    `[domo] unrecognised response from ${DATASET_LIST_PATH} - keys: ${shape}
+` +
+    `[domo] sample: ${JSON.stringify(payload).slice(0, 600)}`
+  );
+  return fail(
+    'CONNECTOR_UNREACHABLE',
+    `${host} answered ${DATASET_LIST_PATH} with something this connector does not ` +
+    `recognise (fields: ${shape}). The instance API may have changed - the server log ` +
+    'has the response, and services/providers/domoProvider.ts is the only file that needs to change.'
+  );
+}
+
+async function findDatasetById(host: string, token: string, datasetId: string): Promise<Dataset | null> {
+  try {
+    return shapeDataset(await callDomo(host, token, `${datasetDetailPath(datasetId)}?part=core,rowcolcount`));
+  } catch (err: any) {
+    if (err && (err.upstreamStatus === 404 || err.upstreamStatus === 403)) return null;
+    throw err;
+  }
+}
+
+function resolvePageSize(value: unknown): number {
+  const size = Math.floor(Number(value));
+  return DATASET_PAGE_SIZES.includes(size) ? size : DEFAULT_DATASET_PAGE_SIZE;
+}
+
+async function listDatasetPage({ host, token, page, pageSize, search, fresh = false }: {
+  host: string;
+  token: string;
+  page?: unknown;
+  pageSize?: unknown;
+  search?: unknown;
+  fresh?: boolean;
+}): Promise<{ datasets: Dataset[]; page: number; pageSize: number; total: number | null; hasMore: boolean; cached: boolean }> {
+  const size = resolvePageSize(pageSize);
+  const pageNumber = Math.max(1, Math.floor(Number(page)) || 1);
+  const offset = (pageNumber - 1) * size;
+  const needle = String(search ?? '').trim().slice(0, MAX_DATASET_SEARCH);
+  const account = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
+  const key = `${host}|${account}|${size}|${offset}|${needle.toLowerCase()}`;
+
+  if (!fresh) {
+    const hit = DATASET_PAGES.get(key);
+    if (hit) return { ...hit, cached: true };
+  } else {
+    DATASET_PAGES.invalidatePrefix(`${host}|${account}|`);
+  }
+
+  if (DATASET_ID_PATTERN.test(needle)) {
+    const found = pageNumber === 1 ? await findDatasetById(host, token, needle.toLowerCase()) : null;
+    const byId = { datasets: found ? [found] : [], page: pageNumber, pageSize: size, total: found ? 1 : 0, hasMore: false };
+    DATASET_PAGES.set(key, byId);
+    return { ...byId, cached: false };
+  }
+
+  const payload = await callDomo(host, token, DATASET_LIST_PATH + datasetPageQuery(offset, size, needle));
+  const rows = extractRows(payload);
+  if (rows === null) throw unrecognised(host, payload);
+
+  const datasets = rows.map(shapeDataset).filter((d): d is Dataset => d !== null);
+  const reported = Number(payload && payload._metaData && payload._metaData.totalCount);
+  const total = Number.isFinite(reported) ? reported : null;
+  const result = {
+    datasets,
+    page: pageNumber,
+    pageSize: size,
+    total,
+    hasMore: total !== null ? offset + datasets.length < total : datasets.length === size,
+  };
+  DATASET_PAGES.set(key, result);
+  return { ...result, cached: false };
+}
+
 async function listDatasets({ host, token, limit }: { host?: any; token?: any; limit?: unknown } = {}): Promise<{ datasets: Dataset[]; truncated: boolean; limit: number }> {
   const target = resolveLimit(limit);
   const ceiling = target + 1;
@@ -184,22 +278,7 @@ async function listDatasets({ host, token, limit }: { host?: any; token?: any; l
     const payload = await callDomo(host, token, DATASET_LIST_PATH + datasetPageQuery(offset, pageSize));
 
     const rows = extractRows(payload);
-    if (rows === null) {
-      const shape = payload && typeof payload === 'object'
-        ? Object.keys(payload).join(', ') || '(no keys)'
-        : typeof payload;
-      console.error(
-        `[domo] unrecognised response from ${DATASET_LIST_PATH} - keys: ${shape}
-` +
-        `[domo] sample: ${JSON.stringify(payload).slice(0, 600)}`
-      );
-      throw fail(
-        'CONNECTOR_UNREACHABLE',
-        `${host} answered ${DATASET_LIST_PATH} with something this connector does not ` +
-        `recognise (fields: ${shape}). The instance API may have changed - the server log ` +
-        'has the response, and services/providers/domoProvider.js is the only file that needs to change.'
-      );
-    }
+    if (rows === null) throw unrecognised(host, payload);
 
     offset += rows.length;
 
@@ -345,8 +424,10 @@ function firstFiniteNumber(...candidates: unknown[]): number | null {
 }
 
 export {
+  DATASET_PAGE_SIZES,
   normaliseHost,
   verify,
   listDatasets,
+  listDatasetPage,
   getTableProfile,
 };

@@ -12,6 +12,7 @@ router.use(...authenticated);
 
 router.get('/connectors', read, context.connectors);
 router.get('/connections', read, context.connections);
+router.get('/connections/drafts', read, context.draftConnections);
 router.get('/published-versions', read, context.publishedVersions);
 router.get('/published-connections', read, context.publishedConnections);
 router.get('/published-contexts', read, context.publishedContexts);

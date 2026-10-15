@@ -2,6 +2,7 @@ import config from '../config';
 import { CT } from '../models/contextModel';
 import { companyScope, queryOrNotFound } from './baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
+import { likePattern } from '../tools/listQuery';
 import type { Queryable } from '../config/pgPool';
 import type { Actor } from '../types/actor';
 
@@ -25,6 +26,44 @@ async function listForActor(actor: Actor, seeAll: boolean) {
     [...access.params, ...scope.params, ...visible.params]
   );
   return rows;
+}
+
+async function listDrafts(
+  actor: Actor,
+  seeAll: boolean,
+  { search, offset, limit }: { search: string; offset: number; limit: number }
+): Promise<{ rows: any[]; total: number }> {
+  const scope = companyScope(actor, 'c.company_id');
+  const access = accessColumns(actor);
+  const visible = visibleClause(actor, seeAll);
+  const where = [
+    scope.clause,
+    visible.sql,
+    `(d.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM ${CT.versions} p
+                                        WHERE p.connection_id = c.id AND p.status = 'published'))`,
+  ];
+  const params: unknown[] = [...scope.params, ...visible.params];
+  if (search) {
+    where.push('(c.name ILIKE ? OR d.name ILIKE ?)');
+    const pattern = likePattern(search);
+    params.push(pattern, pattern);
+  }
+  const from = `FROM ${CT.connections} c
+       LEFT JOIN ${CT.versions} d ON d.connection_id = c.id AND d.status = 'draft'
+      WHERE ${where.join(' AND ')}`;
+
+  const { rows: [{ n }] } = await db.query(`SELECT COUNT(*)::int AS n ${from}`, params);
+  const { rows } = await db.query(
+    `SELECT ${COLUMNS}, ${access.sql},
+            (SELECT COUNT(*) FROM ${CT.datasets} ds WHERE ds.connection_id = c.id) AS "selectedDatasetCount",
+            d.name AS draft_name, d.version AS draft_version, d.current_step AS draft_step,
+            d.updated_at AS draft_updated_at
+       ${from}
+      ORDER BY COALESCE(d.updated_at, c.created_at) DESC, c.name
+      LIMIT ? OFFSET ?`,
+    [...access.params, ...params, limit, offset]
+  );
+  return { rows, total: n };
 }
 
 async function listPublished(actor: Actor, seeAll: boolean) {
@@ -148,6 +187,7 @@ async function remove(id: string): Promise<void> {
 
 export {
   listForActor,
+  listDrafts,
   listPublished,
   listPublishedVersions,
   findWithSecret,

@@ -13,6 +13,8 @@ import {
 import * as domo from './providers/domoProvider';
 import { CONNECTION_STATUS } from '../constants/statuses';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
+import { MAX_CONTEXTS_PAGE, MAX_SEARCH_LENGTH } from '../constants/pagination';
+import { pageOf } from '../tools/pagination';
 import { accessOf, assertLevel, isContextAdmin } from './contextAccessService';
 import type { ContextAccess } from './contextAccessService';
 import type { ContextAccessLevel } from '../constants/context';
@@ -207,10 +209,16 @@ async function createConnection(actor: Actor, companyId: number | null, { provid
   };
 }
 
-async function fetchDatasets(actor: Actor, id: unknown, { limit }: { limit?: number } = {}): Promise<any> {
+async function fetchDatasetPage(
+  actor: Actor,
+  id: unknown,
+  { page, pageSize, search, fresh }: { page?: unknown; pageSize?: unknown; search?: unknown; fresh?: boolean } = {}
+): Promise<any> {
   const row = await loadRow(actor, id);
   const impl = providerFor(row.provider);
-  return callWarehouse(row, (token) => impl.listDatasets({ host: row.host, token, limit }));
+  return callWarehouse(row, (token) =>
+    impl.listDatasetPage({ host: row.host, token, page, pageSize, search, fresh })
+  );
 }
 
 async function verifyConnection(actor: Actor, id: unknown): Promise<{ connection: any; account: any }> {
@@ -233,15 +241,43 @@ async function deleteConnection(actor: Actor, id: unknown): Promise<{ provider: 
   return { provider: row.provider, name: row.name, companyId: row.company_id ?? null };
 }
 
+async function listDraftConnections(actor: Actor, query: Record<string, unknown> = {}) {
+  const search = String(query.search || '').trim().slice(0, MAX_SEARCH_LENGTH);
+  const { page, pageSize, offset } = pageOf(query, 10, MAX_CONTEXTS_PAGE);
+  const { rows, total } = await connectionRepository.listDrafts(actor, isContextAdmin(actor), {
+    search,
+    offset,
+    limit: pageSize,
+  });
+  return {
+    items: rows.map((row: Row) => ({
+      ...shapeConnection(row, undefined, accessOf(actor, row)),
+      draft: row.draft_version === null || row.draft_version === undefined
+        ? null
+        : {
+            name: row.draft_name,
+            version: Number(row.draft_version),
+            label: `v${row.draft_version}`,
+            step: row.draft_step || null,
+            updatedAt: row.draft_updated_at,
+          },
+    })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
 export {
   listConnections,
+  listDraftConnections,
   factTotals,
   listPublishedConnections,
   listPublishedVersionOptions,
   requireConnection,
   requireConnectionId,
   createConnection,
-  fetchDatasets,
+  fetchDatasetPage,
   profileOverview,
   tableProfile,
   verifyConnection,

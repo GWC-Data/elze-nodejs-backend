@@ -1,5 +1,6 @@
 import { fail } from '../tools/AppError';
 import { readLimit, extractionRecord } from '../validators/contextValidator';
+import { pageOf } from '../tools/pagination';
 import { listedDataset } from '../views/serializers/connectionSerializer';
 import { CONNECTORS, findConnector, STATUS } from '../constants/connectorCatalogue';
 import { resolveTargetCompany } from './authorizationService';
@@ -110,20 +111,31 @@ async function getConnection(actor: Actor, id: unknown, versionId: unknown): Pro
 }
 
 async function listDatasets(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
-  const limit = readLimit(query.limit);
   if (query.version) {
     const connection = await connections.requireConnection(actor, id);
     const version = await versionFor(connection, query.version);
-    const listed = version.datasets.map(listedDataset);
-    return { datasets: listed, fetchedAt: version.publishedAt, limit: listed.length, truncated: false };
+    const needle = String(query.search || '').trim().toLowerCase();
+    const listed = version.datasets
+      .map(listedDataset)
+      .filter((d: Record<string, any>) => !needle || String(d.name || '').toLowerCase().includes(needle));
+    const { page, pageSize, offset } = pageOf(query, 25, 50);
+    return {
+      datasets: listed.slice(offset, offset + pageSize),
+      page,
+      pageSize,
+      total: listed.length,
+      hasMore: offset + pageSize < listed.length,
+      cached: false,
+      fetchedAt: version.publishedAt,
+    };
   }
-  const listing = await connections.fetchDatasets(actor, id, { limit });
-  return {
-    datasets: listing.datasets,
-    fetchedAt: new Date().toISOString(),
-    limit: listing.limit,
-    truncated: listing.truncated,
-  };
+  const listing = await connections.fetchDatasetPage(actor, id, {
+    page: query.page,
+    pageSize: query.pageSize,
+    search: query.search,
+    fresh: query.fresh === 'true',
+  });
+  return { ...listing, fetchedAt: new Date().toISOString() };
 }
 
 async function profile(actor: Actor, id: unknown, versionId: unknown): Promise<any> {
@@ -349,9 +361,12 @@ const listPublishedConnections = connections.listPublishedConnections;
 const listPublishedVersionOptions = connections.listPublishedVersionOptions;
 const verifyConnection = connections.verifyConnection;
 
+const listDraftConnections = connections.listDraftConnections;
+
 export {
   listConnectors,
   listConnections,
+  listDraftConnections,
   listCompanyPublished,
   listPublishedConnections,
   listPublishedVersionOptions,
