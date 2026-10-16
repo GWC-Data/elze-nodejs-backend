@@ -622,6 +622,9 @@ and the test suites run the `.ts` sources directly through `tsx`. `build`, `type
 ```bash
 npm run build             # generate the Prisma client, compile src/, scripts/ and tests/ into dist/
 npm run typecheck         # generate the Prisma client, tsc --noEmit
+npm run lint              # Biome lint rules
+npm run format            # rewrite files in the project style
+npm run check             # lint + formatting, without writing (what CI runs)
 npm run dev               # tsx src/server.ts under nodemon
 npm start                 # serve the API and the built frontend (from dist/)
 npm run setup:indexes     # create indexes from dashboard metadata (--dry-run supported)
@@ -633,6 +636,18 @@ npm run docs:check        # compare docs/openapi.json with the routes in src/rou
 npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts)
 npm run test:context      # the context layer (see tests/contextLayer.test.ts)
 ```
+
+### Lint and format
+
+Biome does both (`biome.json`); ESLint is not used because `typescript-eslint` does not
+support TypeScript 7. The style is 2 spaces, single quotes, semicolons, ES5 trailing
+commas and 120 columns. `noExplicitAny` and `noNonNullAssertion` are off until the
+repositories return typed rows. Run `npm run format` before committing, or install the
+Biome editor extension and format on save.
+
+The commit that first formatted the whole codebase is listed in `.git-blame-ignore-revs`.
+GitHub skips it in blame views; locally, run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
 
 ### Moving the database
 
