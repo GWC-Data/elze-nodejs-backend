@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { rawRows } from './baseRepository';
 import { accessLevelId } from '../services/catalogueService';
 import type { Actor } from '../types/actor';
+import type { GeneralAccess } from '../generated/prisma/enums';
 
 const { prisma } = config.database;
 
@@ -87,7 +88,7 @@ async function deleteGrant(connectionId: string, userId: number): Promise<boolea
   return result.count > 0;
 }
 
-async function setGeneralAccess(connectionId: string, value: string): Promise<void> {
+async function setGeneralAccess(connectionId: string, value: GeneralAccess): Promise<void> {
   await prisma.connection.updateMany({ where: { id: connectionId }, data: { generalAccess: value } });
 }
 

@@ -33,16 +33,16 @@ model Company {
 }
 
 model User {
-  id                 Int       @id @default(autoincrement())
-  companyId          Int?      @map("company_id")
-  username           String    @unique(map: "uq_users_username") @db.VarChar(50)
-  email              String    @unique(map: "uq_users_email") @db.VarChar(190)
-  displayName        String?   @map("display_name") @db.VarChar(120)
-  passwordHash       String?   @map("password_hash") @db.VarChar(100)
-  status             String    @default("pending") @db.VarChar(16)
-  mustChangePassword Boolean   @default(false) @map("must_change_password")
-  lastLoginAt        DateTime? @map("last_login_at") @db.Timestamptz(6)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                 Int        @id @default(autoincrement())
+  companyId          Int?       @map("company_id")
+  username           String     @unique(map: "uq_users_username") @db.VarChar(50)
+  email              String     @unique(map: "uq_users_email") @db.VarChar(190)
+  displayName        String?    @map("display_name") @db.VarChar(120)
+  passwordHash       String?    @map("password_hash") @db.VarChar(100)
+  status             UserStatus @default(pending)
+  mustChangePassword Boolean    @default(false) @map("must_change_password")
+  lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -208,11 +208,11 @@ model AuditLog {
 }
 
 model AuditEventType {
-  key        String   @id @db.VarChar(64)
-  label      String   @db.VarChar(120)
-  categories String[] @default([])
-  action     String?  @db.VarChar(16)
-  sortOrder  Int      @default(0) @map("sort_order")
+  key        String       @id @db.VarChar(64)
+  label      String       @db.VarChar(120)
+  categories String[]     @default([])
+  action     AuditAction?
+  sortOrder  Int          @default(0) @map("sort_order")
 
   entries AuditLog[]
 
@@ -221,15 +221,15 @@ model AuditEventType {
 }
 
 model Connector {
-  id          String   @id @db.VarChar(32)
-  name        String   @db.VarChar(120)
-  status      String   @db.VarChar(16)
+  id          String          @id @db.VarChar(32)
+  name        String          @db.VarChar(120)
+  status      ConnectorStatus
   description String?
-  docsUrl     String?  @map("docs_url")
-  credentials Json     @default("[]")
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  docsUrl     String?         @map("docs_url")
+  credentials Json            @default("[]")
+  sortOrder   Int             @default(0) @map("sort_order")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   connections Connection[]
 
@@ -238,19 +238,19 @@ model Connector {
 }
 
 model Connection {
-  id             String    @id @db.Uuid
-  companyId      Int       @map("company_id")
-  provider       String    @db.VarChar(32)
-  name           String    @db.VarChar(120)
-  host           String    @db.VarChar(190)
+  id             String           @id @db.Uuid
+  companyId      Int              @map("company_id")
+  provider       String           @db.VarChar(32)
+  name           String           @db.VarChar(120)
+  host           String           @db.VarChar(190)
   secret         String
-  secretHint     String    @map("secret_hint") @db.VarChar(24)
-  status         String    @default("connected") @db.VarChar(16)
-  lastError      String?   @map("last_error")
-  lastVerifiedAt DateTime? @map("last_verified_at") @db.Timestamptz(6)
-  createdBy      Int?      @map("created_by")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  generalAccess  String    @default("company") @map("general_access") @db.VarChar(16)
+  secretHint     String           @map("secret_hint") @db.VarChar(24)
+  status         ConnectionStatus @default(connected)
+  lastError      String?          @map("last_error")
+  lastVerifiedAt DateTime?        @map("last_verified_at") @db.Timestamptz(6)
+  createdBy      Int?             @map("created_by")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  generalAccess  GeneralAccess    @default(company) @map("general_access")
 
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator   User?     @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -288,30 +288,30 @@ model Dataset {
 }
 
 model ContextLayerVersion {
-  id                   String    @id @db.Uuid
-  connectionId         String    @map("connection_id") @db.Uuid
-  companyId            Int       @map("company_id")
-  name                 String    @db.VarChar(120)
+  id                   String        @id @db.Uuid
+  connectionId         String        @map("connection_id") @db.Uuid
+  companyId            Int           @map("company_id")
+  name                 String        @db.VarChar(120)
   version              Int
-  status               String    @default("draft") @db.VarChar(16)
-  currentStep          String?   @map("current_step") @db.VarChar(16)
-  datasetIds           Json      @default("[]") @map("dataset_ids")
-  basedOnId            String?   @map("based_on_id") @db.Uuid
-  sessionId            String?   @map("session_id")
-  extractionMode       String?   @map("extraction_mode") @db.VarChar(16)
-  extractionReport     String?   @map("extraction_report")
-  extractedAt          DateTime? @map("extracted_at") @db.Timestamptz(6)
-  objectCount          Int       @default(0) @map("object_count")
-  stats                Json      @default("{}")
-  snapshot             Json      @default("[]")
-  notifyTeam           Boolean   @default(false) @map("notify_team")
-  createdBy            Int?      @map("created_by")
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  publishedBy          Int?      @map("published_by")
-  publishedAt          DateTime? @map("published_at") @db.Timestamptz(6)
-  datasets             Json      @default("[]")
-  extractionDatasetIds Json?     @map("extraction_dataset_ids")
+  status               VersionStatus @default(draft)
+  currentStep          ContextStep?  @map("current_step")
+  datasetIds           Json          @default("[]") @map("dataset_ids")
+  basedOnId            String?       @map("based_on_id") @db.Uuid
+  sessionId            String?       @map("session_id")
+  extractionMode       String?       @map("extraction_mode") @db.VarChar(16)
+  extractionReport     String?       @map("extraction_report")
+  extractedAt          DateTime?     @map("extracted_at") @db.Timestamptz(6)
+  objectCount          Int           @default(0) @map("object_count")
+  stats                Json          @default("{}")
+  snapshot             Json          @default("[]")
+  notifyTeam           Boolean       @default(false) @map("notify_team")
+  createdBy            Int?          @map("created_by")
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  publishedBy          Int?          @map("published_by")
+  publishedAt          DateTime?     @map("published_at") @db.Timestamptz(6)
+  datasets             Json          @default("[]")
+  extractionDatasetIds Json?         @map("extraction_dataset_ids")
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -326,13 +326,13 @@ model ContextLayerVersion {
 }
 
 model ContextObjectReview {
-  objectId     String   @id @map("object_id") @db.Uuid
-  connectionId String   @map("connection_id") @db.Uuid
-  status       String   @db.VarChar(16)
+  objectId     String       @id @map("object_id") @db.Uuid
+  connectionId String       @map("connection_id") @db.Uuid
+  status       ReviewStatus
   note         String?
-  reviewedBy   Int?     @map("reviewed_by")
-  reviewedAt   DateTime @default(now()) @map("reviewed_at") @db.Timestamptz(6)
-  edited       Boolean  @default(false)
+  reviewedBy   Int?         @map("reviewed_by")
+  reviewedAt   DateTime     @default(now()) @map("reviewed_at") @db.Timestamptz(6)
+  edited       Boolean      @default(false)
 
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   reviewer   User?      @relation(fields: [reviewedBy], references: [id], onUpdate: NoAction)
@@ -423,11 +423,11 @@ model Permission {
 }
 
 model AccessLevel {
-  id          String  @id @db.Uuid
-  resource    String  @db.VarChar(16)
-  key         String  @db.VarChar(16)
+  id          String         @id @db.Uuid
+  resource    AccessResource
+  key         String         @db.VarChar(16)
   rank        Int
-  label       String  @db.VarChar(60)
+  label       String         @db.VarChar(60)
   description String?
 
   dashboardUserAccess  DashboardUserAccess[]
@@ -443,8 +443,8 @@ model AccessLevel {
 model Role {
   id          String    @id @db.Uuid
   companyId   Int?      @map("company_id")
-  kind        String    @db.VarChar(16)
-  tier        String    @db.VarChar(16)
+  kind        RoleKind
+  tier        RoleTier
   name        String    @db.VarChar(50)
   description String?   @db.VarChar(255)
   createdBy   Int?      @map("created_by")
@@ -635,5 +635,105 @@ model ContextGroupAccess {
   @@id([connectionId, groupId])
   @@index([groupId], map: "idx_context_group_access_group_id")
   @@map("context_group_access")
+  @@schema("access_control")
+}
+
+enum UserStatus {
+  pending
+  active
+  disabled
+
+  @@map("user_status")
+  @@schema("public")
+}
+
+enum ConnectionStatus {
+  connected
+  invalid
+
+  @@map("connection_status")
+  @@schema("public")
+}
+
+enum GeneralAccess {
+  restricted
+  company
+
+  @@map("general_access")
+  @@schema("public")
+}
+
+enum VersionStatus {
+  draft
+  published
+
+  @@map("version_status")
+  @@schema("public")
+}
+
+enum ContextStep {
+  connect
+  context
+  discover
+  profile
+  understand
+  model
+  review
+  publish
+
+  @@map("context_step")
+  @@schema("public")
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+  skipped
+
+  @@map("review_status")
+  @@schema("public")
+}
+
+enum ConnectorStatus {
+  available
+  planned
+
+  @@map("connector_status")
+  @@schema("public")
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+
+  @@map("audit_action")
+  @@schema("public")
+}
+
+enum RoleKind {
+  system
+  company_default
+  custom
+
+  @@map("role_kind")
+  @@schema("access_control")
+}
+
+enum RoleTier {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  USER
+
+  @@map("role_tier")
+  @@schema("access_control")
+}
+
+enum AccessResource {
+  dashboard
+  context
+
+  @@map("access_resource")
   @@schema("access_control")
 }

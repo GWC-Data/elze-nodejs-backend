@@ -495,6 +495,9 @@ database was renamed.
 |---|---|
 | `0_init` | the tables, keys, indexes and foreign keys as they stood when Prisma was introduced |
 | `1_database_objects` | what `schema.prisma` cannot express: CHECK constraints, the partial unique indexes, the PL/pgSQL triggers, the five `access_control` views and the table comments. Written to be re-runnable |
+| `2_catalogue_in_database` | `connectors` and `audit_event_types`, the catalogue rows (permissions, features, access levels, system roles and their defaults) with their fixed UUIDs, and the trigger that gives the platform owner every new permission |
+| `3_scope_dimensions` | `access_control.scope_dimensions` |
+| `4_status_enums` | status-like columns become PostgreSQL enums (`user_status`, `role_tier`, `review_status`, …) in place of CHECK constraints; the views are recreated around the change |
 
 The database is shared. The agent backend (`Elze-backend`) owns `context_objects`,
 `context_versions`, `context_dataset_blueprint`, `pii_classifications`, `access_policies`,

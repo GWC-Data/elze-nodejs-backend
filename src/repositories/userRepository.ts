@@ -5,6 +5,7 @@ import { likePattern, orderBy } from '../tools/listQuery';
 import type { Tx } from '../config/database';
 import type { Actor } from '../types/actor';
 import type { ListWindow } from './baseRepository';
+import type { UserStatus } from '../generated/prisma/enums';
 
 const { prisma, withTransaction } = config.database;
 
@@ -165,7 +166,7 @@ async function setRole(userId: number, roleId: string, assignedBy: number | null
   });
 }
 
-async function updateColumns(id: number, changes: { displayName?: string | null; status?: string }): Promise<void> {
+async function updateColumns(id: number, changes: { displayName?: string | null; status?: UserStatus }): Promise<void> {
   if (!Object.keys(changes).length) return;
   await prisma.user.updateMany({ where: { id }, data: changes });
 }

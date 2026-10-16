@@ -18,7 +18,7 @@ interface SqlSource {
 const OBJECTS = CT.objects;
 const REVIEWS = CT.reviews;
 
-const STATUS_SQL = `COALESCE(r.status, CASE WHEN o.verified THEN 'approved' ELSE 'pending' END)`;
+const STATUS_SQL = `COALESCE(r.status::text, CASE WHEN o.verified THEN 'approved' ELSE 'pending' END)`;
 
 const SNAPSHOT_FACTS = `
   SELECT (e->>'id')::uuid AS id, v.connection_id AS context_id, v.id AS version_id,

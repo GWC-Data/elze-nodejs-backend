@@ -4,6 +4,7 @@ import { companyScope, orNotFound, rawRows } from './baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import { likePattern } from '../tools/listQuery';
 import type { Actor } from '../types/actor';
+import type { ConnectionStatus } from '../generated/prisma/enums';
 
 const { prisma, withTransaction } = config.database;
 
@@ -147,7 +148,7 @@ async function insert({ id, companyId, provider, name, host, secret, secretHint,
   });
 }
 
-async function markStatus(id: string, status: string, lastError: string | null): Promise<void> {
+async function markStatus(id: string, status: ConnectionStatus, lastError: string | null): Promise<void> {
   await prisma.connection.updateMany({
     where: { id },
     data: { status, lastError, ...(status === 'connected' ? { lastVerifiedAt: new Date() } : {}) },
