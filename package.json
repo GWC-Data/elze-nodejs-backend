@@ -18,8 +18,12 @@
     "db:status": "prisma migrate status",
     "db:generate": "prisma generate",
     "docs:check": "tsx scripts/checkApiDocs.ts",
-    "test:e2e": "tsx tests/rbac.e2e.ts",
-    "test:context": "tsx tests/contextLayer.test.ts"
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run",
+    "test:integration": "tsx scripts/testDb.ts",
+    "test:e2e": "tsx scripts/testDb.ts e2e",
+    "test:context": "tsx scripts/testDb.ts context",
+    "test:dashboard": "tsx scripts/testDb.ts dashboard"
   },
   "keywords": [],
   "author": "",
@@ -53,6 +57,7 @@
     "@types/swagger-ui-express": "4.1.8",
     "nodemon": "^3.1.14",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "5.0.3"
   }
 }

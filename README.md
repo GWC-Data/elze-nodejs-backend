@@ -58,6 +58,8 @@ backend/
 │   │                                sql quoting, list/pagination helpers, slugify, caches
 │   └── types/                       Actor, and the req.actor/req.account typing for Express
 │
+├── biome.json                       lint and format rules
+├── vitest.config.mts                unit test runner settings
 ├── tsconfig.json                    strict, CommonJS output into dist/ (gitignored)
 ├── prisma.config.ts                 Prisma CLI settings; builds the database URL from DB_*
 ├── prisma/schema.prisma             the application tables, as Prisma models
@@ -68,7 +70,9 @@ backend/
 ├── scripts/setupIndexes.ts          creates indexes for slicer/groupBy columns
 ├── scripts/resetAccess.ts           emails an account a fresh activation link
 ├── scripts/checkApiDocs.ts          fails when docs/openapi.json and src/routes disagree
+├── scripts/testDb.ts                runs the integration suites, each in a throwaway database
 │
+├── tests/unit/                      Vitest unit tests, no database (support/ holds shared fixtures)
 ├── tests/rbac.e2e.ts                the RBAC / tenancy / token / onboarding suite
 ├── tests/smtpSink.ts                an in-process SMTP relay the suite reads mail from
 ├── tests/reportingFixture.ts        a small source table so dashboard checks are real
@@ -442,8 +446,7 @@ in this application that is true, and it calls Domo endpoints that are not part
 of Domo's versioned public API.
 
 ```bash
-DB_NAME=app_e2e npm run db:migrate
-DB_NAME=app_e2e npm run test:context   # against a stand-in Domo
+npm run test:context   # against a stand-in Domo, in a throwaway database (see Tests)
 ```
 
 ### Row-level data scopes
@@ -633,9 +636,42 @@ npm run db:migrate        # apply pending migrations to the database .env points
 npm run db:status         # list applied and pending migrations
 npm run db:generate       # regenerate the Prisma client after editing schema.prisma
 npm run docs:check        # compare docs/openapi.json with the routes in src/routes
-npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts)
+npm test                  # unit tests, then the integration suites
+npm run test:unit         # Vitest, tests/unit/, no database
+npm run test:integration  # the three suites below, each in a fresh throwaway database
+npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts), against a running server
 npm run test:context      # the context layer (see tests/contextLayer.test.ts)
+npm run test:dashboard    # dashboard ownership and tenancy (see tests/dashboard_lifecycle.test.ts)
 ```
+
+### Tests
+
+Unit tests live in `tests/unit/`, run under Vitest and never touch a database or the
+network: modules that would (the catalogue repository, column metadata) are replaced with
+`vi.mock`. Add one next to the others as `<sourceModule>.test.ts`.
+
+The integration suites need PostgreSQL. `scripts/testDb.ts` runs them: for each suite it
+drops and recreates a database called `elze_test`, applies the migrations, starts the API
+on port 8099 when the suite needs a server, runs the suite, stops the server, and drops the
+database at the end (`--keep` leaves it for inspection). The server and the suites get a
+complete test environment of their own: test-only secrets, an in-process SMTP relay on port
+2525, no Redis. Nothing from `.env` decides which database they use, so they cannot write
+to the development database; the runner also refuses to start if `TEST_DB_NAME` names the
+database `.env` points at.
+
+| Variable | Default |
+|---|---|
+| `TEST_DB_HOST`, `TEST_DB_PORT` | `localhost`, `5432` |
+| `TEST_DB_USER`, `TEST_DB_PASSWORD` | `postgres`, `postgres` |
+| `TEST_DB_NAME` | `elze_test` |
+| `TEST_SERVER_PORT`, `TEST_SMTP_PORT` | `8099`, `2525` |
+
+```bash
+TEST_DB_PASSWORD=root npm run test:integration
+TEST_DB_PASSWORD=root npm run test:e2e -- --keep
+```
+
+The `TEST_DB_*` variables can also go in `.env`.
 
 ### Lint and format
 
@@ -668,30 +704,6 @@ When `DB_HOST` is a connection pooler (Neon's `-pooler` endpoint, PgBouncer), se
 `DB_HOST`; the Prisma CLI (`npm run db:migrate`, `db:status`) uses `DB_DIRECT_HOST`, because
 migrations take a session-level advisory lock that a transaction-mode pooler cannot hold. For
 Neon the direct host is the pooled one without `-pooler`.
-
-The suite brings its own SMTP relay and its own reporting table, so it needs a throwaway
-database and the server pointed at that relay. `DB_NAME` goes on **every** process — the
-fixture connects through the application's own pool, which otherwise reads `.env` and
-builds its table in the real database:
-
-```bash
-# both terminals
-export DB_NAME=app_e2e
-export BOOTSTRAP_ADMIN_USERNAME=platformowner BOOTSTRAP_ADMIN_EMAIL=owner@example.com
-export BOOTSTRAP_ADMIN_PASSWORD='ChangeMeAtFirstSignIn1!'
-
-# terminal 1
-npm run db:migrate
-PORT=8099 \
-SMTP_HOST=127.0.0.1 SMTP_PORT=2525 SMTP_USERNAME= SMTP_PASSWORD= \
-EMAIL_FROM=e2e@example.com npm start
-
-# terminal 2
-npm run test:e2e
-```
-
-Drop and recreate `app_e2e` between runs, then migrate it again: the suite expects to start
-from an empty installation.
 
 `reset:access` exists because the API needs an administrator who can sign in, and the case
 it is for is that nobody can — if the only SUPER_ADMIN loses their password, bootstrap will
