@@ -3,7 +3,7 @@ import { defineConfig } from 'prisma/config';
 
 function databaseUrl(): string {
   const url = new URL('postgresql://localhost');
-  url.hostname = process.env.DB_HOST || 'localhost';
+  url.hostname = process.env.DB_DIRECT_HOST || process.env.DB_HOST || 'localhost';
   url.port = process.env.DB_PORT || '5432';
   url.username = encodeURIComponent(process.env.DB_USER || '');
   url.password = encodeURIComponent(process.env.DB_PASSWORD || '');

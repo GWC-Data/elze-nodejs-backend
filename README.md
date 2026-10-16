@@ -621,6 +621,12 @@ certificate with its own authority — Render, Heroku, and most others — add
 encryption-without-authentication, which is why it is a second, explicit setting rather
 than something `DB_SSL=true` quietly implies.
 
+When `DB_HOST` is a connection pooler (Neon's `-pooler` endpoint, PgBouncer), set
+`DB_DIRECT_HOST` to the database's direct host as well. The application keeps using
+`DB_HOST`; the Prisma CLI (`npm run db:migrate`, `db:status`) uses `DB_DIRECT_HOST`, because
+migrations take a session-level advisory lock that a transaction-mode pooler cannot hold. For
+Neon the direct host is the pooled one without `-pooler`.
+
 The suite brings its own SMTP relay and its own reporting table, so it needs a throwaway
 database and the server pointed at that relay. `DB_NAME` goes on **every** process — the
 fixture connects through the application's own pool, which otherwise reads `.env` and
