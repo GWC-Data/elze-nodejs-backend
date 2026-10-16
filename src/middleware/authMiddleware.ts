@@ -57,7 +57,9 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
 
   if (!SAFE_METHODS.has(req.method)) {
     let csrfError: unknown = null;
-    requireCsrf(req, res, (err?: unknown) => { csrfError = err || null; });
+    requireCsrf(req, res, (err?: unknown) => {
+      csrfError = err || null;
+    });
     if (csrfError) return next(csrfError);
   }
 
@@ -134,11 +136,4 @@ function requireDashboardAccess(level: string, param = 'dashboardId'): RequestHa
 
 const authenticated: RequestHandler[] = [requireRbac, requireAuth, requirePasswordCurrent];
 
-export {
-  requireRbac,
-  requireAuth,
-  requirePlatform,
-  requirePermission,
-  requireDashboardAccess,
-  authenticated,
-};
+export { requireRbac, requireAuth, requirePlatform, requirePermission, requireDashboardAccess, authenticated };

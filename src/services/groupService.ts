@@ -54,11 +54,9 @@ async function writeMembers(conn: Tx, group: { id: number; companyId: number }, 
   if (found.length !== unique.length) {
     const known = new Set(found);
     const rejected = unique.filter((id) => !known.has(id));
-    throw fail(
-      'VALIDATION_ERROR',
-      `These accounts are not in this company: ${rejected.join(', ')}`,
-      { userIds: rejected }
-    );
+    throw fail('VALIDATION_ERROR', `These accounts are not in this company: ${rejected.join(', ')}`, {
+      userIds: rejected,
+    });
   }
 
   await groupRepository.insertMembers(conn, group.id, unique);
@@ -73,7 +71,10 @@ async function uniqueName<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function createGroup(actor: Actor, { name, active = true, userIds = [], companyId: requestedCompanyId }: GroupFields) {
+async function createGroup(
+  actor: Actor,
+  { name, active = true, userIds = [], companyId: requestedCompanyId }: GroupFields
+) {
   const groupName = requireString(name, 'Group name', { max: 100 });
   requireArray(userIds, 'userIds must be an array');
 

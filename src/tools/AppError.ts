@@ -41,7 +41,7 @@ class InvalidDashboardIdError extends CodedError {
       'InvalidDashboardIdError',
       'INVALID_DASHBOARD_ID',
       `Invalid dashboard id ${JSON.stringify(String(dashboardId))}. ` +
-      'Allowed characters: letters, digits, underscore, hyphen (max 64).'
+        'Allowed characters: letters, digits, underscore, hyphen (max 64).'
     );
   }
 }

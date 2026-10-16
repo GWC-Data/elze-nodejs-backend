@@ -5,11 +5,7 @@ import { fail } from '../tools/AppError';
 import { seal, open, hint } from '../tools/secretBox';
 import { requireString } from '../validators/commonValidator';
 import { cleanDatasetSelection } from '../validators/contextValidator';
-import {
-  shapeConnection,
-  shapeSelected,
-  publishedVersionOption,
-} from '../views/serializers/connectionSerializer';
+import { shapeConnection, shapeSelected, publishedVersionOption } from '../views/serializers/connectionSerializer';
 import * as domo from './providers/domoProvider';
 import { CONNECTION_STATUS } from '../constants/statuses';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
@@ -28,7 +24,12 @@ const PROVIDERS: Record<string, any> = { domo };
 const NOT_FOUND = 'Connection not found';
 
 function providerFor(id: unknown): any {
-  const provider = PROVIDERS[String(id || '').trim().toLowerCase()];
+  const provider =
+    PROVIDERS[
+      String(id || '')
+        .trim()
+        .toLowerCase()
+    ];
   if (!provider) {
     throw fail('VALIDATION_ERROR', `"${id}" is not a connector that can be configured yet.`);
   }
@@ -94,7 +95,11 @@ async function requireConnection(actor: Actor, id: unknown, required: ContextAcc
   return shapeConnection(row, await selectedDatasets(row.id), row.access);
 }
 
-async function profileOverview(actor: Actor, id: unknown, { datasets }: { datasets?: any[] } = {}): Promise<Record<string, any>> {
+async function profileOverview(
+  actor: Actor,
+  id: unknown,
+  { datasets }: { datasets?: any[] } = {}
+): Promise<Record<string, any>> {
   const row = await loadRow(actor, id);
   const selected = datasets || (await selectedDatasets(row.id));
 
@@ -124,7 +129,11 @@ async function openToken(row: Row): Promise<string> {
   try {
     return open(row.secret);
   } catch {
-    await connectionRepository.markStatus(row.id, CONNECTION_STATUS.INVALID, 'The stored credential could not be decrypted.');
+    await connectionRepository.markStatus(
+      row.id,
+      CONNECTION_STATUS.INVALID,
+      'The stored credential could not be decrypted.'
+    );
     throw fail(
       'CONNECTOR_AUTH_FAILED',
       'The stored token for this connection could not be read. It has to be entered again.'
@@ -156,18 +165,23 @@ async function tableProfile(actor: Actor, id: unknown, tableId: unknown): Promis
 
   const selected = await selectedDatasets(row.id);
   if (!selected.some((dataset: any) => dataset.id === String(tableId))) {
-    throw fail(
-      'RESOURCE_NOT_FOUND',
-      'That table is not part of this connection\'s selected datasets.'
-    );
+    throw fail('RESOURCE_NOT_FOUND', "That table is not part of this connection's selected datasets.");
   }
 
-  return callWarehouse(row, (token) =>
-    impl.getTableProfile({ host: row.host, token, datasetId: String(tableId) })
-  );
+  return callWarehouse(row, (token) => impl.getTableProfile({ host: row.host, token, datasetId: String(tableId) }));
 }
 
-async function createConnection(actor: Actor, companyId: number, { provider, name, host, token, limit }: { provider: string; name: unknown; host: unknown; token: unknown; limit?: number }): Promise<Record<string, any>> {
+async function createConnection(
+  actor: Actor,
+  companyId: number,
+  {
+    provider,
+    name,
+    host,
+    token,
+    limit,
+  }: { provider: string; name: unknown; host: unknown; token: unknown; limit?: number }
+): Promise<Record<string, any>> {
   const impl = providerFor(provider);
   const providerId = String(provider).trim().toLowerCase();
 
@@ -217,9 +231,7 @@ async function fetchDatasetPage(
 ): Promise<any> {
   const row = await loadRow(actor, id);
   const impl = providerFor(row.provider);
-  return callWarehouse(row, (token) =>
-    impl.listDatasetPage({ host: row.host, token, page, pageSize, search, fresh })
-  );
+  return callWarehouse(row, (token) => impl.listDatasetPage({ host: row.host, token, page, pageSize, search, fresh }));
 }
 
 async function verifyConnection(actor: Actor, id: unknown): Promise<{ connection: any; account: any }> {
@@ -243,7 +255,9 @@ async function deleteConnection(actor: Actor, id: unknown): Promise<{ provider: 
 }
 
 async function listDraftConnections(actor: Actor, query: Record<string, unknown> = {}) {
-  const search = String(query.search || '').trim().slice(0, MAX_SEARCH_LENGTH);
+  const search = String(query.search || '')
+    .trim()
+    .slice(0, MAX_SEARCH_LENGTH);
   const { page, pageSize, offset } = pageOf(query, 10, MAX_CONTEXTS_PAGE);
   const { rows, total } = await connectionRepository.listDrafts(actor, isContextAdmin(actor), {
     search,
@@ -253,15 +267,16 @@ async function listDraftConnections(actor: Actor, query: Record<string, unknown>
   return {
     items: rows.map((row: Row) => ({
       ...shapeConnection(row, undefined, accessOf(actor, row)),
-      draft: row.draft_version === null || row.draft_version === undefined
-        ? null
-        : {
-            name: row.draft_name,
-            version: Number(row.draft_version),
-            label: `v${row.draft_version}`,
-            step: row.draft_step || null,
-            updatedAt: row.draft_updated_at,
-          },
+      draft:
+        row.draft_version === null || row.draft_version === undefined
+          ? null
+          : {
+              name: row.draft_name,
+              version: Number(row.draft_version),
+              label: `v${row.draft_version}`,
+              step: row.draft_step || null,
+              updatedAt: row.draft_updated_at,
+            },
     })),
     total,
     page,

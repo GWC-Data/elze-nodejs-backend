@@ -30,14 +30,15 @@ function parseArgs(argv: string[]): { ids: string[]; dryRun: boolean } {
 }
 
 function slug(value: unknown): string {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function indexName(table: string, column: string, suffix: string = ''): string {
   const base = `idx_${slug(table)}_${slug(column)}${suffix}`;
-  return base.length <= MAX_IDENTIFIER_LENGTH
-    ? base
-    : base.slice(0, MAX_IDENTIFIER_LENGTH).replace(/_+$/, '');
+  return base.length <= MAX_IDENTIFIER_LENGTH ? base : base.slice(0, MAX_IDENTIFIER_LENGTH).replace(/_+$/, '');
 }
 
 function indexTargets(colMeta: ColMeta): { skip?: string; targets?: IndexTarget[] } {
@@ -76,7 +77,7 @@ function candidateColumns(spec: Spec): string[] {
   for (const card of spec.cards || []) {
     addDateGrain(card);
     addGroupBy(card.groupBy);
-    if (!(card.groupBy?.length)) {
+    if (!card.groupBy?.length) {
       for (const col of card.columns || []) {
         if (['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
       }
@@ -200,8 +201,7 @@ async function closeDatabase(): Promise<void> {
           continue;
         }
 
-        const sql =
-          `CREATE INDEX ${quoteIdentifier(name)} ON ${quoteQualified(schema, table)} (${target.expr})`;
+        const sql = `CREATE INDEX ${quoteIdentifier(name)} ON ${quoteQualified(schema, table)} (${target.expr})`;
         if (dryRun) {
           console.log(`  ~ ${sql}   -- ${target.note}`);
         } else {

@@ -42,7 +42,10 @@ async function replaceUserPermissions(actor: Actor, id: number, permissionIds: u
     throw fail('VALIDATION_ERROR', 'A platform account already holds every permission.');
   }
   if (target.role !== USER) {
-    throw fail('VALIDATION_ERROR', 'Extra permissions are only for members. A company admin already holds every company permission.');
+    throw fail(
+      'VALIDATION_ERROR',
+      'Extra permissions are only for members. A company admin already holds every company permission.'
+    );
   }
 
   const features = await enabledFor(target.company_id);

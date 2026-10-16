@@ -15,10 +15,7 @@ function buildActor(
   }
   const roleScope = scopeOfTier(userRow.role);
   if (!roleScope) {
-    throw fail(
-      'INTERNAL_ERROR',
-      `Account "${userRow.username}" holds unknown role "${userRow.role}".`
-    );
+    throw fail('INTERNAL_ERROR', `Account "${userRow.username}" holds unknown role "${userRow.role}".`);
   }
   const isPlatform = roleScope === ROLE_SCOPES.platform;
 
@@ -92,7 +89,7 @@ function assertCompanyMatch(actor: Actor, resourceCompanyId: unknown, what: stri
 
   console.warn(
     `[authz] tenant denial: "${actor.username}" (company ${actor.companyId}) reached ` +
-    `a resource in company ${resourceCompanyId ?? 'platform'}`
+      `a resource in company ${resourceCompanyId ?? 'platform'}`
   );
   throw fail('TENANT_ACCESS_DENIED', `${what} does not belong to your company.`);
 }
@@ -146,11 +143,9 @@ function assertRolePermissionsAllowed(roleScope: string, permissions: readonly s
   if (roleScope === ROLE_SCOPES.platform) return;
   const escaping = permissions.filter((p) => isPlatformOnly(p));
   if (escaping.length) {
-    throw fail(
-      'VALIDATION_ERROR',
-      `A company role cannot hold platform permissions: ${escaping.join(', ')}`,
-      { permissions: escaping }
-    );
+    throw fail('VALIDATION_ERROR', `A company role cannot hold platform permissions: ${escaping.join(', ')}`, {
+      permissions: escaping,
+    });
   }
 }
 

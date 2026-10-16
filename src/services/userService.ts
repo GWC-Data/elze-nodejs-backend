@@ -85,7 +85,14 @@ async function currentUser(id: number) {
 
 async function createUser(
   actor: Actor,
-  { username, email, displayName, role, customRoleId: requestedCustomRole, companyId: requestedCompanyId }: Record<string, any>
+  {
+    username,
+    email,
+    displayName,
+    role,
+    customRoleId: requestedCustomRole,
+    companyId: requestedCompanyId,
+  }: Record<string, any>
 ) {
   const targetRole = String(role || '').trim();
   if (!targetRole) throw fail('VALIDATION_ERROR', 'A role is required.');
@@ -98,9 +105,7 @@ async function createUser(
     await requireActiveCompany(actor, companyId, 'That company is deactivated, so accounts cannot be added to it.');
   }
 
-  const customRoleId = targetRole === USER
-    ? await resolveAssignableRole(actor, requestedCustomRole, companyId)
-    : null;
+  const customRoleId = targetRole === USER ? await resolveAssignableRole(actor, requestedCustomRole, companyId) : null;
   const roleId = customRoleId ?? (await builtInRoleId(targetRole, companyId));
 
   const user = await createAndInvite(actor, {
@@ -194,10 +199,7 @@ async function activateUser(actor: Actor, id: number) {
 
   if (target.status === USER_STATUS.ACTIVE) throw fail('CONFLICT', 'That account is already active.');
   if (!target.has_password) {
-    throw fail(
-      'CONFLICT',
-      'That account has never been activated. Send a new activation link instead.'
-    );
+    throw fail('CONFLICT', 'That account has never been activated. Send a new activation link instead.');
   }
 
   await userRepository.updateColumns(id, { status: USER_STATUS.ACTIVE });

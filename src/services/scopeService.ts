@@ -42,7 +42,9 @@ async function replaceUserScopes(
   user: { id: number; username: string },
   scopes: Record<string, unknown[]>
 ) {
-  const dimensions = new Map<string, ScopeDimension>((await scopeRepository.listDimensions()).map((d) => [d.dimension, d]));
+  const dimensions = new Map<string, ScopeDimension>(
+    (await scopeRepository.listDimensions()).map((d) => [d.dimension, d])
+  );
   const problem = scopeProblem(scopes, (key) => dimensions.get(key) || null);
   if (problem) throw fail('VALIDATION_ERROR', problem);
 

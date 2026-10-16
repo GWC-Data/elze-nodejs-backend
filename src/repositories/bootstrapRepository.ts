@@ -25,7 +25,12 @@ async function countUsersWithoutRole(): Promise<number> {
   return prisma.user.count({ where: { role: null } });
 }
 
-async function insertSuperAdmin({ username, email, passwordHash, roleId }: {
+async function insertSuperAdmin({
+  username,
+  email,
+  passwordHash,
+  roleId,
+}: {
   username: string;
   email: string;
   passwordHash: string;
@@ -40,22 +45,30 @@ async function insertSuperAdmin({ username, email, passwordHash, roleId }: {
   });
 }
 
-async function insertDashboardIfMissing({ id, title, description, spec }: {
+async function insertDashboardIfMissing({
+  id,
+  title,
+  description,
+  spec,
+}: {
   id: string;
   title: string;
   description?: string | null;
   spec: unknown;
 }): Promise<void> {
   await prisma.dashboard.createMany({
-    data: [{ id, title, description: description ?? null, companyId: null, createdBy: null, spec: spec as Prisma.InputJsonValue }],
+    data: [
+      {
+        id,
+        title,
+        description: description ?? null,
+        companyId: null,
+        createdBy: null,
+        spec: spec as Prisma.InputJsonValue,
+      },
+    ],
     skipDuplicates: true,
   });
 }
 
-export {
-  appliedMigrations,
-  countUsers,
-  countUsersWithoutRole,
-  insertSuperAdmin,
-  insertDashboardIfMissing,
-};
+export { appliedMigrations, countUsers, countUsersWithoutRole, insertSuperAdmin, insertDashboardIfMissing };

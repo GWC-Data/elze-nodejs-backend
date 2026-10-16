@@ -20,11 +20,7 @@ interface EmailContent {
 }
 
 function escapeHtml(value: unknown): string {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function hours(seconds: number): string {
@@ -36,7 +32,15 @@ const supportLine = SUPPORT_EMAIL
   ? `If you need help, contact ${SUPPORT_EMAIL}.`
   : 'If you need help, contact whoever administers this workspace.';
 
-function accountActivation({ displayName, username, email, companyName, activationUrl, ttlSeconds, invitedBy }: AccountActivationInput): EmailContent {
+function accountActivation({
+  displayName,
+  username,
+  email,
+  companyName,
+  activationUrl,
+  ttlSeconds,
+  invitedBy,
+}: AccountActivationInput): EmailContent {
   const greeting = displayName ? `Hello ${displayName},` : 'Hello,';
   const where = companyName ? ` for ${companyName}` : '';
   const by = invitedBy ? ` by ${invitedBy}` : '';
@@ -111,9 +115,7 @@ function accountActivation({ displayName, username, email, companyName, activati
 </div>`.trim();
 
   return {
-    subject: companyName
-      ? `Your ${companyName} account is ready`
-      : 'Your analytics account is ready',
+    subject: companyName ? `Your ${companyName} account is ready` : 'Your analytics account is ready',
     text,
     html,
   };

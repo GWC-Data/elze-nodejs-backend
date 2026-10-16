@@ -22,7 +22,9 @@ interface Db extends Queryable {
 }
 
 function toPositionalParams(sql: string): string {
-  return splitPlaceholders(sql).map((piece, index) => (index ? `$${index}${piece}` : piece)).join('');
+  return splitPlaceholders(sql)
+    .map((piece, index) => (index ? `$${index}${piece}` : piece))
+    .join('');
 }
 
 function wrap(client: Pool | PoolClient): Queryable {
@@ -57,7 +59,9 @@ function createPool(config: PoolConfig): Db {
         await client.query('COMMIT');
         return result;
       } catch (err) {
-        try { await client.query('ROLLBACK'); } catch { }
+        try {
+          await client.query('ROLLBACK');
+        } catch {}
         throw err;
       } finally {
         client.release();

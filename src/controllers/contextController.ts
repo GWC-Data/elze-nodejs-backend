@@ -54,7 +54,10 @@ async function profile(req: Request, res: Response): Promise<void> {
 }
 
 async function table(req: Request, res: Response): Promise<void> {
-  ok(res, await contextLayer.tableProfile(req.actor, req.params.id as string, req.params.tableId as string, req.query.version));
+  ok(
+    res,
+    await contextLayer.tableProfile(req.actor, req.params.id as string, req.params.tableId as string, req.query.version)
+  );
 }
 
 async function versions(req: Request, res: Response): Promise<void> {

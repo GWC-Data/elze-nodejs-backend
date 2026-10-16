@@ -76,10 +76,4 @@ const SUMMARY_MAX = 240;
 
 const AUDIT_SORTS: Record<string, string> = { ts: 'a.ts', event: 'a.event', actor: 'a.actor' };
 
-export {
-  EVENTS,
-  FORBIDDEN_DETAIL_KEYS,
-  ENVELOPE_KEYS,
-  SUMMARY_MAX,
-  AUDIT_SORTS,
-};
+export { EVENTS, FORBIDDEN_DETAIL_KEYS, ENVELOPE_KEYS, SUMMARY_MAX, AUDIT_SORTS };

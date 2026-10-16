@@ -142,7 +142,15 @@ function confidenceFloor(value: unknown): number | null {
 
 async function pageObjects(
   connectionId: string,
-  { runVersionId, versionId, type, status, search, minConfidence, highConfidenceAt }: {
+  {
+    runVersionId,
+    versionId,
+    type,
+    status,
+    search,
+    minConfidence,
+    highConfidenceAt,
+  }: {
     runVersionId?: string | null;
     versionId?: string | null;
     type?: unknown;
@@ -169,7 +177,9 @@ async function pageObjects(
     where.push('o.confidence IS NOT NULL AND o.confidence >= ?');
     params.push(floor);
   }
-  const needle = String(search || '').trim().slice(0, 100);
+  const needle = String(search || '')
+    .trim()
+    .slice(0, 100);
   if (needle) {
     where.push('(o.qualified_name ILIKE ? OR o.payload::text ILIKE ?)');
     const pattern = likePattern(needle);

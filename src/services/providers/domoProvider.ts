@@ -19,11 +19,9 @@ const WHOAMI_PATH = '/api/content/v2/users/me';
 
 const DATASET_LIST_PATH = '/api/data/v3/datasources';
 
-const datasetDetailPath = (datasetId: string): string =>
-  `/api/data/v3/datasources/${encodeURIComponent(datasetId)}`;
+const datasetDetailPath = (datasetId: string): string => `/api/data/v3/datasources/${encodeURIComponent(datasetId)}`;
 
-const queryExecutePath = (datasetId: string): string =>
-  `/api/query/v1/execute/${encodeURIComponent(datasetId)}`;
+const queryExecutePath = (datasetId: string): string => `/api/query/v1/execute/${encodeURIComponent(datasetId)}`;
 
 const dataVersionsPath = (datasetId: string): string =>
   `/api/data/v3/datasources/${encodeURIComponent(datasetId)}/dataversions/details`;
@@ -49,9 +47,21 @@ const DOMO_THROTTLE = new Throttle({ concurrent: 2, gapMs: 250, maxWaiting: 20 }
 const DATASET_PAGES = new TtlCache(2 * 60 * 1000);
 
 const DATASET_PARTS = [
-  'core', 'permission', 'status', 'pdp', 'rowcolcount', 'certification',
-  'sharecount', 'alertcount', 'dataprovider', 'features', 'impactcounts',
-  'functions', 'cryo', 'warnings', 'pharos',
+  'core',
+  'permission',
+  'status',
+  'pdp',
+  'rowcolcount',
+  'certification',
+  'sharecount',
+  'alertcount',
+  'dataprovider',
+  'features',
+  'impactcounts',
+  'functions',
+  'cryo',
+  'warnings',
+  'pharos',
 ].join(',');
 
 function datasetPageQuery(offset: number, pageSize: number, search = ''): string {
@@ -72,24 +82,31 @@ function resolveLimit(limit: unknown): number {
 }
 
 function normaliseHost(input: unknown): string {
-  let value = String(input || '').trim().toLowerCase();
+  let value = String(input || '')
+    .trim()
+    .toLowerCase();
   if (!value) {
     throw fail('VALIDATION_ERROR', 'The Domo instance is required, for example acme.domo.com');
   }
 
-  value = value.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  value = value
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '');
   if (!value.includes('.')) value = `${value}.domo.com`;
 
   if (!/^[a-z0-9][a-z0-9.-]{1,188}$/.test(value) || !value.endsWith('.domo.com')) {
-    throw fail(
-      'VALIDATION_ERROR',
-      `"${input}" is not a Domo instance address. It looks like acme.domo.com.`
-    );
+    throw fail('VALIDATION_ERROR', `"${input}" is not a Domo instance address. It looks like acme.domo.com.`);
   }
   return value;
 }
 
-async function callDomo(host: string, token: string, path: string, { method = 'GET', body }: { method?: string; body?: unknown } = {}): Promise<DomoPayload> {
+async function callDomo(
+  host: string,
+  token: string,
+  path: string,
+  { method = 'GET', body }: { method?: string; body?: unknown } = {}
+): Promise<DomoPayload> {
   const url = `https://${host}${path}`;
 
   let response: Response;
@@ -110,37 +127,46 @@ async function callDomo(host: string, token: string, path: string, { method = 'G
     });
   } catch (err: any) {
     if (err && err.code === 'RATE_LIMITED') throw err;
-    const reason = err.name === 'TimeoutError'
-      ? `it did not respond within ${REQUEST_TIMEOUT_MS / 1000} seconds`
-      : err.message;
+    const reason =
+      err.name === 'TimeoutError' ? `it did not respond within ${REQUEST_TIMEOUT_MS / 1000} seconds` : err.message;
     throw fail('CONNECTOR_UNREACHABLE', `Could not reach ${host}: ${reason}`);
   }
 
   let payload: DomoPayload = null;
   if (text) {
-    try { payload = JSON.parse(text); } catch { }
+    try {
+      payload = JSON.parse(text);
+    } catch {}
   }
 
   if (response.status === 401 || response.status === 403) {
-    throw Object.assign(fail(
-      'CONNECTOR_AUTH_FAILED',
-      `${host} rejected that access token. Check it has not been revoked or expired, ` +
-      'and that it was issued by this instance.'
-    ), { upstreamStatus: response.status });
+    throw Object.assign(
+      fail(
+        'CONNECTOR_AUTH_FAILED',
+        `${host} rejected that access token. Check it has not been revoked or expired, ` +
+          'and that it was issued by this instance.'
+      ),
+      { upstreamStatus: response.status }
+    );
   }
 
   if (!response.ok) {
     const detail = (payload && (payload.message || payload.error)) || text.slice(0, 200) || 'no detail';
-    throw Object.assign(fail(
-      'CONNECTOR_UNREACHABLE',
-      `${host} answered ${response.status} for ${path}: ${detail}`
-    ), { upstreamStatus: response.status });
+    throw Object.assign(fail('CONNECTOR_UNREACHABLE', `${host} answered ${response.status} for ${path}: ${detail}`), {
+      upstreamStatus: response.status,
+    });
   }
 
   return payload;
 }
 
-async function verify({ host, token }: { host: string; token: string }): Promise<{ accountId: any; accountName: any; accountEmail: any }> {
+async function verify({
+  host,
+  token,
+}: {
+  host: string;
+  token: string;
+}): Promise<{ accountId: any; accountName: any; accountEmail: any }> {
   const me = await callDomo(host, token, WHOAMI_PATH);
   return {
     accountId: me && (me.id ?? me.userId ?? null),
@@ -154,9 +180,10 @@ function shapeDataset(row: DomoRow | null | undefined): Dataset | null {
   const id = row.id ?? row.datasourceId ?? row.dataSourceId;
   if (!id) return null;
 
-  const owner = row.owner && typeof row.owner === 'object'
-    ? (row.owner.name || row.owner.displayName || null)
-    : (row.ownerName || null);
+  const owner =
+    row.owner && typeof row.owner === 'object'
+      ? row.owner.name || row.owner.displayName || null
+      : row.ownerName || null;
 
   return {
     id: String(id),
@@ -186,19 +213,17 @@ function extractRows(payload: DomoPayload): any[] | null {
 }
 
 function unrecognised(host: string, payload: DomoPayload): Error {
-  const shape = payload && typeof payload === 'object'
-    ? Object.keys(payload).join(', ') || '(no keys)'
-    : typeof payload;
+  const shape =
+    payload && typeof payload === 'object' ? Object.keys(payload).join(', ') || '(no keys)' : typeof payload;
   console.error(
     `[domo] unrecognised response from ${DATASET_LIST_PATH} - keys: ${shape}
-` +
-    `[domo] sample: ${JSON.stringify(payload).slice(0, 600)}`
+` + `[domo] sample: ${JSON.stringify(payload).slice(0, 600)}`
   );
   return fail(
     'CONNECTOR_UNREACHABLE',
     `${host} answered ${DATASET_LIST_PATH} with something this connector does not ` +
-    `recognise (fields: ${shape}). The instance API may have changed - the server log ` +
-    'has the response, and services/providers/domoProvider.ts is the only file that needs to change.'
+      `recognise (fields: ${shape}). The instance API may have changed - the server log ` +
+      'has the response, and services/providers/domoProvider.ts is the only file that needs to change.'
   );
 }
 
@@ -216,18 +241,34 @@ function resolvePageSize(value: unknown): number {
   return DATASET_PAGE_SIZES.includes(size) ? size : DEFAULT_DATASET_PAGE_SIZE;
 }
 
-async function listDatasetPage({ host, token, page, pageSize, search, fresh = false }: {
+async function listDatasetPage({
+  host,
+  token,
+  page,
+  pageSize,
+  search,
+  fresh = false,
+}: {
   host: string;
   token: string;
   page?: unknown;
   pageSize?: unknown;
   search?: unknown;
   fresh?: boolean;
-}): Promise<{ datasets: Dataset[]; page: number; pageSize: number; total: number | null; hasMore: boolean; cached: boolean }> {
+}): Promise<{
+  datasets: Dataset[];
+  page: number;
+  pageSize: number;
+  total: number | null;
+  hasMore: boolean;
+  cached: boolean;
+}> {
   const size = resolvePageSize(pageSize);
   const pageNumber = Math.max(1, Math.floor(Number(page)) || 1);
   const offset = (pageNumber - 1) * size;
-  const needle = String(search ?? '').trim().slice(0, MAX_DATASET_SEARCH);
+  const needle = String(search ?? '')
+    .trim()
+    .slice(0, MAX_DATASET_SEARCH);
   const account = crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
   const key = `${host}|${account}|${size}|${offset}|${needle.toLowerCase()}`;
 
@@ -240,7 +281,13 @@ async function listDatasetPage({ host, token, page, pageSize, search, fresh = fa
 
   if (DATASET_ID_PATTERN.test(needle)) {
     const found = pageNumber === 1 ? await findDatasetById(host, token, needle.toLowerCase()) : null;
-    const byId = { datasets: found ? [found] : [], page: pageNumber, pageSize: size, total: found ? 1 : 0, hasMore: false };
+    const byId = {
+      datasets: found ? [found] : [],
+      page: pageNumber,
+      pageSize: size,
+      total: found ? 1 : 0,
+      hasMore: false,
+    };
     DATASET_PAGES.set(key, byId);
     return { ...byId, cached: false };
   }
@@ -263,7 +310,15 @@ async function listDatasetPage({ host, token, page, pageSize, search, fresh = fa
   return { ...result, cached: false };
 }
 
-async function listDatasets({ host, token, limit }: { host?: any; token?: any; limit?: unknown } = {}): Promise<{ datasets: Dataset[]; truncated: boolean; limit: number }> {
+async function listDatasets({
+  host,
+  token,
+  limit,
+}: {
+  host?: any;
+  token?: any;
+  limit?: unknown;
+} = {}): Promise<{ datasets: Dataset[]; truncated: boolean; limit: number }> {
   const target = resolveLimit(limit);
   const ceiling = target + 1;
   const datasets: Dataset[] = [];
@@ -304,9 +359,7 @@ async function listDatasets({ host, token, limit }: { host?: any; token?: any; l
 }
 
 function isNumericType(domoType: unknown): boolean {
-  return ['LONG', 'DOUBLE', 'DECIMAL', 'INTEGER', 'FLOAT', 'NUMBER'].includes(
-    String(domoType || '').toUpperCase()
-  );
+  return ['LONG', 'DOUBLE', 'DECIMAL', 'INTEGER', 'FLOAT', 'NUMBER'].includes(String(domoType || '').toUpperCase());
 }
 
 function profileColumns(names: any[], types: any[], rows: any[]): Record<string, any>[] {
@@ -358,13 +411,17 @@ async function storedSizeBytes(host: string, token: string, datasetId: string): 
   }
 }
 
-async function getTableProfile({ host, token, datasetId }: { host: string; token: string; datasetId: string }): Promise<Record<string, any>> {
+async function getTableProfile({
+  host,
+  token,
+  datasetId,
+}: {
+  host: string;
+  token: string;
+  datasetId: string;
+}): Promise<Record<string, any>> {
   const detail = await callDomo(host, token, datasetDetailPath(datasetId));
-  const reportedSize = firstFiniteNumber(
-    detail?.sizeInBytes,
-    detail?.dataSourceSize,
-    detail?.sizeBytes
-  );
+  const reportedSize = firstFiniteNumber(detail?.sizeInBytes, detail?.dataSourceSize, detail?.sizeBytes);
 
   const [sample, sizeBytes] = await Promise.all([
     callDomo(host, token, queryExecutePath(datasetId), {
@@ -375,9 +432,7 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
   ]);
 
   const names: any[] = Array.isArray(sample?.columns) ? sample.columns : [];
-  const types = (Array.isArray(sample?.metadata) ? sample.metadata : []).map(
-    (m: any) => (m?.type) || null
-  );
+  const types = (Array.isArray(sample?.metadata) ? sample.metadata : []).map((m: any) => m?.type || null);
   const rows: any[] = Array.isArray(sample?.rows) ? sample.rows : [];
 
   const columns = profileColumns(names, types, rows);
@@ -389,18 +444,16 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
     id: String(datasetId),
     datasetId: String(datasetId),
     name: (detail && (detail.name || detail.displayName)) || String(datasetId),
-    description: (detail?.description) || null,
+    description: detail?.description || null,
     rowCount,
-    columnCount: Number.isFinite(Number(detail?.columnCount))
-      ? Number(detail.columnCount)
-      : columns.length || null,
+    columnCount: Number.isFinite(Number(detail?.columnCount)) ? Number(detail.columnCount) : columns.length || null,
     sizeBytes,
     qualityScore: null,
     lastRefreshedAt: (detail && (detail.lastTouched ?? detail.lastUpdated ?? detail.updatedAt)) || null,
     owner:
       detail?.owner && typeof detail.owner === 'object'
         ? detail.owner.name || detail.owner.displayName || null
-        : (detail?.ownerName) || null,
+        : detail?.ownerName || null,
     columns,
     sample: names.length
       ? {
@@ -423,11 +476,4 @@ function firstFiniteNumber(...candidates: unknown[]): number | null {
   return null;
 }
 
-export {
-  DATASET_PAGE_SIZES,
-  normaliseHost,
-  verify,
-  listDatasets,
-  listDatasetPage,
-  getTableProfile,
-};
+export { DATASET_PAGE_SIZES, normaliseHost, verify, listDatasets, listDatasetPage, getTableProfile };

@@ -38,8 +38,7 @@ async function seedSuperAdmin(): Promise<boolean> {
     roleId: systemRoleId(SUPER_ADMIN),
   });
   console.log(
-    `[rbac] seeded platform owner "${username}" as ${SUPER_ADMIN}, ` +
-    'flagged to change its password at first sign-in'
+    `[rbac] seeded platform owner "${username}" as ${SUPER_ADMIN}, flagged to change its password at first sign-in`
   );
   return true;
 }
@@ -70,7 +69,8 @@ async function seedDefaultDashboards(): Promise<void> {
 }
 
 function migrationNames(): string[] {
-  return fs.readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+  return fs
+    .readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
     .sort();
@@ -94,7 +94,8 @@ async function bootstrapAppMeta(): Promise<boolean> {
     await seedDefaultDashboards();
 
     const roleless = await bootstrapRepository.countUsersWithoutRole();
-    if (roleless) console.warn(`[rbac] ${roleless} account(s) have no role in access_control.user_roles and cannot sign in`);
+    if (roleless)
+      console.warn(`[rbac] ${roleless} account(s) have no role in access_control.user_roles and cannot sign in`);
 
     ready = true;
     readyError = null;
@@ -115,8 +116,7 @@ async function bootstrapWithRetry(attempts: number = 5, delayMs: number = 3000):
     } catch (err: any) {
       const last = attempt === attempts;
       console.warn(
-        `[rbac] bootstrap failed (${err.code || err.message})` +
-        (last ? '' : `, retrying in ${delayMs / 1000}s...`)
+        `[rbac] bootstrap failed (${err.code || err.message})${last ? '' : `, retrying in ${delayMs / 1000}s...`}`
       );
       if (last) {
         console.error('[rbac] giving up. The metadata database must be reachable to serve any request.');
@@ -133,9 +133,7 @@ async function verifyEmailTransport(): Promise<void> {
     await verifyTransport();
     console.log('[email] SMTP relay reachable and credentials accepted');
   } catch (err: any) {
-    console.warn(
-      `[email] SMTP is not usable: ${err.message}. Creating a user will fail until this is fixed.`
-    );
+    console.warn(`[email] SMTP is not usable: ${err.message}. Creating a user will fail until this is fixed.`);
   }
 }
 
@@ -155,11 +153,4 @@ function startHousekeeping(): NodeJS.Timeout {
   return setInterval(runOnce, HOUSEKEEPING_INTERVAL_MS).unref();
 }
 
-export {
-  isRbacReady,
-  rbacError,
-  bootstrapAppMeta,
-  bootstrapWithRetry,
-  verifyEmailTransport,
-  startHousekeeping,
-};
+export { isRbacReady, rbacError, bootstrapAppMeta, bootstrapWithRetry, verifyEmailTransport, startHousekeeping };

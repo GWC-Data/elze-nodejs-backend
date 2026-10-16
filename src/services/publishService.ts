@@ -42,7 +42,11 @@ function tablesCovered(rows: Row[], allRows: Row[] = rows): string[] {
   return [...names];
 }
 
-async function publishSummary(_actor: Actor, connection: Connection, { version = null }: { version?: Record<string, any> | null } = {}): Promise<Record<string, any>> {
+async function publishSummary(
+  _actor: Actor,
+  connection: Connection,
+  { version = null }: { version?: Record<string, any> | null } = {}
+): Promise<Record<string, any>> {
   const rows = version
     ? await loadObjects(connection.id, undefined, { versionId: version.id })
     : await loadObjects(connection.id);
@@ -154,7 +158,9 @@ async function listPublications(connectionId: string): Promise<Record<string, an
 }
 
 async function listCompanyPublished(actor: Actor, query: Record<string, any> = {}): Promise<Record<string, any>> {
-  const needle = String(query.search || '').trim().slice(0, MAX_SEARCH_LENGTH);
+  const needle = String(query.search || '')
+    .trim()
+    .slice(0, MAX_SEARCH_LENGTH);
   const rows = await versionRepository.listCompanyPublished(actor, isContextAdmin(actor), needle);
 
   const groups = new Map<string, Record<string, any>>();
@@ -198,16 +204,17 @@ async function listCompanyPublished(actor: Actor, query: Record<string, any> = {
   };
 }
 
-async function publishContext(actor: Actor, connection: Connection, { name, notifyTeam = false }: { name?: unknown; notifyTeam?: boolean } = {}): Promise<Record<string, any>> {
+async function publishContext(
+  actor: Actor,
+  connection: Connection,
+  { name, notifyTeam = false }: { name?: unknown; notifyTeam?: boolean } = {}
+): Promise<Record<string, any>> {
   const cleanName = requireString(name, 'Context name', { min: 2, max: 120 });
 
   const rows = await loadObjects(connection.id);
   const approved = publishable(rows);
   if (approved.length === 0) {
-    throw fail(
-      'VALIDATION_ERROR',
-      'There is nothing approved to publish. Approve at least one item in Review first.'
-    );
+    throw fail('VALIDATION_ERROR', 'There is nothing approved to publish. Approve at least one item in Review first.');
   }
 
   const counts = countByType(approved);
@@ -240,10 +247,4 @@ async function publishContext(actor: Actor, connection: Connection, { name, noti
   };
 }
 
-export {
-  publishSummary,
-  validatePublish,
-  publishContext,
-  listPublications,
-  listCompanyPublished,
-};
+export { publishSummary, validatePublish, publishContext, listPublications, listCompanyPublished };

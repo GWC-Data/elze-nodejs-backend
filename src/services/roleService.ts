@@ -83,7 +83,11 @@ function shapeRolePermissions(role: Record<string, any>, permissionIds: readonly
 
 async function describeRolePermissions(id: unknown) {
   const role = await requireSystemRole(id);
-  if (role.tier === SUPER_ADMIN) return shapeRolePermissions(role, allPermissions().map((p) => p.id));
+  if (role.tier === SUPER_ADMIN)
+    return shapeRolePermissions(
+      role,
+      allPermissions().map((p) => p.id)
+    );
   return shapeRolePermissions(role, role.permissionIds);
 }
 

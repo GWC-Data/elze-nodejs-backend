@@ -135,12 +135,17 @@ function build(rows: Awaited<ReturnType<typeof catalogueRepository.loadAll>>): C
     featureById: new Map(features.map((f) => [f.id, f])),
     accessLevels,
     accessLevelById: new Map(accessLevels.map((l) => [l.id, l])),
-    systemRoleByTier: new Map(rows.systemRoles.map((r) => [r.tier, {
-      id: r.id,
-      tier: r.tier,
-      name: r.name,
-      description: r.description || '',
-    }])),
+    systemRoleByTier: new Map(
+      rows.systemRoles.map((r) => [
+        r.tier,
+        {
+          id: r.id,
+          tier: r.tier,
+          name: r.name,
+          description: r.description || '',
+        },
+      ])
+    ),
     connectors,
     connectorById: new Map(connectors.map((c) => [c.id, c])),
     auditEventTypes,
@@ -158,7 +163,9 @@ function assertComplete(next: Catalogue): void {
     if (!next.auditEventTypeByKey.has(event)) missing.push(`audit event type ${event}`);
   }
   if (missing.length) {
-    throw new Error(`the catalogue in the database is incomplete: ${missing.join(', ')}. Add the rows with a migration.`);
+    throw new Error(
+      `the catalogue in the database is incomplete: ${missing.join(', ')}. Add the rows with a migration.`
+    );
   }
 }
 
@@ -216,7 +223,9 @@ function featureKeys(): string[] {
 }
 
 function toggleableFeatureKeys(): string[] {
-  return catalogue().features.filter((f) => !f.locked).map((f) => f.key);
+  return catalogue()
+    .features.filter((f) => !f.locked)
+    .map((f) => f.key);
 }
 
 function featureByKey(key: string): FeatureDef | undefined {
@@ -305,7 +314,13 @@ function connectors(): readonly Connector[] {
 }
 
 function findConnector(id: unknown): Connector | null {
-  return catalogue().connectorById.get(String(id || '').trim().toLowerCase()) || null;
+  return (
+    catalogue().connectorById.get(
+      String(id || '')
+        .trim()
+        .toLowerCase()
+    ) || null
+  );
 }
 
 function auditEventLabel(event: string): string | undefined {
@@ -317,17 +332,27 @@ function auditCategories(): string[] {
 }
 
 function auditActions(): string[] {
-  return [...new Set(catalogue().auditEventTypes.map((e) => e.action).filter((a): a is string => Boolean(a)))];
+  return [
+    ...new Set(
+      catalogue()
+        .auditEventTypes.map((e) => e.action)
+        .filter((a): a is string => Boolean(a))
+    ),
+  ];
 }
 
 function auditEventsInCategory(category: string): string[] | null {
   if (!auditCategories().includes(category)) return null;
-  return catalogue().auditEventTypes.filter((e) => e.categories.includes(category)).map((e) => e.key);
+  return catalogue()
+    .auditEventTypes.filter((e) => e.categories.includes(category))
+    .map((e) => e.key);
 }
 
 function auditEventsWithAction(action: string): string[] | null {
   if (!auditActions().includes(action)) return null;
-  return catalogue().auditEventTypes.filter((e) => e.action === action).map((e) => e.key);
+  return catalogue()
+    .auditEventTypes.filter((e) => e.action === action)
+    .map((e) => e.key);
 }
 
 export {

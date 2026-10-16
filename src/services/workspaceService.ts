@@ -7,10 +7,7 @@ import type { Actor } from '../types/actor';
 
 function tenantId(actor: Actor): number {
   if (actor.isPlatform) {
-    throw fail(
-      'TENANT_ACCESS_DENIED',
-      'A platform account has no workspace of its own. Use the platform console.'
-    );
+    throw fail('TENANT_ACCESS_DENIED', 'A platform account has no workspace of its own. Use the platform console.');
   }
   return actor.companyId as number;
 }

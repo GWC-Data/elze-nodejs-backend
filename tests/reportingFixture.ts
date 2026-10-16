@@ -63,9 +63,15 @@ async function fixtureMarker(schema: string, table: string): Promise<string | nu
   return rows.length ? rows[0].comment : null;
 }
 
-async function createReportingFixture(
-  { schema = 'public', table = 'cinema_analysis', rows = 600 }: { schema?: string; table?: string; rows?: number } = {}
-): Promise<{ schema: string; table: string; rows: number }> {
+async function createReportingFixture({
+  schema = 'public',
+  table = 'cinema_analysis',
+  rows = 600,
+}: {
+  schema?: string;
+  table?: string;
+  rows?: number;
+} = {}): Promise<{ schema: string; table: string; rows: number }> {
   const ref = `${q(schema)}.${q(table)}`;
 
   const existing = await fixtureMarker(schema, table);
@@ -73,8 +79,8 @@ async function createReportingFixture(
     const { rows: where } = await db.query('SELECT current_database() AS db');
     throw new Error(
       `Refusing to replace ${schema}.${table} in database "${where[0].db}": it was not created by ` +
-      'this fixture, and dropping it would destroy real data. Point the suite at a throwaway ' +
-      'database - set DB_NAME on the test process as well as on the server.'
+        'this fixture, and dropping it would destroy real data. Point the suite at a throwaway ' +
+        'database - set DB_NAME on the test process as well as on the server.'
     );
   }
 

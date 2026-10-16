@@ -5,7 +5,10 @@ import { fail } from '../tools/AppError';
 const { LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS, LOGIN_LOCKOUT_SECONDS } = config.auth;
 
 function keyFor(identifier: unknown): string {
-  return String(identifier || '').trim().toLowerCase().slice(0, 190);
+  return String(identifier || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 190);
 }
 
 async function assertNotLocked(identifier: unknown): Promise<void> {
@@ -19,10 +22,7 @@ async function assertNotLocked(identifier: unknown): Promise<void> {
   if (until <= Date.now()) return;
 
   const minutes = Math.max(1, Math.ceil((until - Date.now()) / 60000));
-  throw fail(
-    'RATE_LIMITED',
-    `Too many sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`
-  );
+  throw fail('RATE_LIMITED', `Too many sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
 }
 
 async function recordFailure(identifier: unknown): Promise<void> {

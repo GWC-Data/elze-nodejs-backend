@@ -13,9 +13,7 @@ function shapeConnection(row: Row | null | undefined, datasets?: unknown, access
     lastError: row.last_error || null,
     lastVerifiedAt: row.last_verified_at || null,
     createdAt: row.created_at || null,
-    selectedDatasetCount: row.selectedDatasetCount === undefined
-      ? undefined
-      : Number(row.selectedDatasetCount),
+    selectedDatasetCount: row.selectedDatasetCount === undefined ? undefined : Number(row.selectedDatasetCount),
     selectedDatasets: datasets,
     access: access ?? undefined,
   };

@@ -6,7 +6,8 @@ const { db } = config.database;
 
 function executeQuery(sql: string, params?: Params | null): Promise<{ rows: any[]; elapsed: number }> {
   const start = Date.now();
-  return db.query(sql, params || [])
+  return db
+    .query(sql, params || [])
     .then((result) => {
       const elapsed = Date.now() - start;
       return { rows: result.rows, elapsed };

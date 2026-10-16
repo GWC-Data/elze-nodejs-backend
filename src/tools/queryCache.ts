@@ -17,8 +17,8 @@ class QueryCache {
   constructor(redisUrl?: string | null, options?: QueryCacheOptions) {
     this.redis = null;
     this.redisEnabled = false;
-    this.ttl = (options?.ttl) || 300;
-    this.prefix = (options?.prefix) || 'bi';
+    this.ttl = options?.ttl || 300;
+    this.prefix = options?.prefix || 'bi';
 
     this.memory = new TtlCache(this.ttl * 1000);
 
@@ -131,7 +131,9 @@ class QueryCache {
   async disconnect(): Promise<void> {
     this.memory.stop();
     if (this.redis) {
-      try { await this.redis.quit(); } catch (_) {}
+      try {
+        await this.redis.quit();
+      } catch (_) {}
     }
   }
 }

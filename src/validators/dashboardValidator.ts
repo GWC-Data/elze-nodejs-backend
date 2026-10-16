@@ -24,7 +24,11 @@ function parseFilters(query: Record<string, unknown> | null | undefined): Record
   const filters: Record<string, string[]> = {};
   Object.entries(query || {}).forEach(([id, val]) => {
     if (id === 'companyId') return;
-    if (typeof val === 'string') filters[id] = val.split(',').map((s) => s.trim()).filter(Boolean);
+    if (typeof val === 'string')
+      filters[id] = val
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
   });
   return filters;
 }

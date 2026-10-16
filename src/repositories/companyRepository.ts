@@ -74,7 +74,13 @@ async function findWithCounts(id: number) {
 }
 
 function asRow(company: { id: number; name: string; slug: string; active: boolean; createdAt: Date }) {
-  return { id: company.id, name: company.name, slug: company.slug, active: company.active, created_at: company.createdAt };
+  return {
+    id: company.id,
+    name: company.name,
+    slug: company.slug,
+    active: company.active,
+    created_at: company.createdAt,
+  };
 }
 
 async function findRow(id: number) {

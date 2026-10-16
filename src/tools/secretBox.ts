@@ -19,12 +19,7 @@ function seal(plaintext: unknown): string {
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
 
-  return [
-    VERSION,
-    iv.toString('base64url'),
-    tag.toString('base64url'),
-    ciphertext.toString('base64url'),
-  ].join('.');
+  return [VERSION, iv.toString('base64url'), tag.toString('base64url'), ciphertext.toString('base64url')].join('.');
 }
 
 function open(sealed: unknown): string {
@@ -36,17 +31,10 @@ function open(sealed: unknown): string {
   }
 
   const [, ivB64, tagB64, ctB64] = parts;
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    KEY,
-    Buffer.from(ivB64, 'base64url')
-  );
+  const decipher = crypto.createDecipheriv('aes-256-gcm', KEY, Buffer.from(ivB64, 'base64url'));
   decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
 
-  return Buffer.concat([
-    decipher.update(Buffer.from(ctB64, 'base64url')),
-    decipher.final(),
-  ]).toString('utf8');
+  return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64url')), decipher.final()]).toString('utf8');
 }
 
 function hint(plaintext: unknown): string {

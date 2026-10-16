@@ -54,23 +54,23 @@ function getSource(spec: Spec): Source {
 
   const schema = String(
     dataSource.schema ||
-    (spec.dataset && typeof spec.dataset === 'object' ? spec.dataset.schema : null) ||
-    DEFAULT_SCHEMA
+      (spec.dataset && typeof spec.dataset === 'object' ? spec.dataset.schema : null) ||
+      DEFAULT_SCHEMA
   ).trim();
 
   if (!IDENTIFIER_RE.test(schema)) {
     throw new Error(`Invalid schema name "${schema}". Allowed characters: letters, digits, underscore, $`);
   }
 
-  const declared = dataSource.database ||
-    (spec.dataset && typeof spec.dataset === 'object' ? spec.dataset.database : null) || null;
+  const declared =
+    dataSource.database || (spec.dataset && typeof spec.dataset === 'object' ? spec.dataset.database : null) || null;
 
   if (declared && declared !== DB_NAME) {
     throw new Error(
       `Dashboard names database "${declared}" but this server is connected to ` +
-      `"${DB_NAME}". PostgreSQL cannot query across databases - use ` +
-      '"schema" in dataSource to select a schema within the connected database, ' +
-      'or point DB_NAME at that database.'
+        `"${DB_NAME}". PostgreSQL cannot query across databases - use ` +
+        '"schema" in dataSource to select a schema within the connected database, ' +
+        'or point DB_NAME at that database.'
     );
   }
 
@@ -84,7 +84,7 @@ async function fetchTableMetadata(source: Source): Promise<TableMeta> {
     throw fail(
       'DASHBOARD_SOURCE_UNAVAILABLE',
       `This dashboard reads "${source.schema}.${source.table}", which does not exist in database ` +
-      `"${source.database}". Load that table, or point the dashboard's dataSource at one that exists.`
+        `"${source.database}". Load that table, or point the dashboard's dataSource at one that exists.`
     );
   }
 
@@ -146,10 +146,7 @@ function resolveSourceMetadata(spec: Spec): Promise<Record<string, any>> {
   const source = getSource(spec);
   return getTableMetadata(source).then((meta: TableMeta) => {
     const dataSource = spec.dataSource || spec.source || {};
-    const dateParse =
-      (dataSource && (dataSource.dateParse || dataSource.stringDates)) ||
-      (spec?.dateParse) ||
-      {};
+    const dateParse = (dataSource && (dataSource.dateParse || dataSource.stringDates)) || spec?.dateParse || {};
     return {
       source,
       table: meta,

@@ -31,7 +31,12 @@ async function listForConnection(connectionId: string) {
   );
 }
 
-async function nextVersion(tx: Tx, connectionId: string, name: string, excludeId: string | null = null): Promise<number> {
+async function nextVersion(
+  tx: Tx,
+  connectionId: string,
+  name: string,
+  excludeId: string | null = null
+): Promise<number> {
   const [row] = await rawRows(
     tx,
     Prisma.sql`SELECT COALESCE(MAX(version), 0) AS v
@@ -65,7 +70,16 @@ async function latestPublishedName(tx: Tx, connectionId: string) {
 
 async function insertDraft(
   tx: Tx,
-  { connectionId, companyId, name, version, step, datasetIds, basedOnId, createdBy }: {
+  {
+    connectionId,
+    companyId,
+    name,
+    version,
+    step,
+    datasetIds,
+    basedOnId,
+    createdBy,
+  }: {
     connectionId: string;
     companyId: number | null;
     name: string;
@@ -91,7 +105,8 @@ async function insertDraft(
 async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges) {
   const sets: Prisma.Sql[] = [Prisma.sql`updated_at = now()`];
   if (changes.step !== undefined) sets.push(Prisma.sql`current_step = ${changes.step}`);
-  if (changes.datasetIds !== undefined) sets.push(Prisma.sql`dataset_ids = ${JSON.stringify(changes.datasetIds)}::jsonb`);
+  if (changes.datasetIds !== undefined)
+    sets.push(Prisma.sql`dataset_ids = ${JSON.stringify(changes.datasetIds)}::jsonb`);
   if (changes.sessionId !== undefined) sets.push(Prisma.sql`session_id = ${changes.sessionId}`);
   if (changes.extraction) {
     sets.push(
@@ -126,7 +141,16 @@ async function advanceDraftStep(connectionId: string, steps: readonly string[], 
 async function markPublished(
   tx: Tx,
   draftId: string,
-  { name, version, sessionId, snapshot, stats, notifyTeam, datasets, publishedBy }: {
+  {
+    name,
+    version,
+    sessionId,
+    snapshot,
+    stats,
+    notifyTeam,
+    datasets,
+    publishedBy,
+  }: {
     name: string;
     version: number;
     sessionId: string | null;

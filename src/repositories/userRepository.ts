@@ -105,7 +105,9 @@ function whereOf(filter: UserFilter): Prisma.Sql {
   if (filter.status) conditions.push(Prisma.sql`u.status = ${filter.status}`);
   if (filter.search) {
     const pattern = likePattern(filter.search);
-    conditions.push(Prisma.sql`(u.username ILIKE ${pattern} OR u.email ILIKE ${pattern} OR u.display_name ILIKE ${pattern})`);
+    conditions.push(
+      Prisma.sql`(u.username ILIKE ${pattern} OR u.email ILIKE ${pattern} OR u.display_name ILIKE ${pattern})`
+    );
   }
   return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 }
@@ -137,7 +139,14 @@ async function listOptions(actor: Actor) {
 }
 
 async function insert(
-  { companyId, username, email, displayName, roleId, assignedBy = null }: {
+  {
+    companyId,
+    username,
+    email,
+    displayName,
+    roleId,
+    assignedBy = null,
+  }: {
     companyId: number | null;
     username: string;
     email: string;
@@ -149,7 +158,15 @@ async function insert(
 ): Promise<number> {
   const work = async (client: Tx) => {
     const user = await client.user.create({
-      data: { companyId, username, email, displayName, passwordHash: null, status: 'pending', mustChangePassword: false },
+      data: {
+        companyId,
+        username,
+        email,
+        displayName,
+        passwordHash: null,
+        status: 'pending',
+        mustChangePassword: false,
+      },
       select: { id: true },
     });
     await client.userRole.create({ data: { userId: user.id, roleId, assignedBy } });

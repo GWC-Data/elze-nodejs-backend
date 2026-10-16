@@ -105,13 +105,13 @@ function parseDescription(value: unknown): string | null {
 }
 
 function permissionOptionsFor(actor: Actor, features: readonly string[]) {
-  return allPermissions().filter(
-    (p) => !p.platformOnly && isPermissionEnabled(p.key, features)
-  ).map((p) => ({
-    ...describePermission(p.key),
-    featureEnabled: isPermissionEnabled(p.key, features),
-    assignable: assignable(actor, p.key) && isPermissionEnabled(p.key, features),
-  }));
+  return allPermissions()
+    .filter((p) => !p.platformOnly && isPermissionEnabled(p.key, features))
+    .map((p) => ({
+      ...describePermission(p.key),
+      featureEnabled: isPermissionEnabled(p.key, features),
+      assignable: assignable(actor, p.key) && isPermissionEnabled(p.key, features),
+    }));
 }
 
 async function permissionOptions(actor: Actor, requestedCompanyId: unknown) {
@@ -174,7 +174,10 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
 async function requireEditableBuiltIn(id: unknown, companyId: number) {
   const roleId = requireUuid(id, 'role id');
   if (roleId === systemRoleId(COMPANY_ADMIN)) {
-    throw fail('VALIDATION_ERROR', 'The company admin role cannot be changed here, so a company can never lock itself out.');
+    throw fail(
+      'VALIDATION_ERROR',
+      'The company admin role cannot be changed here, so a company can never lock itself out.'
+    );
   }
   const current = await companyRoleRepository.findCompanyDefault(companyId);
   if (!current || current.id !== roleId) {
@@ -293,7 +296,8 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
   try {
     await companyRoleRepository.remove(role.id);
   } catch (err: any) {
-    if (sqlState(err) === FOREIGN_KEY_VIOLATION) throw fail('CONFLICT', 'A member was just given this role. Try again.');
+    if (sqlState(err) === FOREIGN_KEY_VIOLATION)
+      throw fail('CONFLICT', 'A member was just given this role. Try again.');
     throw err;
   }
   audit(EVENTS.ROLE_DELETED, actor, { companyId: role.companyId, roleId: role.id, role: role.name });

@@ -1,12 +1,7 @@
 import * as contextRepository from '../repositories/contextRepository';
 import { fail } from '../tools/AppError';
 import { pageOf } from '../tools/pagination';
-import {
-  reviewStatusOf,
-  shapeFact,
-  shapeReviewItem,
-  contextObjectItem,
-} from '../views/serializers/contextSerializer';
+import { reviewStatusOf, shapeFact, shapeReviewItem, contextObjectItem } from '../views/serializers/contextSerializer';
 import {
   AI_TEXT_KEYS,
   GENERIC_COLUMNS,
@@ -28,19 +23,24 @@ type Term = Record<string, any>;
 
 const { loadObjects, guarded } = contextRepository;
 
-const identifierKey = (name: unknown): string => String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+const identifierKey = (name: unknown): string =>
+  String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
 const isSystemColumn = (name: unknown): boolean => /^_.*_$/.test(String(name).trim());
 
 function keyColumns(primaryKey: unknown): Set<string> {
   return new Set(
-    String(primaryKey || '').split(/[,()]+/).map((t) => t.trim()).filter(Boolean)
+    String(primaryKey || '')
+      .split(/[,()]+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
   );
 }
 
 function foreignKeyColumns(payload: Payload): Set<any> {
-  return new Set(
-    (Array.isArray(payload.foreign_keys) ? payload.foreign_keys : []).map((fk: any) => fk?.column)
-  );
+  return new Set((Array.isArray(payload.foreign_keys) ? payload.foreign_keys : []).map((fk: any) => fk?.column));
 }
 
 function columnSplitter(rows: Row[]): (qualifiedName: unknown) => { table: string | null; column: string } {
@@ -85,7 +85,16 @@ function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, Payload>, joi
     node: n,
     cols: new Map<string, any>(n.columns.map((c: any) => [identifierKey(c.name), c])),
   }));
-  const add = (from: string, fromCol: string, to: string, toCol: string, rule: string, relationshipType: string, confidence: number, basis: string): void => {
+  const add = (
+    from: string,
+    fromCol: string,
+    to: string,
+    toCol: string,
+    rule: string,
+    relationshipType: string,
+    confidence: number,
+    basis: string
+  ): void => {
     if (from === to) return;
     const pair = [from, to].sort().join('\u0000');
     if (covered.has(pair)) return;
@@ -115,8 +124,16 @@ function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, Payload>, joi
       const target = fk.references.slice(0, dot);
       const targetCol = fk.references.slice(dot + 1);
       if (!nodes.some((n) => n.id === target)) continue;
-      add(table, fk.column, target, targetCol, 'declared', 'many-to-one', 1,
-        `Declared foreign key: ${table}.${fk.column} references ${fk.references}.`);
+      add(
+        table,
+        fk.column,
+        target,
+        targetCol,
+        'declared',
+        'many-to-one',
+        1,
+        `Declared foreign key: ${table}.${fk.column} references ${fk.references}.`
+      );
     }
   }
 
@@ -128,8 +145,16 @@ function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, Payload>, joi
         if (b === a) continue;
         const match = b.cols.get(key);
         if (!match) continue;
-        add(b.node.id, match.name, a.node.id, pk.name, 'primary_key', 'many-to-one', 0.8,
-          `${b.node.id}.${match.name} has the same name as the primary key of ${a.node.id}.`);
+        add(
+          b.node.id,
+          match.name,
+          a.node.id,
+          pk.name,
+          'primary_key',
+          'many-to-one',
+          0.8,
+          `${b.node.id}.${match.name} has the same name as the primary key of ${a.node.id}.`
+        );
       }
     }
   }
@@ -142,8 +167,16 @@ function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, Payload>, joi
         if (!key || GENERIC_COLUMNS.has(key) || isSystemColumn(col.name)) continue;
         const match = b.cols.get(key);
         if (!match) continue;
-        add(a.node.id, col.name, b.node.id, match.name, 'same_name', 'many-to-many', 0.5,
-          `Both tables have a column named "${col.name}". Detected from the name only - check the values match before relying on it.`);
+        add(
+          a.node.id,
+          col.name,
+          b.node.id,
+          match.name,
+          'same_name',
+          'many-to-many',
+          0.5,
+          `Both tables have a column named "${col.name}". Detected from the name only - check the values match before relying on it.`
+        );
       }
     }
   }
@@ -159,19 +192,16 @@ function joinEdge(row: Row, left: string, right: string, keys: any[], payload: P
     targetColumn: keys[0].right ?? '',
     relationshipType: payload.cardinality || 'related',
     confidence: row.confidence === null ? null : Number(row.confidence),
-    status: reviewStatusOf(row) === REVIEW_STATUS.REJECTED
-      ? 'rejected'
-      : row.verified
-        ? 'accepted'
-        : 'suggested',
-    joinCondition: keys
-      .map((k: any) => `${left}.${k.left} = ${right}.${k.right}`)
-      .join(' AND '),
+    status: reviewStatusOf(row) === REVIEW_STATUS.REJECTED ? 'rejected' : row.verified ? 'accepted' : 'suggested',
+    joinCondition: keys.map((k: any) => `${left}.${k.left} = ${right}.${k.right}`).join(' AND '),
     suggestion: payload.basis || null,
   };
 }
 
-async function modelGraph(connectionId: string, { versionId }: { versionId?: string | null } = {}): Promise<Record<string, any>> {
+async function modelGraph(
+  connectionId: string,
+  { versionId }: { versionId?: string | null } = {}
+): Promise<Record<string, any>> {
   const rows = await guarded(() => loadObjects(connectionId, undefined, { versionId }));
 
   const runVersionId = rows.length ? rows[0].version_id : null;
@@ -185,8 +215,18 @@ async function modelGraph(connectionId: string, { versionId }: { versionId?: str
     if (!columnsByTable.has(table)) columnsByTable.set(table, new Map());
     const list = columnsByTable.get(table)!;
     const prev = list.get(column.name);
-    list.set(column.name, prev ? { ...prev, ...column, dataType: prev.dataType || column.dataType,
-      isPrimaryKey: prev.isPrimaryKey || column.isPrimaryKey, isForeignKey: prev.isForeignKey || column.isForeignKey } : column);
+    list.set(
+      column.name,
+      prev
+        ? {
+            ...prev,
+            ...column,
+            dataType: prev.dataType || column.dataType,
+            isPrimaryKey: prev.isPrimaryKey || column.isPrimaryKey,
+            isForeignKey: prev.isForeignKey || column.isForeignKey,
+          }
+        : column
+    );
   };
   for (const [table, payload] of tableFacts) {
     const keys = keyColumns(payload.primary_key);
@@ -268,7 +308,11 @@ function numberFrom(value: unknown): number | null {
   return n * scale;
 }
 
-async function snapshotTableProfile(connectionId: string, versionId: string | null | undefined, dataset: Record<string, any>): Promise<Record<string, any>> {
+async function snapshotTableProfile(
+  connectionId: string,
+  versionId: string | null | undefined,
+  dataset: Record<string, any>
+): Promise<Record<string, any>> {
   const rows = await loadObjects(connectionId, undefined, { versionId });
   const tables: Row[] = rows.filter((r: Row) => r.object_type === 'table');
   const wanted = [dataset.id, dataset.name].filter(Boolean).map(identifierKey);
@@ -281,7 +325,7 @@ async function snapshotTableProfile(connectionId: string, versionId: string | nu
       );
     }) || (tables.length === 1 ? tables[0] : null);
 
-  const payload: Payload = (table?.payload) || {};
+  const payload: Payload = table?.payload || {};
   const split = columnSplitter(rows);
   const stats = new Map<string, any>();
   if (table) {
@@ -339,7 +383,9 @@ async function tableView(connectionId: string, query: Record<string, any> = {}):
   const names: string[] = tables.map((t: Row) => t.qualified_name).sort((a: string, b: string) => b.length - a.length);
   const ownerOf = (name: string): string | null => names.find((t) => name === t || name.startsWith(`${t}.`)) ?? null;
 
-  const groups = new Map<string, { table: Row; columns: Row[]; related: Row[] }>(tables.map((t: Row) => [t.qualified_name, { table: t, columns: [], related: [] }]));
+  const groups = new Map<string, { table: Row; columns: Row[]; related: Row[] }>(
+    tables.map((t: Row) => [t.qualified_name, { table: t, columns: [], related: [] }])
+  );
   const unattached: Row[] = [];
   for (const row of rows) {
     if (row.object_type === 'table') continue;
@@ -362,12 +408,13 @@ async function tableView(connectionId: string, query: Record<string, any> = {}):
     if (reviewStatusOf(row) === REVIEW_STATUS.PENDING) needsReview += 1;
   }
 
-  const needle = String(query.search || '').trim().slice(0, 100).toLowerCase();
+  const needle = String(query.search || '')
+    .trim()
+    .slice(0, 100)
+    .toLowerCase();
   const haystack = (row: Row): string => `${row.qualified_name} ${JSON.stringify(row.payload || {})}`.toLowerCase();
   const matches = (row: Row): boolean => haystack(row).includes(needle);
-  let list = [...groups.values()].sort((a, b) =>
-    a.table.qualified_name.localeCompare(b.table.qualified_name)
-  );
+  let list = [...groups.values()].sort((a, b) => a.table.qualified_name.localeCompare(b.table.qualified_name));
   if (needle) {
     list = list.filter((g) => [g.table, ...g.columns, ...g.related].some(matches));
   }
@@ -448,7 +495,12 @@ async function decideReviewItem(actor: Actor, connectionId: string, objectId: st
   return reloadItem(connectionId, objectId);
 }
 
-async function updateReviewItem(actor: Actor, connectionId: string, objectId: string, body: Record<string, any> = {}): Promise<any> {
+async function updateReviewItem(
+  actor: Actor,
+  connectionId: string,
+  objectId: string,
+  body: Record<string, any> = {}
+): Promise<any> {
   const existing = await contextRepository.requireObject(connectionId, objectId);
 
   if (body.name !== undefined && String(body.name) !== existing.qualified_name) {
@@ -496,7 +548,11 @@ async function updateReviewItem(actor: Actor, connectionId: string, objectId: st
   return reloadItem(connectionId, objectId);
 }
 
-async function bulkDecide(actor: Actor, connectionId: string, { decision, filter = {} }: { decision?: unknown; filter?: Record<string, any> } = {}): Promise<{ affected: number }> {
+async function bulkDecide(
+  actor: Actor,
+  connectionId: string,
+  { decision, filter = {} }: { decision?: unknown; filter?: Record<string, any> } = {}
+): Promise<{ affected: number }> {
   const { status, verified } = requireDecision(decision);
 
   const ids = await guarded(() => contextRepository.matchingObjectIds(connectionId, filter));
@@ -539,9 +595,7 @@ function appliesTo(row: Row): string | null {
 function glossaryTerm(row: Row): Term {
   const payload = row.payload || {};
   const type =
-    row.object_type === 'glossary' && payload.kind === 'dimension'
-      ? 'dimension'
-      : TERM_TYPES[row.object_type];
+    row.object_type === 'glossary' && payload.kind === 'dimension' ? 'dimension' : TERM_TYPES[row.object_type];
   return {
     id: row.id,
     term: typeof payload.term === 'string' && payload.term ? payload.term : readable(row.qualified_name),
@@ -569,9 +623,7 @@ function glossaryStats(terms: Term[]): Record<string, any> {
     entityCount: terms.filter((t) => t.type === 'entity').length,
     metricCount: terms.filter((t) => t.type === 'metric').length,
     dimensionCount: terms.filter((t) => t.type === 'dimension' || t.type === 'term').length,
-    averageConfidence: scored.length
-      ? scored.reduce((sum, t) => sum + t.confidence, 0) / scored.length
-      : null,
+    averageConfidence: scored.length ? scored.reduce((sum, t) => sum + t.confidence, 0) / scored.length : null,
     humanApproved: human.length,
     approvedThisWeek: human.filter((t) => t.reviewedAt && new Date(t.reviewedAt).getTime() >= weekAgo).length,
   };
@@ -593,7 +645,9 @@ async function understanding(connectionId: string, query: Record<string, any> = 
     throw fail('VALIDATION_ERROR', `filter must be one of: ${Object.keys(GLOSSARY_FILTERS).join(', ')}.`);
   }
   const states = GLOSSARY_FILTERS[filter];
-  const needle = String(query.search || '').trim().toLowerCase();
+  const needle = String(query.search || '')
+    .trim()
+    .toLowerCase();
   const selected = terms.filter((t) => {
     if (states && !states.includes(t.state)) return false;
     if (!needle) return true;

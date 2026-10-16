@@ -14,6 +14,11 @@ router.patch(
   requireDashboardAccess('developer'),
   dashboard.updateCard
 );
-router.delete('/:dashboardId', requirePermission('dashboard.delete'), requireDashboardAccess('admin'), dashboard.remove);
+router.delete(
+  '/:dashboardId',
+  requirePermission('dashboard.delete'),
+  requireDashboardAccess('admin'),
+  dashboard.remove
+);
 
 export = router;

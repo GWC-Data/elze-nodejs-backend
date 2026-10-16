@@ -31,7 +31,11 @@ function splitUri(uri: string): { service: string; path: string } | null {
   const m = /^\/svc\/(adk)(\/.*)?$/.exec(bare);
   if (!m) return null;
   let path = m[2] || '/';
-  try { path = decodeURIComponent(path); } catch { return null; }
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return null;
+  }
   if (path.includes('/../') || path.endsWith('/..')) return null;
   return { service: m[1], path };
 }

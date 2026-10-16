@@ -15,9 +15,7 @@ function formatValue(value: unknown, format: Format): string {
   const prefix = f.prefix ?? '';
   const suffix = f.suffix ?? '';
   const declared = f.type || f.format;
-  const abbr = declared
-    ? f.type === 'abbreviated' || f.format === '#A'
-    : Math.abs(n) >= ABBREVIATE_ABOVE;
+  const abbr = declared ? f.type === 'abbreviated' || f.format === '#A' : Math.abs(n) >= ABBREVIATE_ABOVE;
   const rendered = abbr
     ? COMPACT.format(n)
     : n.toLocaleString('en-US', {
@@ -107,7 +105,9 @@ function formatKpi(kpiSpec: Spec, rows: Row[] | null | undefined): Record<string
   if (period) {
     comparisonResult = computeComparisonResult(
       rows,
-      String(kpiSpec.comparison?.comp_val_displayed || '').toLowerCase().includes('absolute')
+      String(kpiSpec.comparison?.comp_val_displayed || '')
+        .toLowerCase()
+        .includes('absolute')
         ? 'absolute'
         : 'percent',
       period.grain
@@ -119,9 +119,7 @@ function formatKpi(kpiSpec: Spec, rows: Row[] | null | undefined): Record<string
 
   const format = vCol.format || kpiSpec.format || {};
   const text = formatValue(value, format);
-  const previousText = comparisonResult?.prevBucket
-    ? formatValue(comparisonResult.previous ?? 0, format)
-    : '';
+  const previousText = comparisonResult?.prevBucket ? formatValue(comparisonResult.previous ?? 0, format) : '';
 
   return {
     id: kpiSpec.id,
@@ -135,9 +133,13 @@ function formatKpi(kpiSpec: Spec, rows: Row[] | null | undefined): Record<string
     comparison: {
       label: kpiSpec.comparison?.label || '',
       delta: comparisonResult?.delta ?? 0,
-      deltaText: comparisonResult?.delta != null
-        ? Math.abs(comparisonResult.delta).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + (kpiSpec.comparison?.deltaFormat?.suffix ?? '')
-        : '',
+      deltaText:
+        comparisonResult?.delta != null
+          ? Math.abs(comparisonResult.delta).toLocaleString('en-US', {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            }) + (kpiSpec.comparison?.deltaFormat?.suffix ?? '')
+          : '',
       previousText,
       period: comparisonResult?.bucket?.name || '',
       previousPeriod: comparisonResult?.prevBucket?.name || '',
@@ -157,7 +159,7 @@ function formatMergedKpi(member: Spec, rows: Row[] | null | undefined): Record<s
 }
 
 function hasExplicitOrder(card: Spec): boolean {
-  const raw = card.orderBy != null ? card.orderBy : (card.sort != null ? card.sort : card.sortBy);
+  const raw = card.orderBy != null ? card.orderBy : card.sort != null ? card.sort : card.sortBy;
   if (raw == null) return false;
   return Array.isArray(raw) ? raw.length > 0 : true;
 }
@@ -338,7 +340,10 @@ function formatArea(card: Spec, rows: Row[], minHeight: number): Record<string, 
 
 function formatTreemap(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
   const columns: any[] = card.columns || [];
-  const nameCol = columns.find((c) => c.mapping === 'SERIES') || columns.find((c) => c.mapping === 'XTIME') || columns.find((c) => c.mapping === 'ITEM');
+  const nameCol =
+    columns.find((c) => c.mapping === 'SERIES') ||
+    columns.find((c) => c.mapping === 'XTIME') ||
+    columns.find((c) => c.mapping === 'ITEM');
   const valueCol = columns.find((c) => c.mapping === 'VALUE');
   const nameKey = nameCol?.column || card.groupBy?.[0]?.column || 'name';
   const valueKey = valueCol?.column || 'value';
@@ -371,7 +376,10 @@ function formatTreemap(card: Spec, rows: Row[], minHeight: number): Record<strin
 
 function formatFunnel(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
   const columns: any[] = card.columns || [];
-  const nameCol = columns.find((c) => c.mapping === 'SERIES') || columns.find((c) => c.mapping === 'ITEM') || columns.find((c) => c.mapping === 'XTIME');
+  const nameCol =
+    columns.find((c) => c.mapping === 'SERIES') ||
+    columns.find((c) => c.mapping === 'ITEM') ||
+    columns.find((c) => c.mapping === 'XTIME');
   const valueCol = columns.find((c) => c.mapping === 'VALUE');
   const nameKey = nameCol?.column || card.groupBy?.[0]?.column || 'name';
   const valueKey = valueCol?.column || 'value';
@@ -402,7 +410,11 @@ function formatFunnel(card: Spec, rows: Row[], minHeight: number): Record<string
   };
 }
 
-function formatSlicer(slicerSpec: Spec, rows: Row[] | null | undefined, filters: Record<string, any> | null | undefined): Record<string, any> {
+function formatSlicer(
+  slicerSpec: Spec,
+  rows: Row[] | null | undefined,
+  filters: Record<string, any> | null | undefined
+): Record<string, any> {
   const values = rows || [];
   const selSet = new Set(filters?.[slicerSpec.id] || []);
   return {
@@ -412,13 +424,12 @@ function formatSlicer(slicerSpec: Spec, rows: Row[] | null | undefined, filters:
     type: slicerSpec.type || 'multi',
     span: slicerSpec.span,
     showCount: slicerSpec.showCount,
-    options: values.map((v: Row) => ({ value: String(v.value), count: Number(v.count) || 0, selected: selSet.has(String(v.value)) })),
+    options: values.map((v: Row) => ({
+      value: String(v.value),
+      count: Number(v.count) || 0,
+      selected: selSet.has(String(v.value)),
+    })),
   };
 }
 
-export {
-  formatKpi,
-  formatMergedKpi,
-  formatCard,
-  formatSlicer,
-};
+export { formatKpi, formatMergedKpi, formatCard, formatSlicer };

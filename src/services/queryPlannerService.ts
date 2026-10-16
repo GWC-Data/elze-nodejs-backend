@@ -24,7 +24,7 @@ function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
     column,
     grain: resolved.key,
     isString: colMeta.isString,
-    parseFormat: (meta.dateParse?.[column]) || null,
+    parseFormat: meta.dateParse?.[column] || null,
     columnMeta: colMeta,
   };
 }
@@ -75,7 +75,9 @@ function normalizeOrderBySpec(raw: unknown): any[] {
 }
 
 function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan[], dateGroup: Plan | null): Plan[] {
-  const entries = normalizeOrderBySpec(card.orderBy != null ? card.orderBy : (card.sort != null ? card.sort : card.sortBy));
+  const entries = normalizeOrderBySpec(
+    card.orderBy != null ? card.orderBy : card.sort != null ? card.sort : card.sortBy
+  );
   if (!entries.length) return [];
 
   return entries.map((entry) => {
@@ -85,7 +87,7 @@ function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan
     }
     const colMeta = getColumn(meta, column);
     const direction = resolveSortDirection(
-      entry.direction != null ? entry.direction : (entry.dir != null ? entry.dir : entry.order)
+      entry.direction != null ? entry.direction : entry.dir != null ? entry.dir : entry.order
     );
 
     if (dateGroup && sameColumn(column, dateGroup.column)) {
@@ -111,7 +113,7 @@ function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan
     if (!isDimension && (dimensions.length || dateGroup)) {
       throw new Error(
         `orderBy column "${column}" must be one of the card's groupBy dimensions or measures, ` +
-        'or must specify an "aggregation".'
+          'or must specify an "aggregation".'
       );
     }
 
@@ -171,9 +173,7 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
   }
 
   const dateGrainSpec = readDateGrainSpec(card) || readDateGrainSpec(card.series?.main);
-  const dateGroup = dateGrainSpec
-    ? buildDateGroup(meta, dateGrainSpec.column, dateGrainSpec.grain)
-    : null;
+  const dateGroup = dateGrainSpec ? buildDateGroup(meta, dateGrainSpec.column, dateGrainSpec.grain) : null;
 
   const measures = valueCols.map((c) => buildMeasure(meta, c.column, c.aggregation, c.column));
 
@@ -210,11 +210,4 @@ function planSlicer(slicer: Spec, meta: Meta, specIndex: number): Plan {
   };
 }
 
-export {
-  buildFilters,
-  kpiValueColumn,
-  readKpiPeriod,
-  planKpi,
-  planCard,
-  planSlicer,
-};
+export { buildFilters, kpiValueColumn, readKpiPeriod, planKpi, planCard, planSlicer };

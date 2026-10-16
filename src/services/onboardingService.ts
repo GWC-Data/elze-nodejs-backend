@@ -22,10 +22,7 @@ interface NewAccountFields {
   roleId: string;
 }
 
-async function createAccount(
-  { companyId, username, email, displayName, role, roleId }: NewAccountFields,
-  conn?: Tx
-) {
+async function createAccount({ companyId, username, email, displayName, role, roleId }: NewAccountFields, conn?: Tx) {
   assertRoleCompanyPairing(role, companyId);
   assertValid(usernameProblem(username));
   assertValid(emailProblem(email));

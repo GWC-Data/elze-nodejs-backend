@@ -26,7 +26,10 @@ router.use((err: any, req: Request, res: Response, next: NextFunction) => {
       path: (req.get('x-original-uri') || '').split('?')[0] || null,
     });
   }
-  res.status(status).set('X-Gate-Reason', String(err?.code ? err.code : 'ERROR')).end();
+  res
+    .status(status)
+    .set('X-Gate-Reason', String(err?.code ? err.code : 'ERROR'))
+    .end();
 });
 
 export = router;

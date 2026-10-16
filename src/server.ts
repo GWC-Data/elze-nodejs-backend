@@ -25,7 +25,9 @@ async function start(): Promise<void> {
     if (err) {
       console.error(`[startup] cannot listen on port ${PORT}: ${err.code || err.message}`);
       if (err.code === 'EADDRINUSE') {
-        console.error('[startup] another process owns this port - often the docker-compose `web` container. Stop it or set PORT.');
+        console.error(
+          '[startup] another process owns this port - often the docker-compose `web` container. Stop it or set PORT.'
+        );
       }
       process.exit(1);
     }
@@ -41,9 +43,7 @@ function shutdown(signal: string): void {
 
   setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
 
-  const closeServer = server
-    ? new Promise<void>((resolve) => server!.close(() => resolve()))
-    : Promise.resolve();
+  const closeServer = server ? new Promise<void>((resolve) => server!.close(() => resolve())) : Promise.resolve();
 
   closeServer
     .then(() => prisma.$disconnect())

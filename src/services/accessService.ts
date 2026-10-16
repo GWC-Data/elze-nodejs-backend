@@ -69,7 +69,10 @@ async function assertDashboardAssigned(actor: Actor, companyId: number | null, d
   }
 }
 
-async function getAccessLevel(actor: Actor | null | undefined, dashboardId: string | null | undefined): Promise<string | null> {
+async function getAccessLevel(
+  actor: Actor | null | undefined,
+  dashboardId: string | null | undefined
+): Promise<string | null> {
   if (!actor || !dashboardId) return null;
   if (actor.isPlatform) return 'admin';
 
@@ -131,10 +134,7 @@ async function countAccessibleDashboards(actor: Actor): Promise<number> {
 }
 
 async function listUserGrants(userId: number) {
-  const [rows, titles] = await Promise.all([
-    accessRepository.userGrantRows(userId),
-    dashboards.dashboardTitles(),
-  ]);
+  const [rows, titles] = await Promise.all([accessRepository.userGrantRows(userId), dashboards.dashboardTitles()]);
   return rows.map((row: Record<string, any>) => {
     const grant: Record<string, any> = {
       dashboardId: row.dashboardId,
@@ -161,7 +161,13 @@ async function listDashboardGrants(companyId: number, dashboardId: string) {
 }
 
 function describeLevels() {
-  return accessLevelsFor('dashboard').map(({ id, key, rank, label, description }) => ({ id, key, rank, label, description }));
+  return accessLevelsFor('dashboard').map(({ id, key, rank, label, description }) => ({
+    id,
+    key,
+    rank,
+    label,
+    description,
+  }));
 }
 
 const levelIdOf = (level: string | null) => (level ? accessLevelId('dashboard', level) : null);
@@ -209,10 +215,7 @@ async function assertSharerMayChange(
     throw fail('INSUFFICIENT_PERMISSION', 'You cannot change your own access to a dashboard.');
   }
   if (level && !levelAtLeast(authority.level, level)) {
-    throw fail(
-      'INSUFFICIENT_PERMISSION',
-      `You can give at most the access you hold yourself ("${authority.level}").`
-    );
+    throw fail('INSUFFICIENT_PERMISSION', `You can give at most the access you hold yourself ("${authority.level}").`);
   }
   const current = await accessRepository.directUserLevel(userId, dashboardId);
   if (current && !levelAtLeast(authority.level, current)) {
@@ -334,7 +337,12 @@ async function groupDashboards(actor: Actor, groupId: number) {
     available: assigned.map((d: DashboardRecord) => ({ id: d.id, title: d.title })),
     held: assigned
       .filter((d: DashboardRecord) => levels.has(d.id))
-      .map((d: DashboardRecord) => ({ id: d.id, title: d.title, level: levels.get(d.id), levelId: levelIdOf(levels.get(d.id)) })),
+      .map((d: DashboardRecord) => ({
+        id: d.id,
+        title: d.title,
+        level: levels.get(d.id),
+        levelId: levelIdOf(levels.get(d.id)),
+      })),
   };
 }
 

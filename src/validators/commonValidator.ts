@@ -8,7 +8,11 @@ function requireId(value: unknown, label = 'id'): number {
   return id;
 }
 
-function requireString(value: unknown, label: string, { max = 255, min = 1 }: { max?: number; min?: number } = {}): string {
+function requireString(
+  value: unknown,
+  label: string,
+  { max = 255, min = 1 }: { max?: number; min?: number } = {}
+): string {
   const text = typeof value === 'string' ? value.trim() : '';
   if (text.length < min) throw fail('VALIDATION_ERROR', `${label} is required`);
   if (text.length > max) throw fail('VALIDATION_ERROR', `${label} must be ${max} characters or fewer`);

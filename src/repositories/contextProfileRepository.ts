@@ -28,7 +28,13 @@ async function find(connectionId: string) {
   return profile ? asRow(profile) : null;
 }
 
-async function upsert({ connectionId, companyId, name, description, createdBy }: {
+async function upsert({
+  connectionId,
+  companyId,
+  name,
+  description,
+  createdBy,
+}: {
   connectionId: string;
   companyId: number;
   name: string;

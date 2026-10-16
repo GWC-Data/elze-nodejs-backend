@@ -16,9 +16,7 @@ interface SmtpSink {
   stop(): Promise<unknown>;
 }
 
-function startSmtpSink(
-  { port = 2525, host = '127.0.0.1' }: { port?: number; host?: string } = {}
-): Promise<SmtpSink> {
+function startSmtpSink({ port = 2525, host = '127.0.0.1' }: { port?: number; host?: string } = {}): Promise<SmtpSink> {
   const messages: SinkMessage[] = [];
 
   const server = net.createServer((socket) => {
@@ -91,7 +89,7 @@ function startSmtpSink(
       }
     });
 
-    socket.on('error', () => {  });
+    socket.on('error', () => {});
   });
 
   function parseHeaders(headerText: string): Record<string, string> {
@@ -157,8 +155,12 @@ function startSmtpSink(
           }
           return null;
         },
-        clear() { messages.length = 0; },
-        stop() { return new Promise((done) => server.close(done)); },
+        clear() {
+          messages.length = 0;
+        },
+        stop() {
+          return new Promise((done) => server.close(done));
+        },
       });
     });
   });

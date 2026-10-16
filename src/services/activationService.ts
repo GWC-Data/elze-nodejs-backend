@@ -38,7 +38,10 @@ async function resolveActivationToken(raw: unknown) {
   const row = await tokenRepository.findActivationByHash(hashToken(raw));
 
   const invalid = () =>
-    fail('INVALID_ACTIVATION_TOKEN', 'That activation link is no longer valid. Ask your administrator to send a new one.');
+    fail(
+      'INVALID_ACTIVATION_TOKEN',
+      'That activation link is no longer valid. Ask your administrator to send a new one.'
+    );
 
   if (!row) throw invalid();
   if (row.consumed_at) throw invalid();

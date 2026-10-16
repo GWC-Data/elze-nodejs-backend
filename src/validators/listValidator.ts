@@ -16,16 +16,27 @@ interface ListQuery {
   dir: 'asc' | 'desc';
 }
 
-function intParam(value: unknown, fallback: number, { min, max, name }: { min: number; max?: number; name: string }): number {
+function intParam(
+  value: unknown,
+  fallback: number,
+  { min, max, name }: { min: number; max?: number; name: string }
+): number {
   if (value === undefined || value === null || value === '') return fallback;
   const n = Number(value);
   if (!Number.isInteger(n) || n < min || (max !== undefined && n > max)) {
-    throw fail('VALIDATION_ERROR', `${name} must be a whole number${max ? ` from ${min} to ${max}` : ` of at least ${min}`}.`);
+    throw fail(
+      'VALIDATION_ERROR',
+      `${name} must be a whole number${max ? ` from ${min} to ${max}` : ` of at least ${min}`}.`
+    );
   }
   return n;
 }
 
-function parseListQuery(query: Record<string, any>, sortable: Record<string, unknown>, defaults: ListDefaults = {}): ListQuery {
+function parseListQuery(
+  query: Record<string, any>,
+  sortable: Record<string, unknown>,
+  defaults: ListDefaults = {}
+): ListQuery {
   const page = intParam(query.page, 1, { min: 1, name: 'page' });
   const pageSize = intParam(query.pageSize, defaults.pageSize || DEFAULT_PAGE_SIZE, {
     min: 1,

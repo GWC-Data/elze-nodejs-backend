@@ -74,10 +74,7 @@ const DATE_GRAINS: Record<string, DateGrain> = {
 function resolvedName(node: PlanNode | null | undefined): string {
   const name = node?.columnMeta?.name;
   if (!name) {
-    throw new Error(
-      `Plan node for column "${node?.column}" has no resolved metadata; ` +
-      'it cannot be rendered safely.'
-    );
+    throw new Error(`Plan node for column "${node?.column}" has no resolved metadata; it cannot be rendered safely.`);
   }
   return name;
 }
@@ -140,11 +137,11 @@ function isDateColumn(colMeta: ColumnMeta): boolean {
 }
 
 function isNumericColumn(colMeta: ColumnMeta): boolean {
-  return !!(colMeta?.isNumeric);
+  return !!colMeta?.isNumeric;
 }
 
 function isStringColumn(colMeta: ColumnMeta): boolean {
-  return !!(colMeta?.isString);
+  return !!colMeta?.isString;
 }
 
 function describeColumnType(colMeta: ColumnMeta): string {
@@ -162,7 +159,7 @@ function validateAggregation(aggFn: unknown, column: string, colMeta: ColumnMeta
   if (AGG_REQUIRES_NUMERIC.has(sqlAgg) && !isNumericColumn(colMeta)) {
     throw new Error(
       `Aggregation "${sqlAgg}" requires a numeric column, but "${column}"${where} is ${describeColumnType(colMeta)}. ` +
-      'Use COUNT or COUNT_DISTINCT for non-numeric columns, or point the measure at a numeric column.'
+        'Use COUNT or COUNT_DISTINCT for non-numeric columns, or point the measure at a numeric column.'
     );
   }
 
@@ -190,13 +187,13 @@ function buildDateGroupExpression(column: string, grain: unknown, opts?: Record<
     if (!parseFormat) {
       throw new Error(
         `Date column "${column}" has a string type. Provide its parse format in dataSource.dateParse ` +
-        `(e.g. {"${column}": "DD-Mon-YY"}) or use a native DATE/TIMESTAMP column.`
+          `(e.g. {"${column}": "DD-Mon-YY"}) or use a native DATE/TIMESTAMP column.`
       );
     }
     if (parseFormat.includes('%')) {
       throw new Error(
         `dateParse for "${column}" uses the pattern "${parseFormat}", which is not a to_date ` +
-        'template. Use one instead, e.g. "DD-Mon-YY" for 15-Aug-23, "YYYY-MM-DD" for 2023-08-15.'
+          'template. Use one instead, e.g. "DD-Mon-YY" for 15-Aug-23, "YYYY-MM-DD" for 2023-08-15.'
       );
     }
     return `to_char(to_date(${col}, '${escapeLiteral(parseFormat)}'), '${fmt}')`;
@@ -268,8 +265,7 @@ function parsePeriodKey(period: unknown, grain?: unknown): number {
       try {
         const key = resolved.sortKey(match);
         if (Number.isFinite(key)) return key;
-      } catch (_) {
-      }
+      } catch (_) {}
     }
   }
 

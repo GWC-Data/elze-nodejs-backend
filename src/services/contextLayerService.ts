@@ -73,10 +73,7 @@ async function createConnection(actor: Actor, body: Record<string, any> = {}): P
     throw fail('VALIDATION_ERROR', `"${provider}" is not a connector this platform knows about.`);
   }
   if (connector.status !== 'available') {
-    throw fail(
-      'VALIDATION_ERROR',
-      `The ${connector.name} connector is not built yet, so it cannot be configured.`
-    );
+    throw fail('VALIDATION_ERROR', `The ${connector.name} connector is not built yet, so it cannot be configured.`);
   }
 
   const companyId = resolveTargetCompany(actor, body.companyId);
@@ -115,10 +112,16 @@ async function listDatasets(actor: Actor, id: unknown, query: Query = {}): Promi
   if (query.version) {
     const connection = await connections.requireConnection(actor, id);
     const version = await versionFor(connection, query.version);
-    const needle = String(query.search || '').trim().toLowerCase();
-    const listed = version.datasets
-      .map(listedDataset)
-      .filter((d: Record<string, any>) => !needle || String(d.name || '').toLowerCase().includes(needle));
+    const needle = String(query.search || '')
+      .trim()
+      .toLowerCase();
+    const listed = version.datasets.map(listedDataset).filter(
+      (d: Record<string, any>) =>
+        !needle ||
+        String(d.name || '')
+          .toLowerCase()
+          .includes(needle)
+    );
     const { page, pageSize, offset } = pageOf(query, 25, 50);
     return {
       datasets: listed.slice(offset, offset + pageSize),
@@ -229,7 +232,12 @@ async function recordExtraction(actor: Actor, id: unknown, body: Record<string, 
   return { draft };
 }
 
-async function readFacts<T>(actor: Actor, id: unknown, query: Query, read: (connection: Connection, version: any) => Promise<T>): Promise<T> {
+async function readFacts<T>(
+  actor: Actor,
+  id: unknown,
+  query: Query,
+  read: (connection: Connection, version: any) => Promise<T>
+): Promise<T> {
   const connection = await connections.requireConnectionId(actor, id);
   const version = await versionFor(connection, query.version);
   return read(connection, version);
@@ -257,7 +265,12 @@ function review(actor: Actor, id: unknown, query: Query = {}): Promise<Record<st
   return readFacts(actor, id, query, (connection) => contextService.reviewQueue(connection.id, query));
 }
 
-async function decide(actor: Actor, id: unknown, itemId: string, { decision, update }: { decision?: unknown; update?: Record<string, any> } = {}): Promise<any> {
+async function decide(
+  actor: Actor,
+  id: unknown,
+  itemId: string,
+  { decision, update }: { decision?: unknown; update?: Record<string, any> } = {}
+): Promise<any> {
   const connection = await connections.requireConnection(actor, id, 'edit');
 
   if (update) {

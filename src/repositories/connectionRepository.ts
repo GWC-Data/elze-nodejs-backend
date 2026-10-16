@@ -121,7 +121,16 @@ async function selectedDatasets(connectionId: string) {
   }));
 }
 
-async function insert({ id, companyId, provider, name, host, secret, secretHint, createdBy }: {
+async function insert({
+  id,
+  companyId,
+  provider,
+  name,
+  host,
+  secret,
+  secretHint,
+  createdBy,
+}: {
   id: string;
   companyId: number;
   provider: string;
@@ -168,7 +177,8 @@ async function replaceSelection(
         connectionId,
         datasetId: dataset.id,
         name: dataset.name ?? null,
-        rowCount: dataset.rowCount === null || dataset.rowCount === undefined ? null : BigInt(Math.trunc(dataset.rowCount)),
+        rowCount:
+          dataset.rowCount === null || dataset.rowCount === undefined ? null : BigInt(Math.trunc(dataset.rowCount)),
         columnCount: dataset.columnCount ?? null,
         selectedBy,
       })),

@@ -11,7 +11,13 @@ import * as registry from '../src/services/dashboardService';
 import * as access from '../src/services/accessService';
 import * as roleRepository from '../src/repositories/roleRepository';
 import { COMPANY_ADMIN, USER } from '../src/constants/roles';
-import { isPlatformOnly, loadCatalogue, permissionKeys, permissionKeysOf, systemRoleId } from '../src/services/catalogueService';
+import {
+  isPlatformOnly,
+  loadCatalogue,
+  permissionKeys,
+  permissionKeysOf,
+  systemRoleId,
+} from '../src/services/catalogueService';
 import type { Actor } from '../src/types/actor';
 
 async function runTests(): Promise<void> {
@@ -118,19 +124,27 @@ async function runTests(): Promise<void> {
   await registry.deleteDashboard(dashA_Id).catch(() => {});
   await registry.deleteDashboard(dashB_Id).catch(() => {});
 
-  await registry.saveSpec(dashA_Id, { title: 'Corp A Analytics', cards: [{ id: 'card1', title: 'Revenue' }] }, {
-    companyId: compA_Id,
-    userId: userA_Id,
-    title: 'Corp A Analytics',
-    description: 'Internal to Corp A',
-  });
+  await registry.saveSpec(
+    dashA_Id,
+    { title: 'Corp A Analytics', cards: [{ id: 'card1', title: 'Revenue' }] },
+    {
+      companyId: compA_Id,
+      userId: userA_Id,
+      title: 'Corp A Analytics',
+      description: 'Internal to Corp A',
+    }
+  );
 
-  await registry.saveSpec(dashB_Id, { title: 'Corp B Analytics', cards: [{ id: 'card1', title: 'Orders' }] }, {
-    companyId: compB_Id,
-    userId: userB_Id,
-    title: 'Corp B Analytics',
-    description: 'Internal to Corp B',
-  });
+  await registry.saveSpec(
+    dashB_Id,
+    { title: 'Corp B Analytics', cards: [{ id: 'card1', title: 'Orders' }] },
+    {
+      companyId: compB_Id,
+      userId: userB_Id,
+      title: 'Corp B Analytics',
+      description: 'Internal to Corp B',
+    }
+  );
 
   console.log('  ✓ Created dashA for Company A and dashB for Company B');
 

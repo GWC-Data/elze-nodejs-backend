@@ -6,7 +6,11 @@ type DashboardSpec = Record<string, any>;
 const KPI_TYPE_SET = new Set(KPI_CHART_TYPES);
 
 function isKpiChartType(chartType: unknown): boolean {
-  return KPI_TYPE_SET.has(String(chartType == null ? '' : chartType).trim().toLowerCase());
+  return KPI_TYPE_SET.has(
+    String(chartType == null ? '' : chartType)
+      .trim()
+      .toLowerCase()
+  );
 }
 
 function cardKind(card: Card | null | undefined): 'kpi' | 'chart' {
@@ -36,9 +40,5 @@ function normalizeSpec(spec: any): any {
   return next;
 }
 
-export {
-  cardKind,
-  flattenCard,
-  normalizeSpec,
-};
+export { cardKind, flattenCard, normalizeSpec };
 export type { Card, DashboardSpec };

@@ -17,10 +17,7 @@ interface AuditRecord {
   detail: Record<string, unknown>;
 }
 
-type AuditScope =
-  | { kind: 'all' }
-  | { kind: 'company'; companyId: number }
-  | { kind: 'self'; userId: number };
+type AuditScope = { kind: 'all' } | { kind: 'company'; companyId: number } | { kind: 'self'; userId: number };
 
 interface AuditFilter {
   scope: AuditScope;

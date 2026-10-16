@@ -6,7 +6,13 @@ const { prisma } = config.database;
 const PURPOSE_ACTIVATION = 'activation';
 
 async function insertRefresh(
-  { id, familyId, userId, tokenHash, expiresAt }: {
+  {
+    id,
+    familyId,
+    userId,
+    tokenHash,
+    expiresAt,
+  }: {
     id: string;
     familyId: string;
     userId: number;
@@ -87,7 +93,13 @@ async function retireActivations(userId: number, tx: Tx = prisma): Promise<void>
 }
 
 async function insertActivation(
-  { id, userId, tokenHash, expiresAt, createdBy }: {
+  {
+    id,
+    userId,
+    tokenHash,
+    expiresAt,
+    createdBy,
+  }: {
     id: string;
     userId: number;
     tokenHash: string;

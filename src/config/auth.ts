@@ -14,7 +14,7 @@ const JWT_REFRESH_SECRET = required(
 if (JWT_ACCESS_SECRET === JWT_REFRESH_SECRET) {
   throw new ConfigError(
     'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ: sharing one secret means a stolen ' +
-    'access token and a stolen refresh token are interchangeable.'
+      'access token and a stolen refresh token are interchangeable.'
   );
 }
 
@@ -47,7 +47,8 @@ const LOGIN_WINDOW_SECONDS = appConfig.LOGIN_WINDOW_SECONDS;
 const LOGIN_LOCKOUT_SECONDS = appConfig.LOGIN_LOCKOUT_SECONDS;
 
 function bootstrapSuperAdmin() {
-  const purpose = 'the database has no accounts yet, so the platform owner is created from it. ' +
+  const purpose =
+    'the database has no accounts yet, so the platform owner is created from it. ' +
     'Remove it once the owner has signed in.';
   return {
     username: required('BOOTSTRAP_ADMIN_USERNAME', purpose),
@@ -60,20 +61,15 @@ export {
   JWT_ACCESS_SECRET,
   JWT_REFRESH_SECRET,
   APPLICATION_URL_BASE as APPLICATION_URL,
-
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_SECONDS,
   ACTIVATION_TOKEN_TTL_SECONDS,
-
   COOKIE_SECURE,
   COOKIE_SAMESITE,
-
   BCRYPT_ROUNDS,
   MIN_PASSWORD_LENGTH,
-
   LOGIN_MAX_ATTEMPTS,
   LOGIN_WINDOW_SECONDS,
   LOGIN_LOCKOUT_SECONDS,
-
   bootstrapSuperAdmin,
 };

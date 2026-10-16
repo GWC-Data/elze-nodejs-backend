@@ -40,7 +40,12 @@ async function versionState(connection: Connection): Promise<Record<string, any>
   };
 }
 
-async function openDraft(conn: Tx, actor: Actor | null | undefined, connection: Connection, step: string | null | undefined): Promise<Row> {
+async function openDraft(
+  conn: Tx,
+  actor: Actor | null | undefined,
+  connection: Connection,
+  step: string | null | undefined
+): Promise<Row> {
   const basedOn = await versionRepository.latestPublishedName(conn, connection.id);
   const name = basedOn ? basedOn.name : String(connection.name).slice(0, 120);
   const version = await versionRepository.nextVersion(conn, connection.id, name);
@@ -73,7 +78,12 @@ function draftPatch(draft: Row, patch: Record<string, any>): versionRepository.D
   return changes;
 }
 
-async function touchDraft(actor: Actor | null | undefined, connection: Connection, patch: Record<string, any> = {}, attempt = 0): Promise<Version | null> {
+async function touchDraft(
+  actor: Actor | null | undefined,
+  connection: Connection,
+  patch: Record<string, any> = {},
+  attempt = 0
+): Promise<Version | null> {
   try {
     const row = await withTransaction(async (conn: Tx) => {
       let draft = await versionRepository.lockDraft(conn, connection.id);
@@ -96,22 +106,36 @@ async function trackStep(connection: Connection, step: string): Promise<Version 
   return shapeVersion(await versionRepository.advanceDraftStep(connection.id, CONTEXT_STEPS, step));
 }
 
-async function publishDraft(conn: Tx, actor: Actor, connection: Connection, { name, snapshot, datasets = [], stats, sessionId, notifyTeam }: { name: string; snapshot: any; datasets?: any[]; stats: any; sessionId: any; notifyTeam: any }): Promise<Version> {
+async function publishDraft(
+  conn: Tx,
+  actor: Actor,
+  connection: Connection,
+  {
+    name,
+    snapshot,
+    datasets = [],
+    stats,
+    sessionId,
+    notifyTeam,
+  }: { name: string; snapshot: any; datasets?: any[]; stats: any; sessionId: any; notifyTeam: any }
+): Promise<Version> {
   let draft = await versionRepository.lockDraft(conn, connection.id);
   if (!draft) draft = await openDraft(conn, actor, connection, 'publish');
 
   const version = await versionRepository.nextVersion(conn, connection.id, name, draft.id);
 
-  return shapeVersion(await versionRepository.markPublished(conn, draft.id, {
-    name,
-    version,
-    sessionId,
-    snapshot,
-    stats,
-    notifyTeam,
-    datasets,
-    publishedBy: actor.id,
-  }))!;
+  return shapeVersion(
+    await versionRepository.markPublished(conn, draft.id, {
+      name,
+      version,
+      sessionId,
+      snapshot,
+      stats,
+      notifyTeam,
+      datasets,
+      publishedBy: actor.id,
+    })
+  )!;
 }
 
 async function latestPublished(connectionId: string): Promise<Version | null> {

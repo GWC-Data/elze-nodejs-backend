@@ -50,12 +50,17 @@ function documentedOperations(spec: any): { operations: Set<string>; problems: s
       const key = `${method.toUpperCase()} ${route}`;
       operations.add(key);
       if (!operation.operationId) problems.push(`${key} has no operationId`);
-      else if (operationIds.has(operation.operationId)) problems.push(`${key} reuses operationId ${operation.operationId} from ${operationIds.get(operation.operationId)}`);
+      else if (operationIds.has(operation.operationId))
+        problems.push(
+          `${key} reuses operationId ${operation.operationId} from ${operationIds.get(operation.operationId)}`
+        );
       else operationIds.set(operation.operationId, key);
       if (!operation.tags?.length) problems.push(`${key} has no tag`);
       for (const [, name] of route.matchAll(/\{(\w+)\}/g)) {
         const params = [...(item.parameters ?? []), ...(operation.parameters ?? [])];
-        const declared = params.some((p: any) => p.in === 'path' && p.name === name) || params.some((p: any) => typeof p.$ref === 'string' && p.$ref.endsWith(`/${name}`));
+        const declared =
+          params.some((p: any) => p.in === 'path' && p.name === name) ||
+          params.some((p: any) => typeof p.$ref === 'string' && p.$ref.endsWith(`/${name}`));
         if (!declared) problems.push(`${key} does not declare path parameter ${name}`);
       }
     }
@@ -81,7 +86,9 @@ function main(): void {
   for (const problem of problems) console.error(`spec problem: ${problem}`);
 
   if (undocumented.length || stale.length || problems.length) {
-    console.error(`\nAPI docs are out of date: ${undocumented.length} undocumented, ${stale.length} stale, ${problems.length} spec problems`);
+    console.error(
+      `\nAPI docs are out of date: ${undocumented.length} undocumented, ${stale.length} stale, ${problems.length} spec problems`
+    );
     process.exit(1);
   }
   console.log(`API docs match the routes: ${served.size} operations`);

@@ -46,9 +46,7 @@ function generateKpiPeriodSql(plan: Plan): GeneratedSql {
   if (plan.kind === 'kpi-period-merged') {
     const selects = [`${dateSelect(plan.dateGroup)} AS "_period"`];
     for (const member of plan.members) {
-      selects.push(
-        buildAggExpression(member.measure.aggregation, resolvedName(member.measure), member.alias)
-      );
+      selects.push(buildAggExpression(member.measure.aggregation, resolvedName(member.measure), member.alias));
     }
     const sql = `SELECT ${selects.join(', ')} FROM ${table}${where} GROUP BY "_period" ORDER BY "_period" ASC`;
     return { sql, params, meta: { type: plan.kind, plan } };
@@ -137,6 +135,4 @@ function generateSql(plan: Plan): GeneratedSql {
   }
 }
 
-export {
-  generateSql,
-};
+export { generateSql };

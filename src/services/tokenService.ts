@@ -32,10 +32,7 @@ async function issueRefreshToken(
   const fullTerm = expiryDate(REFRESH_TOKEN_TTL_SECONDS);
   const expiresAt = notAfter && notAfter.getTime() < fullTerm.getTime() ? notAfter : fullTerm;
 
-  await tokenRepository.insertRefresh(
-    { id, familyId: family, userId, tokenHash: hashToken(raw), expiresAt },
-    conn
-  );
+  await tokenRepository.insertRefresh({ id, familyId: family, userId, tokenHash: hashToken(raw), expiresAt }, conn);
   if (replaces) await tokenRepository.markRotated(replaces, id, conn);
 
   return { id, familyId: family, token: raw, expiresAt };
@@ -53,7 +50,7 @@ async function consumeRefreshToken(raw: unknown) {
     await tokenRepository.revokeFamily(row.family_id, 'reuse_detected');
     console.warn(
       `[auth] refresh token reuse detected for user ${row.user_id}; ` +
-      `family ${row.family_id} revoked (previous reason: ${row.revoked_reason})`
+        `family ${row.family_id} revoked (previous reason: ${row.revoked_reason})`
     );
     throw fail('INVALID_REFRESH_TOKEN', SESSION_ENDED);
   }

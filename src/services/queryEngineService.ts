@@ -22,11 +22,7 @@ type StageError = { stage: string; message: string };
 const cache = new QueryCache(REDIS_URL, { ttl: REDIS_TTL, prefix: CACHE_PREFIX });
 
 function dashboardKey(spec: Spec, meta: Record<string, any> | null | undefined): string {
-  return (
-    spec.id ||
-    spec.title ||
-    (meta?.source ? `${meta.source.database}.${meta.source.table}` : 'default')
-  );
+  return spec.id || spec.title || (meta?.source ? `${meta.source.database}.${meta.source.table}` : 'default');
 }
 
 function describeError(err: any, stage: string): StageError {
@@ -36,7 +32,11 @@ function describeError(err: any, stage: string): StageError {
   };
 }
 
-async function runQueryWithCache(query: Record<string, any>, dashKey: string, ttl?: number): Promise<{ rows: any; cached: boolean; elapsed: number }> {
+async function runQueryWithCache(
+  query: Record<string, any>,
+  dashKey: string,
+  ttl?: number
+): Promise<{ rows: any; cached: boolean; elapsed: number }> {
   const key = cache.generateKey(dashKey, query.meta.type, query.sql, query.params);
   const cached = await cache.get(key);
   if (cached) {
@@ -119,9 +119,8 @@ function planCardEntries(cards: Spec[] | null | undefined, filtersList: Plan[], 
     const kind = cardKind(card);
     const entry: Entry = { specIndex, card, kind };
     try {
-      entry.plan = kind === 'kpi'
-        ? planKpi(card, filtersList, meta, specIndex)
-        : planCard(card, filtersList, meta, specIndex);
+      entry.plan =
+        kind === 'kpi' ? planKpi(card, filtersList, meta, specIndex) : planCard(card, filtersList, meta, specIndex);
     } catch (err) {
       entry.error = describeError(err, 'plan');
     }
@@ -200,20 +199,23 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
 
   const dashKey = dashboardKey(spec, meta);
   const results = await runWithConcurrency(
-    runnable.map((job) => () =>
-      runQueryWithCache(job.query, dashKey)
-        .then((r) => ({ ok: true, ...r }))
-        .catch((err: any) => ({ ok: false, error: describeError(err, 'execute') }))
+    runnable.map(
+      (job) => () =>
+        runQueryWithCache(job.query, dashKey)
+          .then((r) => ({ ok: true, ...r }))
+          .catch((err: any) => ({ ok: false, error: describeError(err, 'execute') }))
     ),
     MAX_CONCURRENT
   );
-  runnable.forEach((job, i) => { job.result = results[i]; });
+  runnable.forEach((job, i) => {
+    job.result = results[i];
+  });
 
   const minHeight = spec.layout?.chart?.minHeight ?? DEFAULT_CHART_MIN_HEIGHT;
 
   for (const job of runnable) {
     if (!job.result?.ok) {
-      assignJobError(job, (job.result?.error) || describeError(new Error('Query produced no result'), 'execute'));
+      assignJobError(job, job.result?.error || describeError(new Error('Query produced no result'), 'execute'));
       continue;
     }
     const rows = job.result.rows;

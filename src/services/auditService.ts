@@ -52,9 +52,10 @@ function audit(event: string, actor: AuditActor, detail: AuditDetail = {}): void
     console.warn(`[audit] unknown event "${event}" - add it to EVENTS in constants/auditEvents.ts`);
   }
   try {
-    const who = actor && typeof actor === 'object'
-      ? { actorId: actor.id ?? null, actor: actor.username ?? null, actorCompanyId: actor.companyId ?? null }
-      : { actorId: null, actor: String(actor || 'anonymous'), actorCompanyId: null };
+    const who =
+      actor && typeof actor === 'object'
+        ? { actorId: actor.id ?? null, actor: actor.username ?? null, actorCompanyId: actor.companyId ?? null }
+        : { actorId: null, actor: String(actor || 'anonymous'), actorCompanyId: null };
 
     const safe = scrub(detail);
     console.log(`[audit] ${JSON.stringify({ ts: new Date().toISOString(), event, ...safe, ...who })}`);
@@ -163,14 +164,18 @@ async function listEntries(
   const page = await auditRepository.listPage(
     { scope, event, categoryEvents, actionEvents, from, to, search: list.search },
     list,
-    (row) => shapeEntry({
-      ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
-      event: row.event,
-      ...visibleDetail(row.detail || {}, visible),
-      actor: row.actor,
-      actorId: row.actor_id,
-      actorCompanyId: row.actor_company_id,
-    }, { id: row.id, companyId: row.company_id, companyName: row.company_name })
+    (row) =>
+      shapeEntry(
+        {
+          ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
+          event: row.event,
+          ...visibleDetail(row.detail || {}, visible),
+          actor: row.actor,
+          actorId: row.actor_id,
+          actorCompanyId: row.actor_company_id,
+        },
+        { id: row.id, companyId: row.company_id, companyName: row.company_name }
+      )
   );
   return { ...page, scope: scope.kind };
 }

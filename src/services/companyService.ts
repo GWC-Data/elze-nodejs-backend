@@ -176,10 +176,7 @@ async function deleteCompany(actor: Actor, id: number): Promise<void> {
   const company = await requireCompany(actor, id);
   const n = await userRepository.countByCompany(id);
   if (n > 0) {
-    throw fail(
-      'CONFLICT',
-      `This company still has ${n} account${n === 1 ? '' : 's'}. Delete them first.`
-    );
+    throw fail('CONFLICT', `This company still has ${n} account${n === 1 ? '' : 's'}. Delete them first.`);
   }
   if (!(await companyRepository.remove(id))) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
   audit(EVENTS.COMPANY_DELETED, actor, { companyId: id, name: company.name });

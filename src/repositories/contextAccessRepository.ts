@@ -133,7 +133,12 @@ async function findGroupGrant(connectionId: string, groupId: number): Promise<st
   return grant ? grant.accessLevel.key : null;
 }
 
-async function upsertGroupGrant(connectionId: string, groupId: number, level: string, grantedBy: number): Promise<void> {
+async function upsertGroupGrant(
+  connectionId: string,
+  groupId: number,
+  level: string,
+  grantedBy: number
+): Promise<void> {
   const accessLevelId = contextLevel(level);
   await prisma.contextGroupAccess.upsert({
     where: { connectionId_groupId: { connectionId, groupId } },

@@ -2,9 +2,7 @@ type Plan = Record<string, any>;
 
 function planSignature(plan: Plan): string {
   const src = plan.source ? [plan.source.database, plan.source.table] : [];
-  const date = plan.dateGroup
-    ? [plan.dateGroup.column, plan.dateGroup.grain, plan.dateGroup.parseFormat || '']
-    : null;
+  const date = plan.dateGroup ? [plan.dateGroup.column, plan.dateGroup.grain, plan.dateGroup.parseFormat || ''] : null;
   const filters = (plan.filters || []).map((f: any) => [f.column, f.operator || 'IN', f.values || []]);
   return JSON.stringify([src, date, filters]);
 }

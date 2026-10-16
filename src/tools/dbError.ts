@@ -1,6 +1,9 @@
 function sqlState(err: unknown): string | undefined {
   const e = err as any;
-  return e?.meta?.driverAdapterError?.cause?.originalCode ?? (typeof e?.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code) ? e.code : undefined);
+  return (
+    e?.meta?.driverAdapterError?.cause?.originalCode ??
+    (typeof e?.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code) ? e.code : undefined)
+  );
 }
 
 function dbMessage(err: unknown): string {

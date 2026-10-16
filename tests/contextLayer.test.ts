@@ -1,7 +1,6 @@
 import assert = require('node:assert');
 
-process.env.CREDENTIAL_SECRET = process.env.CREDENTIAL_SECRET
-  || 'test-only-credential-secret-at-least-32-chars';
+process.env.CREDENTIAL_SECRET = process.env.CREDENTIAL_SECRET || 'test-only-credential-secret-at-least-32-chars';
 process.env.BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'platformowner';
 process.env.BOOTSTRAP_ADMIN_EMAIL = process.env.BOOTSTRAP_ADMIN_EMAIL || 'owner@example.com';
 process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'ChangeMeAtFirstSignIn1!';
@@ -29,7 +28,14 @@ import type { Actor } from '../src/types/actor';
 const level = (key: string) => ({ levelId: accessLevelId('context', key) });
 
 type FetchInit = { headers?: Record<string, string> } & Record<string, any>;
-type SeenRequest = { host: string; path: string; query: string; token: string | undefined; init: FetchInit; search?: string };
+type SeenRequest = {
+  host: string;
+  path: string;
+  query: string;
+  token: string | undefined;
+  init: FetchInit;
+  search?: string;
+};
 
 let passed = 0;
 let failed = 0;
@@ -65,7 +71,8 @@ const KNOWN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000001';
 const MISSING_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000404';
 const FORBIDDEN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000403';
 const UNSIZED_DATASET_ID = 'ds-0001';
-const listAll = (options: { limit?: number } = {}) => domo.listDatasets({ host: GOOD_HOST, token: GOOD_TOKEN, ...options });
+const listAll = (options: { limit?: number } = {}) =>
+  domo.listDatasets({ host: GOOD_HOST, token: GOOD_TOKEN, ...options });
 
 let datasetCount = 3;
 let seenRequests: SeenRequest[] = [];
@@ -92,9 +99,13 @@ function json(body: unknown, status: number = 200): Response {
 function installFakeDomo() {
   global.fetch = (async (url: string, init: FetchInit = {}) => {
     const target = new URL(url);
-    const token = (init.headers || {} as Record<string, string>)['X-DOMO-Developer-Token'];
+    const token = (init.headers || ({} as Record<string, string>))['X-DOMO-Developer-Token'];
     seenRequests.push({
-      host: target.host, path: target.pathname, query: target.search.replace(/^\?/, ''), token, init,
+      host: target.host,
+      path: target.pathname,
+      query: target.search.replace(/^\?/, ''),
+      token,
+      init,
     });
 
     if (target.host === 'unreachable.domo.com') {
@@ -156,10 +167,7 @@ function installFakeDomo() {
       const offset = Number(target.searchParams.get('offset'));
 
       if (!(limit >= 0 && limit <= 50)) {
-        return json(
-          { status: 400, message: `'limit' param must be nonnegative and <= 50. actual=${limit}` },
-          400
-        );
+        return json({ status: 400, message: `'limit' param must be nonnegative and <= 50. actual=${limit}` }, 400);
       }
 
       const page: ReturnType<typeof fakeDataset>[] = [];
@@ -176,10 +184,10 @@ function installFakeDomo() {
 const made: { companies: number[]; users: number[] } = { companies: [], users: [] };
 
 async function makeCompany(name: string): Promise<number> {
-  const { rows } = await db.query(
-    `INSERT INTO companies (name, slug, active) VALUES (?, ?, TRUE) RETURNING id`,
-    [name, name.toLowerCase().replace(/[^a-z0-9]+/g, '-')]
-  );
+  const { rows } = await db.query(`INSERT INTO companies (name, slug, active) VALUES (?, ?, TRUE) RETURNING id`, [
+    name,
+    name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  ]);
   made.companies.push(rows[0].id);
   return rows[0].id;
 }
@@ -190,11 +198,25 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
-  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, systemRoleId('COMPANY_ADMIN')]);
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [
+    rows[0].id,
+    systemRoleId('COMPANY_ADMIN'),
+  ]);
   made.users.push(rows[0].id);
   return {
-    id: rows[0].id, username, companyId, isPlatform: false, role: 'COMPANY_ADMIN',
-    permissions: ['context.read', 'context.create', 'context.update', 'context.publish', 'context.delete', 'context.manage_all'],
+    id: rows[0].id,
+    username,
+    companyId,
+    isPlatform: false,
+    role: 'COMPANY_ADMIN',
+    permissions: [
+      'context.read',
+      'context.create',
+      'context.update',
+      'context.publish',
+      'context.delete',
+      'context.manage_all',
+    ],
     features: [],
   } as unknown as Actor;
 }
@@ -205,11 +227,19 @@ async function makeMember(companyId: number, username: string): Promise<Actor> {
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
     [companyId, username, `${username}@example.com`]
   );
-  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [rows[0].id, systemRoleId('USER')]);
+  await db.query(`INSERT INTO access_control.user_roles (user_id, role_id) VALUES (?, ?)`, [
+    rows[0].id,
+    systemRoleId('USER'),
+  ]);
   made.users.push(rows[0].id);
   return {
-    id: rows[0].id, username, companyId, isPlatform: false, role: 'USER',
-    permissions: ['context.read'], features: [],
+    id: rows[0].id,
+    username,
+    companyId,
+    isPlatform: false,
+    role: 'USER',
+    permissions: ['context.read'],
+    features: [],
   } as unknown as Actor;
 }
 
@@ -238,15 +268,18 @@ async function cleanup(): Promise<void> {
   check('the hint shows only the last four', hint(GOOD_TOKEN) === '••••orks', hint(GOOD_TOKEN));
 
   const tampered = sealed.slice(0, -2) + (sealed.endsWith('A') ? 'BB' : 'AA');
-  check('a tampered value fails to open', await codeOf(() => open(tampered)) !== null);
+  check('a tampered value fails to open', (await codeOf(() => open(tampered))) !== null);
 
   section('Domo instance addresses');
 
   check('a bare name becomes the full host', domo.normaliseHost('acme') === 'acme.domo.com');
   check('a URL is reduced to the host', domo.normaliseHost('https://acme.domo.com/datacenter') === 'acme.domo.com');
   check('case and trailing slash are ignored', domo.normaliseHost('ACME.domo.com/') === 'acme.domo.com');
-  check('a non-Domo host is refused', await codeOf(() => domo.normaliseHost('evil.example.com')) === 'VALIDATION_ERROR');
-  check('an empty address is refused', await codeOf(() => domo.normaliseHost('')) === 'VALIDATION_ERROR');
+  check(
+    'a non-Domo host is refused',
+    (await codeOf(() => domo.normaliseHost('evil.example.com'))) === 'VALIDATION_ERROR'
+  );
+  check('an empty address is refused', (await codeOf(() => domo.normaliseHost(''))) === 'VALIDATION_ERROR');
 
   section('Connecting');
 
@@ -255,7 +288,10 @@ async function cleanup(): Promise<void> {
 
   const badToken = await codeOf(() =>
     service.createConnection(adminA, companyA, {
-      provider: 'domo', name: 'Rejected', host: GOOD_HOST, token: 'wrong-token',
+      provider: 'domo',
+      name: 'Rejected',
+      host: GOOD_HOST,
+      token: 'wrong-token',
     })
   );
   check('a refused token is CONNECTOR_AUTH_FAILED', badToken === 'CONNECTOR_AUTH_FAILED', badToken);
@@ -263,24 +299,36 @@ async function cleanup(): Promise<void> {
 
   const unreachable = await codeOf(() =>
     service.createConnection(adminA, companyA, {
-      provider: 'domo', name: 'Nowhere', host: 'unreachable.domo.com', token: GOOD_TOKEN,
+      provider: 'domo',
+      name: 'Nowhere',
+      host: 'unreachable.domo.com',
+      token: GOOD_TOKEN,
     })
   );
   check('an unreachable instance is CONNECTOR_UNREACHABLE', unreachable === 'CONNECTOR_UNREACHABLE', unreachable);
 
   const unknownProvider = await codeOf(() =>
     service.createConnection(adminA, companyA, {
-      provider: 'snowflake', name: 'Soon', host: GOOD_HOST, token: GOOD_TOKEN,
+      provider: 'snowflake',
+      name: 'Soon',
+      host: GOOD_HOST,
+      token: GOOD_TOKEN,
     })
   );
   check('an unbuilt provider is refused', unknownProvider === 'VALIDATION_ERROR', unknownProvider);
 
   const created = await service.createConnection(adminA, companyA, {
-    provider: 'domo', name: 'Domo — Sales', host: 'ACME.domo.com/', token: GOOD_TOKEN,
+    provider: 'domo',
+    name: 'Domo — Sales',
+    host: 'ACME.domo.com/',
+    token: GOOD_TOKEN,
   });
   check('the connection is created', Boolean(created.connection.id));
   check('the host was normalised', created.connection.host === GOOD_HOST, created.connection.host);
-  check('the credential was checked before saving', seenRequests.some((r) => r.path === '/api/content/v2/users/me'));
+  check(
+    'the credential was checked before saving',
+    seenRequests.some((r) => r.path === '/api/content/v2/users/me')
+  );
   check('the account behind the token is reported', created.account.accountName === 'Ada Lovelace');
   check('the datasets came back with it', created.datasets.length === 3, String(created.datasets.length));
   check('the token is not in the response', !JSON.stringify(created.connection).includes(GOOD_TOKEN));
@@ -295,7 +343,10 @@ async function cleanup(): Promise<void> {
 
   const duplicate = await codeOf(() =>
     service.createConnection(adminA, companyA, {
-      provider: 'domo', name: 'Domo — Sales', host: GOOD_HOST, token: GOOD_TOKEN,
+      provider: 'domo',
+      name: 'Domo — Sales',
+      host: GOOD_HOST,
+      token: GOOD_TOKEN,
     })
   );
   check('the same name twice in one company is refused', duplicate === 'CONFLICT', duplicate);
@@ -342,15 +393,20 @@ async function cleanup(): Promise<void> {
   check('a non-owner admin sharing is refused', adminShares === 'INSUFFICIENT_PERMISSION', adminShares);
 
   const people = await sharing.shareablePeople(adminA, connectionId);
-  check('the people to share with are the company, owner aside',
-    people.some((p: any) => p.userId === memberA.id) && !people.some((p: any) => p.userId === adminA.id)
-      && !people.some((p: any) => p.userId === adminB.id),
-    JSON.stringify(people.map((p: any) => p.userId)));
+  check(
+    'the people to share with are the company, owner aside',
+    people.some((p: any) => p.userId === memberA.id) &&
+      !people.some((p: any) => p.userId === adminA.id) &&
+      !people.some((p: any) => p.userId === adminB.id),
+    JSON.stringify(people.map((p: any) => p.userId))
+  );
 
   let shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, level('view'));
-  check('sharing lists the person with their level',
+  check(
+    'sharing lists the person with their level',
     shared.people.length === 1 && shared.people[0].userId === memberA.id && shared.people[0].level === 'view',
-    JSON.stringify(shared.people));
+    JSON.stringify(shared.people)
+  );
   check('the member now sees it', (await service.listConnections(memberA)).length === 1);
   const asViewer = await service.requireConnection(memberA, connectionId);
   check('as view', asViewer.access.level === 'view' && asViewer.access.canShare === false);
@@ -360,14 +416,23 @@ async function cleanup(): Promise<void> {
   check('view cannot delete it', viewerDeletes === 'INSUFFICIENT_PERMISSION', viewerDeletes);
   const viewerShares = await codeOf(() => sharing.shareWithUser(memberA, connectionId, otherAdminA.id, level('view')));
   check('a sharee cannot share it on', viewerShares === 'INSUFFICIENT_PERMISSION', viewerShares);
-  check('the gate lets view read the description editor', (await gate(memberA, '/description-editor/sessions', 'GET')) === null);
+  check(
+    'the gate lets view read the description editor',
+    (await gate(memberA, '/description-editor/sessions', 'GET')) === null
+  );
   const viewerChats = await gate(memberA, '/description-editor/sessions', 'POST');
   check('the gate keeps view out of description edits', viewerChats === 'INSUFFICIENT_PERMISSION', viewerChats);
 
   shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, level('edit'));
   check('changing the level replaces it', shared.people.length === 1 && shared.people[0].level === 'edit');
-  check('edit can change the draft', (await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'))) === null);
-  check('the gate lets edit use the description editor', (await gate(memberA, '/description-editor/sessions/s1/messages', 'POST')) === null);
+  check(
+    'edit can change the draft',
+    (await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'))) === null
+  );
+  check(
+    'the gate lets edit use the description editor',
+    (await gate(memberA, '/description-editor/sessions/s1/messages', 'POST')) === null
+  );
   const editorDeletes = await codeOf(() => service.requireConnection(memberA, connectionId, 'full'));
   check('edit still cannot delete', editorDeletes === 'INSUFFICIENT_PERMISSION', editorDeletes);
 
@@ -375,7 +440,9 @@ async function cleanup(): Promise<void> {
   check('the owner cannot be given a level', toOwner === 'VALIDATION_ERROR', toOwner);
   const crossCompany = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminB.id, level('view')));
   check("another company's person cannot be added", crossCompany === 'RESOURCE_NOT_FOUND', crossCompany);
-  const badLevel = await codeOf(() => sharing.shareWithUser(adminA, connectionId, memberA.id, { levelId: accessLevelId('dashboard', 'admin') }));
+  const badLevel = await codeOf(() =>
+    sharing.shareWithUser(adminA, connectionId, memberA.id, { levelId: accessLevelId('dashboard', 'admin') })
+  );
   check('an unknown level is refused', badLevel === 'VALIDATION_ERROR', badLevel);
 
   shared = await sharing.unshareWithUser(adminA, connectionId, memberA.id);
@@ -392,8 +459,10 @@ async function cleanup(): Promise<void> {
   const badGeneral = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'public' }));
   check('an unknown general access is refused', badGeneral === 'VALIDATION_ERROR', badGeneral);
   shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'restricted' });
-  check('and it can be restricted again', shared.generalAccess === 'restricted'
-    && (await service.listConnections(memberA)).length === 0);
+  check(
+    'and it can be restricted again',
+    shared.generalAccess === 'restricted' && (await service.listConnections(memberA)).length === 0
+  );
 
   section('Listing datasets');
 
@@ -401,8 +470,14 @@ async function cleanup(): Promise<void> {
   const listing = await listAll();
   const listed = listing.datasets;
   check('the datasets are listed', listed.length === 3, String(listed.length));
-  check('each carries the id a context needs', listed.every((d: any) => typeof d.id === 'string' && d.id));
-  check('row counts are numbers', listed.every((d: any) => typeof d.rowCount === 'number'));
+  check(
+    'each carries the id a context needs',
+    listed.every((d: any) => typeof d.id === 'string' && d.id)
+  );
+  check(
+    'row counts are numbers',
+    listed.every((d: any) => typeof d.rowCount === 'number')
+  );
   check('the owner is flattened to a name', listed[0].owner === 'Ada Lovelace', String(listed[0].owner));
   check('a short list is not reported as truncated', listing.truncated === false);
 
@@ -416,23 +491,23 @@ async function cleanup(): Promise<void> {
 
   const first = new URL(`https://x${listCalls[0].path}${listCalls[0].search || ''}`);
   const params = new URLSearchParams(listCalls[0].query || '');
-  check('limit never exceeds the cap Domo enforces',
+  check(
+    'limit never exceeds the cap Domo enforces',
     listCalls.every((c) => Number(new URLSearchParams(c.query).get('limit')) <= 50),
-    JSON.stringify(listCalls.map((c) => new URLSearchParams(c.query).get('limit'))));
-  check('offset steps by the page size',
+    JSON.stringify(listCalls.map((c) => new URLSearchParams(c.query).get('limit')))
+  );
+  check(
+    'offset steps by the page size',
     listCalls.map((c) => new URLSearchParams(c.query).get('offset')).join() === '0,50,100,150,200,250',
-    listCalls.map((c) => new URLSearchParams(c.query).get('offset')).join());
-  check('row and column counts are requested',
-    (params.get('part') || '').includes('rowcolcount'), params.get('part'));
+    listCalls.map((c) => new URLSearchParams(c.query).get('offset')).join()
+  );
+  check('row and column counts are requested', (params.get('part') || '').includes('rowcolcount'), params.get('part'));
   check('hidden datasets are included', params.get('includeHidden') === 'true');
   check('the order is stable across pages', params.get('orderBy') === 'createdAt');
   void first;
 
   datasetCount = 0;
-  check(
-    'a token with no datasets is not an error',
-    (await listAll()).datasets.length === 0
-  );
+  check('a token with no datasets is not an error', (await listAll()).datasets.length === 0);
 
   section('The listing limit');
 
@@ -443,19 +518,14 @@ async function cleanup(): Promise<void> {
   check('the default stops at 20', capped.datasets.length === 20, String(capped.datasets.length));
   check('the applied limit is reported', capped.limit === 20, String(capped.limit));
   check('it says there is more', capped.truncated === true);
-  check(
-    'one page was enough',
-    seenRequests.filter((r) => r.path === '/api/data/v3/datasources').length === 1
-  );
+  check('one page was enough', seenRequests.filter((r) => r.path === '/api/data/v3/datasources').length === 1);
 
   seenRequests = [];
   const ten = await listAll({ limit: 10 });
   check('an explicit limit is honoured', ten.datasets.length === 10, String(ten.datasets.length));
   check(
     'it asks for one row beyond the limit, to detect more',
-    new URLSearchParams(
-      seenRequests.find((r) => r.path === '/api/data/v3/datasources')!.query
-    ).get('limit') === '11'
+    new URLSearchParams(seenRequests.find((r) => r.path === '/api/data/v3/datasources')!.query).get('limit') === '11'
   );
   check('the probe row is not returned', ten.datasets.length === 10);
   check('ten of 260 is truncated', ten.truncated === true);
@@ -472,20 +542,16 @@ async function cleanup(): Promise<void> {
 
   datasetCount = 137;
   const overPage = await listAll({ limit: 100 });
-  check('a limit on a page boundary still detects more',
-    overPage.truncated === true, String(overPage.truncated));
-  check('and returns exactly the limit',
-    overPage.datasets.length === 100, String(overPage.datasets.length));
+  check('a limit on a page boundary still detects more', overPage.truncated === true, String(overPage.truncated));
+  check('and returns exactly the limit', overPage.datasets.length === 100, String(overPage.datasets.length));
 
   datasetCount = 100;
   const onPage = await listAll({ limit: 100 });
-  check('exactly a page-boundary total is not truncated',
-    onPage.truncated === false, String(onPage.truncated));
+  check('exactly a page-boundary total is not truncated', onPage.truncated === false, String(onPage.truncated));
 
   datasetCount = 51;
   const justOver = await listAll({ limit: 50 });
-  check('one beyond a single page is truncated',
-    justOver.truncated === true, String(justOver.truncated));
+  check('one beyond a single page is truncated', justOver.truncated === true, String(justOver.truncated));
 
   datasetCount = 3;
 
@@ -506,12 +572,10 @@ async function cleanup(): Promise<void> {
 
   responseShape = () => ({ totalResultCount: 42, somethingElse: {} });
   const unknownShape = await codeOf(() => listAll());
-  check('an unrecognised shape is an error, not an empty list',
-    unknownShape === 'CONNECTOR_UNREACHABLE', unknownShape);
+  check('an unrecognised shape is an error, not an empty list', unknownShape === 'CONNECTOR_UNREACHABLE', unknownShape);
 
   responseShape = () => ({ dataSources: [] });
-  check('a genuinely empty list is still not an error',
-    (await listAll()).datasets.length === 0);
+  check('a genuinely empty list is still not an error', (await listAll()).datasets.length === 0);
 
   responseShape = (rows) => rows;
 
@@ -526,10 +590,12 @@ async function cleanup(): Promise<void> {
   check('the total comes from Domo', pageOne.total === 137, String(pageOne.total));
   check('it knows there is more', pageOne.hasMore === true);
   check('one Domo call per page', pageCalls().length === 1, String(pageCalls().length));
-  check('it asks Domo for exactly that page',
-    new URLSearchParams(pageCalls()[0].query).get('limit') === '25'
-      && new URLSearchParams(pageCalls()[0].query).get('offset') === '0',
-    pageCalls()[0].query);
+  check(
+    'it asks Domo for exactly that page',
+    new URLSearchParams(pageCalls()[0].query).get('limit') === '25' &&
+      new URLSearchParams(pageCalls()[0].query).get('offset') === '0',
+    pageCalls()[0].query
+  );
 
   const lastPage = await service.fetchDatasetPage(adminA, connectionId, { page: 6, pageSize: 25 });
   check('the last page holds the remainder', lastPage.datasets.length === 12, String(lastPage.datasets.length));
@@ -544,24 +610,54 @@ async function cleanup(): Promise<void> {
 
   seenRequests = [];
   await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: 'Dataset 01' });
-  check('search is sent to Domo by name',
-    new URLSearchParams(pageCalls()[0].query).get('nameLike') === 'Dataset 01', pageCalls()[0].query);
+  check(
+    'search is sent to Domo by name',
+    new URLSearchParams(pageCalls()[0].query).get('nameLike') === 'Dataset 01',
+    pageCalls()[0].query
+  );
 
   seenRequests = [];
-  const byId = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: KNOWN_DATASET_ID, fresh: true });
-  check('a full dataset id is looked up directly',
-    byId.datasets.length === 1 && byId.datasets[0].id === KNOWN_DATASET_ID && byId.total === 1 && byId.hasMore === false,
-    JSON.stringify(byId.datasets.map((d: any) => d.id)));
-  check('by asking Domo for that one dataset',
-    seenRequests.some((r) => r.path === `/api/data/v3/datasources/${KNOWN_DATASET_ID}`)
-      && !seenRequests.some((r) => r.path === '/api/data/v3/datasources'));
+  const byId = await service.fetchDatasetPage(adminA, connectionId, {
+    page: 1,
+    pageSize: 25,
+    search: KNOWN_DATASET_ID,
+    fresh: true,
+  });
+  check(
+    'a full dataset id is looked up directly',
+    byId.datasets.length === 1 &&
+      byId.datasets[0].id === KNOWN_DATASET_ID &&
+      byId.total === 1 &&
+      byId.hasMore === false,
+    JSON.stringify(byId.datasets.map((d: any) => d.id))
+  );
+  check(
+    'by asking Domo for that one dataset',
+    seenRequests.some((r) => r.path === `/api/data/v3/datasources/${KNOWN_DATASET_ID}`) &&
+      !seenRequests.some((r) => r.path === '/api/data/v3/datasources')
+  );
 
-  const missing = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: MISSING_DATASET_ID, fresh: true });
-  check('an id Domo does not know is an empty result, not an error', missing.datasets.length === 0 && missing.total === 0);
-  const forbidden = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: FORBIDDEN_DATASET_ID, fresh: true });
+  const missing = await service.fetchDatasetPage(adminA, connectionId, {
+    page: 1,
+    pageSize: 25,
+    search: MISSING_DATASET_ID,
+    fresh: true,
+  });
+  check(
+    'an id Domo does not know is an empty result, not an error',
+    missing.datasets.length === 0 && missing.total === 0
+  );
+  const forbidden = await service.fetchDatasetPage(adminA, connectionId, {
+    page: 1,
+    pageSize: 25,
+    search: FORBIDDEN_DATASET_ID,
+    fresh: true,
+  });
   check('an id the token cannot see is also just empty', forbidden.datasets.length === 0 && forbidden.total === 0);
-  check('and neither marks the connection invalid',
-    (await service.requireConnection(adminA, connectionId)).status === 'connected');
+  check(
+    'and neither marks the connection invalid',
+    (await service.requireConnection(adminA, connectionId)).status === 'connected'
+  );
 
   const oddSize = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 30, fresh: true });
   check('an unsupported page size falls back to 25', oddSize.pageSize === 25, String(oddSize.pageSize));
@@ -582,16 +678,27 @@ async function cleanup(): Promise<void> {
     inFlight -= 1;
     return plainFetch(url, init);
   }) as typeof fetch;
-  await Promise.all([1, 2, 3, 4].map((page) =>
-    service.fetchDatasetPage(adminA, connectionId, { page, pageSize: 10, fresh: true })));
+  await Promise.all(
+    [1, 2, 3, 4].map((page) => service.fetchDatasetPage(adminA, connectionId, { page, pageSize: 10, fresh: true }))
+  );
   global.fetch = plainFetch;
   check('the throttle keeps at most two Domo calls in flight', peak <= 2, String(peak));
   const gaps = starts.slice(1).map((t, i) => t - starts[i]);
-  check('and spaces their starts', gaps.every((gap) => gap >= 240), JSON.stringify(gaps));
+  check(
+    'and spaces their starts',
+    gaps.every((gap) => gap >= 240),
+    JSON.stringify(gaps)
+  );
 
   const tight = new Throttle({ concurrent: 1, gapMs: 0, maxWaiting: 1 });
   let release: () => void = () => undefined;
-  const holding = tight.run('k', () => new Promise<void>((done) => { release = done; }));
+  const holding = tight.run(
+    'k',
+    () =>
+      new Promise<void>((done) => {
+        release = done;
+      })
+  );
   const queued = tight.run('k', async () => 'second');
   const overflow = await codeOf(() => tight.run('k', async () => 'third'));
   check('a full queue is refused with RATE_LIMITED', overflow === 'RATE_LIMITED', overflow);
@@ -611,15 +718,24 @@ async function cleanup(): Promise<void> {
     { id: 'ds-0002', name: 'Dataset 0002', rowCount: 1002, columnCount: 5 },
   ]);
   check('two datasets are selected', connection.selectedDatasets.length === 2);
-  check('the dataset id is what is stored', connection.selectedDatasets.map((d: any) => d.id).join() === 'ds-0000,ds-0002');
+  check(
+    'the dataset id is what is stored',
+    connection.selectedDatasets.map((d: any) => d.id).join() === 'ds-0000,ds-0002'
+  );
   check('the name is kept alongside it', connection.selectedDatasets[0].name === 'Dataset 0000');
 
   connection = await service.replaceSelection(adminA, connectionId, [{ id: 'ds-0001' }]);
-  check('saving replaces rather than merges', connection.selectedDatasets.length === 1, String(connection.selectedDatasets.length));
+  check(
+    'saving replaces rather than merges',
+    connection.selectedDatasets.length === 1,
+    String(connection.selectedDatasets.length)
+  );
   check('the surviving row is the new one', connection.selectedDatasets[0].id === 'ds-0001');
 
   connection = await service.replaceSelection(adminA, connectionId, [
-    { id: 'ds-0001' }, { id: 'ds-0001' }, { id: '  ' },
+    { id: 'ds-0001' },
+    { id: 'ds-0001' },
+    { id: '  ' },
   ]);
   check('duplicates and blanks are dropped', connection.selectedDatasets.length === 1);
 
@@ -631,7 +747,11 @@ async function cleanup(): Promise<void> {
 
   await service.replaceSelection(adminA, connectionId, [{ id: 'ds-0000' }, { id: 'ds-0001' }]);
   const listRow = (await service.listConnections(adminA))[0];
-  check('the list read carries the selected count', listRow.selectedDatasetCount === 2, String(listRow.selectedDatasetCount));
+  check(
+    'the list read carries the selected count',
+    listRow.selectedDatasetCount === 2,
+    String(listRow.selectedDatasetCount)
+  );
 
   section('Profiling');
 
@@ -644,15 +764,20 @@ async function cleanup(): Promise<void> {
   const overview = await service.profileOverview(adminA, connectionId);
   check('the tree is the stored selection', overview.datasets.length === 2, String(overview.datasets.length));
   check('a Domo dataset is one table', overview.datasets[0].tables.length === 1);
-  check('the stored counts come through', overview.datasets[0].tables[0].rowCount === 1000,
-    String(overview.datasets[0].tables[0].rowCount));
+  check(
+    'the stored counts come through',
+    overview.datasets[0].tables[0].rowCount === 1000,
+    String(overview.datasets[0].tables[0].rowCount)
+  );
   check('the tree costs no warehouse call', seenRequests.length === 0, String(seenRequests.length));
 
   await service.replaceSelection(adminA, connectionId, [{ id: 'ds-0000' }]);
   const noCounts = await service.profileOverview(adminA, connectionId);
-  check('a selection with no counts reports null, not zero',
+  check(
+    'a selection with no counts reports null, not zero',
     noCounts.datasets[0].tables[0].rowCount === null,
-    String(noCounts.datasets[0].tables[0].rowCount));
+    String(noCounts.datasets[0].tables[0].rowCount)
+  );
   await service.replaceSelection(adminA, connectionId, [
     { id: 'ds-0000', name: 'Dataset 0000', rowCount: 1000, columnCount: 5 },
     { id: 'ds-0001', name: 'Dataset 0001', rowCount: 1001, columnCount: 5 },
@@ -662,36 +787,41 @@ async function cleanup(): Promise<void> {
   const profile = await service.tableProfile(adminA, connectionId, 'ds-0000');
   check('the table name comes from the source', profile.name === 'Dataset ds-0000', profile.name);
   check('the row count comes from the source', profile.rowCount === 4200, String(profile.rowCount));
-  check('storage is the byte count the source reported',
-    profile.sizeBytes === 2576980377, String(profile.sizeBytes));
-  check('the columns are the ones the source reports',
+  check('storage is the byte count the source reported', profile.sizeBytes === 2576980377, String(profile.sizeBytes));
+  check(
+    'the columns are the ones the source reports',
     profile.columns.map((c: any) => c.name).join() === 'id,region,revenue',
-    profile.columns.map((c: any) => c.name).join());
+    profile.columns.map((c: any) => c.name).join()
+  );
   check('column types come through', profile.columns[1].dataType === 'STRING', profile.columns[1].dataType);
 
-  check('null rates are computed from the sample',
-    profile.columns[1].nullPercent === 25, String(profile.columns[1].nullPercent));
-  check('distinct counts too',
-    profile.columns[1].uniqueCount === 2, String(profile.columns[1].uniqueCount));
-  check('min/max only for numeric columns',
+  check(
+    'null rates are computed from the sample',
+    profile.columns[1].nullPercent === 25,
+    String(profile.columns[1].nullPercent)
+  );
+  check('distinct counts too', profile.columns[1].uniqueCount === 2, String(profile.columns[1].uniqueCount));
+  check(
+    'min/max only for numeric columns',
     profile.columns[2].min === 10.5 && profile.columns[2].max === 30.5,
-    `${profile.columns[2].min}/${profile.columns[2].max}`);
-  check('a text column gets no min/max',
-    profile.columns[1].min === null && profile.columns[1].max === null);
-  check('the stats say what they were computed over',
-    profile.statsSampleSize === 4, String(profile.statsSampleSize));
+    `${profile.columns[2].min}/${profile.columns[2].max}`
+  );
+  check('a text column gets no min/max', profile.columns[1].min === null && profile.columns[1].max === null);
+  check('the stats say what they were computed over', profile.statsSampleSize === 4, String(profile.statsSampleSize));
   check('sample rows come back', profile.sample.rows.length === 4, String(profile.sample.rows.length));
 
   check('semantic types are absent rather than guessed', profile.columns[0].semanticType === null);
   check('quality is absent rather than scored', profile.qualityScore === null);
 
-  check('it took one detail call and one query',
-    seenRequests.length === 2, String(seenRequests.length));
+  check('it took one detail call and one query', seenRequests.length === 2, String(seenRequests.length));
 
   seenRequests = [];
   const unsized = await service.tableProfile(adminA, connectionId, UNSIZED_DATASET_ID);
-  check('without a size in the detail, storage adds up the successful data versions',
-    unsized.sizeBytes === 3500, String(unsized.sizeBytes));
+  check(
+    'without a size in the detail, storage adds up the successful data versions',
+    unsized.sizeBytes === 3500,
+    String(unsized.sizeBytes)
+  );
   check('which costs one more call', seenRequests.length === 3, String(seenRequests.length));
 
   const unselected = await codeOf(() => service.tableProfile(adminA, connectionId, 'ds-0099'));
@@ -752,7 +882,11 @@ async function cleanup(): Promise<void> {
     )`);
 
   const fixture = async (
-    ws: string, run: string, type: string, name: string, payload: Record<string, any>,
+    ws: string,
+    run: string,
+    type: string,
+    name: string,
+    payload: Record<string, any>,
     extra: { source?: string; verified?: boolean; confidence?: number; order?: number } = {}
   ): Promise<string> => {
     const { rows } = await db.query(
@@ -761,8 +895,17 @@ async function cleanup(): Promise<void> {
           confidence, payload, version_id, created_at)
        VALUES (?::uuid, ?, ?, ?, ?, ?, ?::jsonb, ?::uuid, now() + (? * interval '1 second'))
        RETURNING id`,
-      [ws, type, name, extra.source || 'db_inferred', extra.verified ?? false,
-       extra.confidence ?? null, JSON.stringify(payload), run, extra.order ?? 0]
+      [
+        ws,
+        type,
+        name,
+        extra.source || 'db_inferred',
+        extra.verified ?? false,
+        extra.confidence ?? null,
+        JSON.stringify(payload),
+        run,
+        extra.order ?? 0,
+      ]
     );
     return rows[0].id;
   };
@@ -775,123 +918,193 @@ async function cleanup(): Promise<void> {
 
   await fixture(ws, RUN, 'table', 'orders', { description: 'Order header rows' }, { order: 1 });
   await fixture(ws, RUN, 'table', 'customers', { description: 'Customer master' }, { order: 2 });
-  const colId = await fixture(ws, RUN, 'column_stats', 'orders.customer_id',
+  const colId = await fixture(
+    ws,
+    RUN,
+    'column_stats',
+    'orders.customer_id',
     { data_type: 'STRING', null_rate: '0.0%', description: 'FK to customers', note: 'candidate primary key' },
-    { order: 3 });
-  await fixture(ws, RUN, 'column_stats', 'orders.total',
-    { data_type: 'DOUBLE', null_rate: '0.0%', description: 'Order total' }, { order: 4 });
-  await fixture(ws, RUN, 'join', 'orders__customers', {
-    tables: ['orders', 'customers'],
-    join_keys: [{ left: 'customer_id', right: 'id' }],
-    cardinality: 'many:1',
-    basis: 'FK enforced',
-  }, { confidence: 0.97, order: 5 });
-  await fixture(ws, RUN, 'join', 'orders__regions', {
-    tables: ['orders', 'regions'],
-    join_keys: [{ left: 'region_code', right: 'code' }],
-    cardinality: 'many:1',
-    basis: 'name match',
-  }, { confidence: 0.6, order: 6 });
+    { order: 3 }
+  );
+  await fixture(
+    ws,
+    RUN,
+    'column_stats',
+    'orders.total',
+    { data_type: 'DOUBLE', null_rate: '0.0%', description: 'Order total' },
+    { order: 4 }
+  );
+  await fixture(
+    ws,
+    RUN,
+    'join',
+    'orders__customers',
+    {
+      tables: ['orders', 'customers'],
+      join_keys: [{ left: 'customer_id', right: 'id' }],
+      cardinality: 'many:1',
+      basis: 'FK enforced',
+    },
+    { confidence: 0.97, order: 5 }
+  );
+  await fixture(
+    ws,
+    RUN,
+    'join',
+    'orders__regions',
+    {
+      tables: ['orders', 'regions'],
+      join_keys: [{ left: 'region_code', right: 'code' }],
+      cardinality: 'many:1',
+      basis: 'name match',
+    },
+    { confidence: 0.6, order: 6 }
+  );
 
   const graph = await store.modelGraph(ws);
-  check('only the latest run is read',
+  check(
+    'only the latest run is read',
     !graph.nodes.some((n: any) => n.id === 'stale_table'),
-    graph.nodes.map((n: any) => n.id).join(','));
+    graph.nodes.map((n: any) => n.id).join(',')
+  );
   check('a node per table', graph.nodes.length === 3, String(graph.nodes.length));
-  check('a join to an unrecorded table still makes a node',
-    graph.nodes.some((n: any) => n.id === 'regions'));
-  check('columns hang off their table',
+  check(
+    'a join to an unrecorded table still makes a node',
+    graph.nodes.some((n: any) => n.id === 'regions')
+  );
+  check(
+    'columns hang off their table',
     graph.nodes.find((n: any) => n.id === 'orders').columns.length === 2,
-    String(graph.nodes.find((n: any) => n.id === 'orders').columns.length));
-  check('a candidate key is read from the note, not guessed',
-    graph.nodes.find((n: any) => n.id === 'orders').columns.find((c: any) => c.name === 'customer_id').isPrimaryKey);
+    String(graph.nodes.find((n: any) => n.id === 'orders').columns.length)
+  );
+  check(
+    'a candidate key is read from the note, not guessed',
+    graph.nodes.find((n: any) => n.id === 'orders').columns.find((c: any) => c.name === 'customer_id').isPrimaryKey
+  );
   check('an edge per join', graph.edges.length === 2, String(graph.edges.length));
-  check('the join condition is built from join_keys',
+  check(
+    'the join condition is built from join_keys',
     graph.edges[0].joinCondition === 'orders.customer_id = customers.id',
-    graph.edges[0].joinCondition);
+    graph.edges[0].joinCondition
+  );
   check('confidence comes through', graph.edges[0].confidence === 0.97, String(graph.edges[0].confidence));
   check('an unverified join is suggested', graph.edges[0].status === 'suggested', graph.edges[0].status);
 
   const queue = await store.reviewQueue(ws);
   check('every object is reviewable', queue.total === 6, String(queue.total));
-  check('counts are per type', queue.counts.column_stats === 2 && queue.counts.join === 2,
-    JSON.stringify(queue.counts));
-  check('everything starts pending',
-    queue.items.every((i: any) => i.status === 'pending'));
-  check('the note surfaces as downstream impact',
-    queue.items.find((i: any) => i.id === colId).downstreamImpact === 'candidate primary key');
+  check(
+    'counts are per type',
+    queue.counts.column_stats === 2 && queue.counts.join === 2,
+    JSON.stringify(queue.counts)
+  );
+  check(
+    'everything starts pending',
+    queue.items.every((i: any) => i.status === 'pending')
+  );
+  check(
+    'the note surfaces as downstream impact',
+    queue.items.find((i: any) => i.id === colId).downstreamImpact === 'candidate primary key'
+  );
 
   await store.decideReviewItem(adminA, ws, colId, 'approve');
   const afterApprove = await store.reviewQueue(ws);
-  check('approving sets our status',
-    afterApprove.items.find((i: any) => i.id === colId).status === 'approved');
+  check('approving sets our status', afterApprove.items.find((i: any) => i.id === colId).status === 'approved');
 
   const pendingView = await store.tableView(ws, { review: 'pending' });
   const pendingOrders = pendingView.tables.find((g: any) => g.table.qualifiedName === 'orders');
-  check('the review filter keeps only what is still pending',
-    Boolean(pendingOrders) && !pendingOrders.columns.some((c: any) => c.id === colId)
-      && pendingOrders.columns.some((c: any) => c.qualifiedName === 'orders.total'),
-    JSON.stringify(pendingOrders?.columns?.map((c: any) => c.qualifiedName)));
+  check(
+    'the review filter keeps only what is still pending',
+    Boolean(pendingOrders) &&
+      !pendingOrders.columns.some((c: any) => c.id === colId) &&
+      pendingOrders.columns.some((c: any) => c.qualifiedName === 'orders.total'),
+    JSON.stringify(pendingOrders?.columns?.map((c: any) => c.qualifiedName))
+  );
   const allOrders = (await store.tableView(ws, {})).tables.find((g: any) => g.table.qualifiedName === 'orders');
   check('without it every column is listed', allOrders?.columns.length === 2, String(allOrders?.columns.length));
-  check('each table says how much of it needs review, filtered or not',
+  check(
+    'each table says how much of it needs review, filtered or not',
     (allOrders?.needsReview ?? 0) >= 1 && pendingOrders?.needsReview === allOrders?.needsReview,
-    `${allOrders?.needsReview} / ${pendingOrders?.needsReview}`);
-  check('review counts are the pending tables and columns',
+    `${allOrders?.needsReview} / ${pendingOrders?.needsReview}`
+  );
+  check(
+    'review counts are the pending tables and columns',
     pendingView.reviewCounts.tables === 2 && pendingView.reviewCounts.columns === 1,
-    JSON.stringify(pendingView.reviewCounts));
+    JSON.stringify(pendingView.reviewCounts)
+  );
   const badReview = await codeOf(() => store.tableView(ws, { review: 'maybe' }));
   check('an unknown review filter is refused', badReview === 'VALIDATION_ERROR', badReview);
-  const { rows: verifiedRow } = await db.query(
-    'SELECT verified, reviewed_by FROM context_objects WHERE id = ?::uuid', [colId]);
-  check('and mirrors verified into context_objects, which the analyst agent reads',
-    verifiedRow[0].verified === true, String(verifiedRow[0].verified));
+  const { rows: verifiedRow } = await db.query('SELECT verified, reviewed_by FROM context_objects WHERE id = ?::uuid', [
+    colId,
+  ]);
+  check(
+    'and mirrors verified into context_objects, which the analyst agent reads',
+    verifiedRow[0].verified === true,
+    String(verifiedRow[0].verified)
+  );
   check('recording who did it', verifiedRow[0].reviewed_by === adminA.username);
 
   await store.decideReviewItem(adminA, ws, colId, 'skip');
-  const { rows: afterSkip } = await db.query(
-    'SELECT verified FROM context_objects WHERE id = ?::uuid', [colId]);
-  check('skip records a status but does not touch verified',
-    afterSkip[0].verified === true, String(afterSkip[0].verified));
-  check('skip is a status a boolean cannot hold',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'skipped');
+  const { rows: afterSkip } = await db.query('SELECT verified FROM context_objects WHERE id = ?::uuid', [colId]);
+  check(
+    'skip records a status but does not touch verified',
+    afterSkip[0].verified === true,
+    String(afterSkip[0].verified)
+  );
+  check(
+    'skip is a status a boolean cannot hold',
+    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'skipped'
+  );
 
   await store.updateReviewItem(adminA, ws, colId, { description: 'Edited by a human' });
-  const { rows: merged } = await db.query(
-    'SELECT payload FROM context_objects WHERE id = ?::uuid', [colId]);
-  check('an edit changes the key it names',
-    merged[0].payload.description === 'Edited by a human', merged[0].payload.description);
-  check('and merges rather than replacing - the rest of the payload survives',
+  const { rows: merged } = await db.query('SELECT payload FROM context_objects WHERE id = ?::uuid', [colId]);
+  check(
+    'an edit changes the key it names',
+    merged[0].payload.description === 'Edited by a human',
+    merged[0].payload.description
+  );
+  check(
+    'and merges rather than replacing - the rest of the payload survives',
     merged[0].payload.data_type === 'STRING' && merged[0].payload.null_rate === '0.0%',
-    JSON.stringify(merged[0].payload));
+    JSON.stringify(merged[0].payload)
+  );
 
   const bulk = await store.bulkDecide(adminA, ws, {
-    decision: 'approve', filter: { minConfidence: 0.9 },
+    decision: 'approve',
+    filter: { minConfidence: 0.9 },
   });
-  check('a bulk decision acts on what matches, not on what is on screen',
-    bulk.affected === 1, String(bulk.affected));
-  check('a row with no confidence does not pass a confidence bar',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.type === 'table').status === 'pending');
+  check('a bulk decision acts on what matches, not on what is on screen', bulk.affected === 1, String(bulk.affected));
+  check(
+    'a row with no confidence does not pass a confidence bar',
+    (await store.reviewQueue(ws)).items.find((i: any) => i.type === 'table').status === 'pending'
+  );
 
   const crossReview = await codeOf(() => service.requireConnection(adminB, connectionId));
-  check('another company cannot reach this connection at all',
-    crossReview === 'RESOURCE_NOT_FOUND', crossReview);
+  check('another company cannot reach this connection at all', crossReview === 'RESOURCE_NOT_FOUND', crossReview);
 
   await store.decideReviewItem(adminA, ws, colId, 'approve');
-  check('a skipped item can be approved later',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'approved');
+  check(
+    'a skipped item can be approved later',
+    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'approved'
+  );
 
   const connectionRow = await service.requireConnection(adminA, connectionId);
 
   const summary = await publish.publishSummary(adminA, connectionRow);
-  check('the summary counts approved facts only',
+  check(
+    'the summary counts approved facts only',
     summary.stats.find((s: any) => s.id === 'columns').value === 1,
-    JSON.stringify(summary.stats.find((s: any) => s.id === 'columns')));
-  check('pending items are a warning, not a blocker',
-    summary.blockers.some((b: any) => b.severity === 'warning' && b.step === 'review'));
+    JSON.stringify(summary.stats.find((s: any) => s.id === 'columns'))
+  );
+  check(
+    'pending items are a warning, not a blocker',
+    summary.blockers.some((b: any) => b.severity === 'warning' && b.step === 'review')
+  );
   check('it is publishable once something is approved', summary.ready === true);
-  check('the name defaults to the connection, as a starting point',
-    summary.suggestedName === connectionRow.name, summary.suggestedName);
+  check(
+    'the name defaults to the connection, as a starting point',
+    summary.suggestedName === connectionRow.name,
+    summary.suggestedName
+  );
 
   const noName = await codeOf(() => publish.publishContext(adminA, connectionRow, { name: '' }));
   check('publishing requires a name', noName === 'VALIDATION_ERROR', noName);
@@ -902,13 +1115,16 @@ async function cleanup(): Promise<void> {
 
   const { rows: storedRow } = await db.query(
     `SELECT name, version, object_count, snapshot, company_id
-       FROM ${CT.versions} WHERE id = ?::uuid`, [v1.id]);
-  check('the row is keyed by the name the user gave',
-    storedRow[0].name === 'Revenue', storedRow[0].name);
+       FROM ${CT.versions} WHERE id = ?::uuid`,
+    [v1.id]
+  );
+  check('the row is keyed by the name the user gave', storedRow[0].name === 'Revenue', storedRow[0].name);
   check('and scoped to their company', storedRow[0].company_id === companyA);
-  check('the snapshot holds the facts themselves, not just ids',
+  check(
+    'the snapshot holds the facts themselves, not just ids',
     Array.isArray(storedRow[0].snapshot) && storedRow[0].snapshot[0].payload !== undefined,
-    JSON.stringify(storedRow[0].snapshot).slice(0, 80));
+    JSON.stringify(storedRow[0].snapshot).slice(0, 80)
+  );
 
   const v2 = await publish.publishContext(adminA, connectionRow, { name: 'Revenue' });
   check('republishing the same name makes the next version', v2.version === 'v2', v2.version);
@@ -923,10 +1139,9 @@ async function cleanup(): Promise<void> {
   await service.deleteConnection(adminA, connectionId);
   check('the connection is gone', (await service.listConnections(adminA)).length === 0);
 
-  const orphans = await db.query(
-    `SELECT COUNT(*)::int AS n FROM ${CT.datasets} WHERE connection_id = ?`,
-    [connectionId]
-  );
+  const orphans = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.datasets} WHERE connection_id = ?`, [
+    connectionId,
+  ]);
   check('its dataset selection went with it', orphans.rows[0].n === 0, String(orphans.rows[0].n));
 
   await cleanup();
@@ -940,7 +1155,9 @@ async function cleanup(): Promise<void> {
   process.exit(failed ? 1 : 0);
 })().catch(async (err: unknown) => {
   console.error('\nHARNESS ERROR:', err);
-  try { await cleanup(); } catch {  }
+  try {
+    await cleanup();
+  } catch {}
   process.exit(1);
 });
 

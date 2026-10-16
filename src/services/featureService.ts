@@ -13,7 +13,14 @@ import type { Actor } from '../types/actor';
 import type { Tx } from '../config/database';
 
 function catalogue() {
-  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({ id, key, label, description, locked, covers }));
+  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({
+    id,
+    key,
+    label,
+    description,
+    locked,
+    covers,
+  }));
 }
 
 function parseFeatureIds(featureIds: unknown): string[] {
@@ -73,11 +80,4 @@ async function replaceCompanyFeatures(actor: Actor, companyId: number, featureId
   return { companyId, features: describe(after) };
 }
 
-export {
-  catalogue,
-  parseFeatureIds,
-  enabledFor,
-  companyFeatures,
-  setInitialFeatures,
-  replaceCompanyFeatures,
-};
+export { catalogue, parseFeatureIds, enabledFor, companyFeatures, setInitialFeatures, replaceCompanyFeatures };

@@ -136,7 +136,7 @@ async function logout(presented: unknown) {
       const row = await tokens.consumeRefreshToken(presented);
       await tokens.revokeFamily(row.family_id, 'logout');
       audit(EVENTS.LOGOUT, { id: row.user_id, username: null }, { familyId: row.family_id });
-    } catch { }
+    } catch {}
   }
   return { state: AUTH_STATE.UNAUTHENTICATED };
 }

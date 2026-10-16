@@ -25,11 +25,9 @@ async function sendEmail(message: EmailMessage, { consequence }: { consequence?:
     console.error(`[email] delivery to ${to} failed: ${err.message}`);
     throw fail(
       'EMAIL_DELIVERY_FAILED',
-      [
-        `The email to ${to} could not be sent.`,
-        consequence,
-        'Check the mail configuration and try again.',
-      ].filter(Boolean).join(' ')
+      [`The email to ${to} could not be sent.`, consequence, 'Check the mail configuration and try again.']
+        .filter(Boolean)
+        .join(' ')
     );
   }
 }

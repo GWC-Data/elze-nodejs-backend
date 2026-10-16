@@ -13,12 +13,7 @@ import { columnCatalogue, hydratedView } from '../views/serializers/dashboardSer
 import { hydrateDashboard } from './queryEngineService';
 import { resolveSourceMetadata } from './metadataService';
 import { audit, EVENTS } from './auditService';
-import {
-  DASHBOARD_ID_RE,
-  NEW_DASHBOARD_VERSION,
-  DEFAULT_DATA_SOURCE,
-  DEFAULT_LAYOUT,
-} from '../constants/dashboard';
+import { DASHBOARD_ID_RE, NEW_DASHBOARD_VERSION, DEFAULT_DATA_SOURCE, DEFAULT_LAYOUT } from '../constants/dashboard';
 import type { Actor } from '../types/actor';
 
 const { DEFAULT_DASHBOARD_ID } = config.engine;
@@ -194,7 +189,12 @@ function invalidateSpecCache(dashboardId: unknown): void {
 async function saveSpec(
   dashboardId: unknown,
   spec: Spec,
-  { companyId = null, userId = null, title = null, description = null }: { companyId?: number | null; userId?: number | null; title?: string | null; description?: string | null } = {}
+  {
+    companyId = null,
+    userId = null,
+    title = null,
+    description = null,
+  }: { companyId?: number | null; userId?: number | null; title?: string | null; description?: string | null } = {}
 ): Promise<string> {
   const id = assertValidDashboardId(dashboardId);
   const normalized = normalizeSpec(spec);
@@ -202,7 +202,7 @@ async function saveSpec(
   await dashboardRepository.upsert({
     id,
     title: title || normalized.title || id,
-    description: description !== undefined ? description : (normalized.description || null),
+    description: description !== undefined ? description : normalized.description || null,
     companyId,
     userId,
     spec: normalized,
@@ -228,15 +228,18 @@ async function hydrateView(filters: Record<string, any> | null | undefined, spec
 
   console.log(
     `[Dashboard] spec=${t1 - t0}ms engine=${t2 - t1}ms assemble=${t3 - t2}ms ` +
-    `total=${t3 - t0}ms queries kpi=${data._stats.kpiQueries} card=${data._stats.cardQueries} ` +
-    `slicer=${data._stats.slicerQueries} cacheHits=${data._stats.cacheHits || 0} ` +
-    `errors=${data._stats.errors || 0}`
+      `total=${t3 - t0}ms queries kpi=${data._stats.kpiQueries} card=${data._stats.cardQueries} ` +
+      `slicer=${data._stats.slicerQueries} cacheHits=${data._stats.cacheHits || 0} ` +
+      `errors=${data._stats.errors || 0}`
   );
 
   return result;
 }
 
-function newDashboardSpec(body: Record<string, any>, { id, title, description }: { id: string; title: string; description: string | null }): Spec {
+function newDashboardSpec(
+  body: Record<string, any>,
+  { id, title, description }: { id: string; title: string; description: string | null }
+): Spec {
   if (body.spec && typeof body.spec === 'object') {
     return { ...body.spec, id, title, description };
   }
@@ -267,9 +270,7 @@ async function createDashboard(actor: Actor, body: Record<string, any> = {}): Pr
     throw fail('CONFLICT', `A dashboard with id "${id}" already exists.`);
   }
 
-  const companyId = actor.isPlatform
-    ? (body.companyId ? Number(body.companyId) : null)
-    : actor.companyId;
+  const companyId = actor.isPlatform ? (body.companyId ? Number(body.companyId) : null) : actor.companyId;
 
   const spec = newDashboardSpec(body, { id, title, description });
 
@@ -282,12 +283,21 @@ async function createDashboard(actor: Actor, body: Record<string, any> = {}): Pr
   return { id, title, description, companyId, accessLevel: 'admin', spec };
 }
 
-async function viewDashboard(dashboardId: unknown, filters: Record<string, any> | null | undefined, accessLevel: unknown): Promise<Record<string, any>> {
+async function viewDashboard(
+  dashboardId: unknown,
+  filters: Record<string, any> | null | undefined,
+  accessLevel: unknown
+): Promise<Record<string, any>> {
   const view = await hydrateView(filters, await getSpec(dashboardId));
   return { ...view, accessLevel };
 }
 
-async function updateCard(actor: Actor, dashboardId: string, { index, card, filters }: { index: number; card: any; filters?: Record<string, any> | null }, accessLevel: unknown): Promise<Record<string, any>> {
+async function updateCard(
+  actor: Actor,
+  dashboardId: string,
+  { index, card, filters }: { index: number; card: any; filters?: Record<string, any> | null },
+  accessLevel: unknown
+): Promise<Record<string, any>> {
   const spec = await getSpec(dashboardId);
   if (!actor.isPlatform) {
     const allowed = await accessRepository.companyDashboardIds(actor.companyId);
@@ -340,7 +350,10 @@ async function describeColumns(dashboardId: unknown): Promise<any> {
   return columnCatalogue(spec, meta, rowCount);
 }
 
-async function previewCard(dashboardId: unknown, { card, filters }: { card: any; filters?: Record<string, any> | null }): Promise<Record<string, any>> {
+async function previewCard(
+  dashboardId: unknown,
+  { card, filters }: { card: any; filters?: Record<string, any> | null }
+): Promise<Record<string, any>> {
   const draft = flattenCard(card);
   const spec = await getSpec(dashboardId);
   const data = await hydrateDashboard({ ...spec, cards: [draft] }, filters || {});

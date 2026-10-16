@@ -35,7 +35,13 @@ async function findById(id: string) {
     select: { id: true, title: true, description: true, companyId: true, spec: true },
   });
   if (!row) return null;
-  return { id: row.id, title: row.title, description: row.description, company_id: row.companyId, spec: row.spec as any };
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    company_id: row.companyId,
+    spec: row.spec as any,
+  };
 }
 
 async function existsInDb(id: string): Promise<boolean> {
@@ -43,11 +49,12 @@ async function existsInDb(id: string): Promise<boolean> {
 }
 
 async function list(companyId?: number | null) {
-  const where = companyId === undefined
-    ? {}
-    : companyId === null
-      ? { companyId: null }
-      : { OR: [{ companyId }, { companyId: null }] };
+  const where =
+    companyId === undefined
+      ? {}
+      : companyId === null
+        ? { companyId: null }
+        : { OR: [{ companyId }, { companyId: null }] };
   return prisma.dashboard.findMany({
     where,
     select: { id: true, title: true, description: true, companyId: true, createdBy: true },
@@ -55,7 +62,14 @@ async function list(companyId?: number | null) {
   });
 }
 
-async function upsert({ id, title, description, companyId, userId, spec }: {
+async function upsert({
+  id,
+  title,
+  description,
+  companyId,
+  userId,
+  spec,
+}: {
   id: string;
   title: string;
   description?: string | null;
@@ -66,7 +80,15 @@ async function upsert({ id, title, description, companyId, userId, spec }: {
   const json = spec as Prisma.InputJsonValue;
   await prisma.dashboard.upsert({
     where: { id },
-    create: { id, title, description: description ?? null, companyId, createdBy: userId, spec: json, updatedAt: new Date() },
+    create: {
+      id,
+      title,
+      description: description ?? null,
+      companyId,
+      createdBy: userId,
+      spec: json,
+      updatedAt: new Date(),
+    },
     update: { title, description: description ?? null, spec: json, updatedAt: new Date() },
   });
 }

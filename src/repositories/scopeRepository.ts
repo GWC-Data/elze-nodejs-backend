@@ -51,13 +51,17 @@ async function userScopeRows(userId: number) {
   );
 }
 
-async function replaceUserScopes(userId: number, scopes: Record<string, readonly string[]>, actorId: number | null = null): Promise<void> {
+async function replaceUserScopes(
+  userId: number,
+  scopes: Record<string, readonly string[]>,
+  actorId: number | null = null
+): Promise<void> {
   await withTransaction(async (tx) => {
     const [current] = await rawRows<{ scopes: Record<string, string[]> }>(
       tx,
       Prisma.sql`SELECT scopes FROM access_control.user_data_scopes WHERE user_id = ${userId} FOR UPDATE`
     );
-    const next: Record<string, string[]> = { ...((current?.scopes) || {}) };
+    const next: Record<string, string[]> = { ...(current?.scopes || {}) };
     for (const [dimension, values] of Object.entries(scopes)) {
       if (values.length) next[dimension] = [...values].sort();
       else delete next[dimension];

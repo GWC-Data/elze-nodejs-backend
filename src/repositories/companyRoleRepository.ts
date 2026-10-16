@@ -56,15 +56,19 @@ async function findInCompany(id: string, companyId: number | null) {
   return rows[0] || null;
 }
 
-async function insert(
-  { companyId, name, description, permissionIds, createdBy }: {
-    companyId: number;
-    name: string;
-    description: string | null;
-    permissionIds: readonly string[];
-    createdBy: number;
-  }
-): Promise<string> {
+async function insert({
+  companyId,
+  name,
+  description,
+  permissionIds,
+  createdBy,
+}: {
+  companyId: number;
+  name: string;
+  description: string | null;
+  permissionIds: readonly string[];
+  createdBy: number;
+}): Promise<string> {
   return withTransaction(async (tx) => {
     const id = crypto.randomUUID();
     await tx.role.create({ data: { id, companyId, kind: 'custom', tier: 'USER', name, description, createdBy } });
@@ -75,7 +79,11 @@ async function insert(
 
 async function update(
   id: string,
-  { name, description, permissionIds }: { name?: string; description?: string | null; permissionIds?: readonly string[] },
+  {
+    name,
+    description,
+    permissionIds,
+  }: { name?: string; description?: string | null; permissionIds?: readonly string[] },
   actorId: number
 ): Promise<void> {
   await withTransaction(async (tx) => {
@@ -133,11 +141,18 @@ async function saveCompanyDefault(companyId: number, permissionIds: readonly str
   });
 }
 
-async function resetCompanyDefault(companyId: number, permissionIds: readonly string[], actorId: number): Promise<boolean> {
+async function resetCompanyDefault(
+  companyId: number,
+  permissionIds: readonly string[],
+  actorId: number
+): Promise<boolean> {
   return withTransaction(async (tx) => {
     const row = await ensureCompanyDefault(tx, companyId, null);
     const before = await tx.role.findUnique({ where: { id: row.id }, select: { modifiedAt: true } });
-    await tx.role.update({ where: { id: row.id }, data: { modifiedBy: null, modifiedAt: null, updatedAt: new Date() } });
+    await tx.role.update({
+      where: { id: row.id },
+      data: { modifiedBy: null, modifiedAt: null, updatedAt: new Date() },
+    });
     await writePermissions(tx, row.id, permissionIds, actorId);
     return Boolean(before?.modifiedAt);
   });

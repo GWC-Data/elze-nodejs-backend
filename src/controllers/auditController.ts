@@ -11,13 +11,16 @@ async function list(req: Request, res: Response): Promise<void> {
     const value = req.query[key];
     return typeof value === 'string' && value ? value : null;
   };
-  ok(res, await listEntries(req.actor, query as AuditListQuery, {
-    event: text('event'),
-    category: text('category'),
-    action: text('action'),
-    from: text('from'),
-    to: text('to'),
-  }));
+  ok(
+    res,
+    await listEntries(req.actor, query as AuditListQuery, {
+      event: text('event'),
+      category: text('category'),
+      action: text('action'),
+      from: text('from'),
+      to: text('to'),
+    })
+  );
 }
 
 export { list };

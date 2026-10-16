@@ -20,11 +20,14 @@ async function scopeOptions(_req: Request, res: Response): Promise<void> {
 
 async function list(req: Request, res: Response): Promise<void> {
   const query = parseListQuery(req.query, userService.USER_SORTS, { sort: 'name', pageSize: 15 });
-  ok(res, await userService.listUsers(req.actor, query, {
-    companyId: req.query.companyId,
-    role: req.query.role,
-    status: req.query.status,
-  }));
+  ok(
+    res,
+    await userService.listUsers(req.actor, query, {
+      companyId: req.query.companyId,
+      role: req.query.role,
+      status: req.query.status,
+    })
+  );
 }
 
 async function create(req: Request, res: Response): Promise<void> {

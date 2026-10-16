@@ -56,7 +56,10 @@ async function isAvailable(companyId: number | null, dashboardId: string): Promi
   return Boolean(row?.available);
 }
 
-async function gateAndLevels(actor: Actor, dashboardId: string): Promise<{ available: boolean; levels: string[] } | null> {
+async function gateAndLevels(
+  actor: Actor,
+  dashboardId: string
+): Promise<{ available: boolean; levels: string[] } | null> {
   const [gate] = await rawRows<{ available: boolean; levels: string[] }>(
     prisma,
     Prisma.sql`SELECT EXISTS (
@@ -211,7 +214,12 @@ async function revokeUser(userId: number, dashboardId: string): Promise<boolean>
   return result.count > 0;
 }
 
-async function grantGroup(groupId: number, dashboardId: string, level: string, grantedBy: number | null): Promise<void> {
+async function grantGroup(
+  groupId: number,
+  dashboardId: string,
+  level: string,
+  grantedBy: number | null
+): Promise<void> {
   const accessLevelId = dashboardLevel(level);
   await prisma.dashboardGroupAccess.upsert({
     where: { groupId_dashboardId: { groupId, dashboardId } },

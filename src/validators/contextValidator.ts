@@ -20,10 +20,7 @@ function readLimit(raw: unknown): number | undefined {
 
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1 || value > MAX_DATASET_LIMIT) {
-    throw fail(
-      'VALIDATION_ERROR',
-      `limit must be a whole number between 1 and ${MAX_DATASET_LIMIT} (got "${raw}").`
-    );
+    throw fail('VALIDATION_ERROR', `limit must be a whole number between 1 and ${MAX_DATASET_LIMIT} (got "${raw}").`);
   }
   return value;
 }
@@ -36,7 +33,7 @@ function cleanDatasetSelection(datasets: unknown): DatasetSelection[] {
   const clean: DatasetSelection[] = [];
   const seen = new Set<string>();
   for (const entry of datasets) {
-    const source = typeof entry === 'string' ? { id: entry } : (entry || {});
+    const source = typeof entry === 'string' ? { id: entry } : entry || {};
     const datasetId = String(source.id || '').trim();
     if (!datasetId) continue;
     if (datasetId.length > 190) {

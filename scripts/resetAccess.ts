@@ -57,7 +57,9 @@ async function list(): Promise<void> {
       ORDER BY c.name NULLS FIRST, u.username`
   );
   if (!rows.length) {
-    console.log('No accounts yet. Start the server once with BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD set.');
+    console.log(
+      'No accounts yet. Start the server once with BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD set.'
+    );
     return;
   }
   console.table(rows.map((r) => ({ ...r, company: r.company || '(platform)' })));
