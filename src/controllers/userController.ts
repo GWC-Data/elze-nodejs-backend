@@ -14,7 +14,7 @@ async function options(req: Request, res: Response): Promise<void> {
   ok(res, await userService.listUserOptions(req.actor));
 }
 
-async function scopeOptions(req: Request, res: Response): Promise<void> {
+async function scopeOptions(_req: Request, res: Response): Promise<void> {
   ok(res, await scopeService.scopeOptions());
 }
 
@@ -66,7 +66,7 @@ async function getPermissions(req: Request, res: Response): Promise<void> {
 }
 
 async function replacePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await userPermissionService.replaceUserPermissions(req.actor, userId(req), (req.body || {}).permissionIds));
+  ok(res, await userPermissionService.replaceUserPermissions(req.actor, userId(req), req.body?.permissionIds));
 }
 
 async function getScope(req: Request, res: Response): Promise<void> {
@@ -76,7 +76,7 @@ async function getScope(req: Request, res: Response): Promise<void> {
 
 async function replaceScope(req: Request, res: Response): Promise<void> {
   const user = await userService.requireUserInScope(req.actor, userId(req));
-  ok(res, await scopeService.replaceUserScopes(req.actor, user, (req.body || {}).scopes));
+  ok(res, await scopeService.replaceUserScopes(req.actor, user, req.body?.scopes));
 }
 
 export {

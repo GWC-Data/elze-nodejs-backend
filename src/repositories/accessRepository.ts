@@ -53,7 +53,7 @@ async function isAvailable(companyId: number | null, dashboardId: string): Promi
        SELECT 1 FROM dashboards WHERE company_id = ${companyId} AND id = ${dashboardId}
      ) AS available`
   );
-  return Boolean(row && row.available);
+  return Boolean(row?.available);
 }
 
 async function gateAndLevels(actor: Actor, dashboardId: string): Promise<{ available: boolean; levels: string[] } | null> {

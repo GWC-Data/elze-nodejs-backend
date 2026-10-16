@@ -2,11 +2,11 @@ import type { Request, Response } from 'express';
 import { ok } from '../tools/apiResponse';
 import * as roleService from '../services/roleService';
 
-function permissions(req: Request, res: Response): void {
+function permissions(_req: Request, res: Response): void {
   ok(res, roleService.permissionCatalogue());
 }
 
-async function list(req: Request, res: Response): Promise<void> {
+async function list(_req: Request, res: Response): Promise<void> {
   ok(res, await roleService.listRoles());
 }
 
@@ -15,7 +15,7 @@ async function rolePermissions(req: Request, res: Response): Promise<void> {
 }
 
 async function replacePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, (req.body || {}).permissionIds));
+  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, req.body?.permissionIds));
 }
 
 export { permissions, list, rolePermissions, replacePermissions };

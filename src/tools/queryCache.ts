@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import type RedisClient from 'ioredis';
 import TtlCache from './ttlCache';
 
@@ -17,8 +17,8 @@ class QueryCache {
   constructor(redisUrl?: string | null, options?: QueryCacheOptions) {
     this.redis = null;
     this.redisEnabled = false;
-    this.ttl = (options && options.ttl) || 300;
-    this.prefix = (options && options.prefix) || 'bi';
+    this.ttl = (options?.ttl) || 300;
+    this.prefix = (options?.prefix) || 'bi';
 
     this.memory = new TtlCache(this.ttl * 1000);
 

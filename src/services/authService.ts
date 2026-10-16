@@ -100,7 +100,7 @@ async function login(body: RequestBody = {}) {
 }
 
 async function refresh(presented: unknown) {
-  let row;
+  let row: Awaited<ReturnType<typeof tokens.consumeRefreshToken>>;
   try {
     row = await tokens.consumeRefreshToken(presented);
   } catch (err: any) {
@@ -162,7 +162,7 @@ async function changePassword(
   const user = await userRepository.findById(actor.id);
   const credentials = await userRepository.findCredentialsById(actor.id);
 
-  if (!verifyPassword(currentPassword, credentials && credentials.password_hash)) {
+  if (!verifyPassword(currentPassword, credentials?.password_hash)) {
     throw fail('INVALID_CREDENTIALS', 'Your current password is incorrect.');
   }
   assertValid(passwordProblem(newPassword));

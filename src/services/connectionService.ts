@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import * as connectionRepository from '../repositories/connectionRepository';
 import * as contextRepository from '../repositories/contextRepository';
 import { fail } from '../tools/AppError';

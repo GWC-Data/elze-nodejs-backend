@@ -72,10 +72,10 @@ const DATE_GRAINS: Record<string, DateGrain> = {
 };
 
 function resolvedName(node: PlanNode | null | undefined): string {
-  const name = node && node.columnMeta && node.columnMeta.name;
+  const name = node?.columnMeta?.name;
   if (!name) {
     throw new Error(
-      `Plan node for column "${node && node.column}" has no resolved metadata; ` +
+      `Plan node for column "${node?.column}" has no resolved metadata; ` +
       'it cannot be rendered safely.'
     );
   }
@@ -140,11 +140,11 @@ function isDateColumn(colMeta: ColumnMeta): boolean {
 }
 
 function isNumericColumn(colMeta: ColumnMeta): boolean {
-  return !!(colMeta && colMeta.isNumeric);
+  return !!(colMeta?.isNumeric);
 }
 
 function isStringColumn(colMeta: ColumnMeta): boolean {
-  return !!(colMeta && colMeta.isString);
+  return !!(colMeta?.isString);
 }
 
 function describeColumnType(colMeta: ColumnMeta): string {
@@ -252,7 +252,7 @@ function buildWhereSql(filters: PlanNode[] | null | undefined): { where: string;
     }
   }
   return {
-    where: conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
+    where: conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '',
     params,
   };
 }

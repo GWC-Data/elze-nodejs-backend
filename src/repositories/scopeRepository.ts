@@ -57,7 +57,7 @@ async function replaceUserScopes(userId: number, scopes: Record<string, readonly
       tx,
       Prisma.sql`SELECT scopes FROM access_control.user_data_scopes WHERE user_id = ${userId} FOR UPDATE`
     );
-    const next: Record<string, string[]> = { ...((current && current.scopes) || {}) };
+    const next: Record<string, string[]> = { ...((current?.scopes) || {}) };
     for (const [dimension, values] of Object.entries(scopes)) {
       if (values.length) next[dimension] = [...values].sort();
       else delete next[dimension];

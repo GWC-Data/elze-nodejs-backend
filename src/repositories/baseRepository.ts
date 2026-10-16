@@ -39,7 +39,7 @@ async function pagedRows<T>(
   shape: (row: any) => T
 ): Promise<{ items: T[]; total: number }> {
   const rows = await rawRows(tx, query);
-  let total;
+  let total: number;
   if (rows.length) {
     total = Number(rows[0].__total);
   } else {

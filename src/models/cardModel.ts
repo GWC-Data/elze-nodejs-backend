@@ -10,12 +10,12 @@ function isKpiChartType(chartType: unknown): boolean {
 }
 
 function cardKind(card: Card | null | undefined): 'kpi' | 'chart' {
-  return isKpiChartType(card && card.chartType) ? 'kpi' : 'chart';
+  return isKpiChartType(card?.chartType) ? 'kpi' : 'chart';
 }
 
 function flattenCard(card: any): any {
   if (!card || typeof card !== 'object') return card;
-  const main = card.series && card.series.main;
+  const main = card.series?.main;
   if (!main) return card;
 
   const next: Card = { ...card };

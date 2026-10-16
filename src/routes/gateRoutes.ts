@@ -18,7 +18,7 @@ router.get('/agents', ...authenticated, async (req: Request, res: Response, next
 
 router.use((err: any, req: Request, res: Response, next: NextFunction) => {
   void next;
-  const status = ERROR_STATUS[err && err.code] === 401 ? 401 : 403;
+  const status = ERROR_STATUS[err?.code] === 401 ? 401 : 403;
   if (req.actor && status === 403) {
     denied(req.actor, {
       reason: err.code || 'agent_gate',
@@ -26,7 +26,7 @@ router.use((err: any, req: Request, res: Response, next: NextFunction) => {
       path: (req.get('x-original-uri') || '').split('?')[0] || null,
     });
   }
-  res.status(status).set('X-Gate-Reason', String(err && err.code ? err.code : 'ERROR')).end();
+  res.status(status).set('X-Gate-Reason', String(err?.code ? err.code : 'ERROR')).end();
 });
 
 export = router;

@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import type { Request, Response, CookieOptions } from 'express';
 import config from '../config';
 import {
@@ -61,11 +61,11 @@ function clearSessionCookies(res: Response) {
 }
 
 function readCookie(req: Request, name: string): string | null {
-  return (req.cookies && req.cookies[name]) || null;
+  return (req.cookies?.[name]) || null;
 }
 
 const readAccessCookie = (req: Request) => readCookie(req, ACCESS_COOKIE);
 const readRefreshCookie = (req: Request) => readCookie(req, REFRESH_COOKIE);
-const readCsrfCookie = (req: Request): string | undefined => req.cookies && req.cookies[CSRF_COOKIE];
+const readCsrfCookie = (req: Request): string | undefined => req.cookies?.[CSRF_COOKIE];
 
 export { setSessionCookies, clearSessionCookies, readAccessCookie, readRefreshCookie, readCsrfCookie };

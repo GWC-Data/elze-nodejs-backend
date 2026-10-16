@@ -95,7 +95,7 @@ async function loadObjects(
   const src = sourceOf(connectionId, { runVersionId, versionId });
   let clause = src.where;
   const params = [...src.params];
-  if (types && types.length) {
+  if (types?.length) {
     clause += ' AND o.object_type = ANY(?)';
     params.push(types);
   }

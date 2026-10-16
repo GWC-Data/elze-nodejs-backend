@@ -44,7 +44,7 @@ function generateKpiPeriodSql(plan: Plan): GeneratedSql {
   const { where, params } = buildWhereSql(plan.filters);
 
   if (plan.kind === 'kpi-period-merged') {
-    const selects = [dateSelect(plan.dateGroup) + ' AS "_period"'];
+    const selects = [`${dateSelect(plan.dateGroup)} AS "_period"`];
     for (const member of plan.members) {
       selects.push(
         buildAggExpression(member.measure.aggregation, resolvedName(member.measure), member.alias)
@@ -93,11 +93,11 @@ function generateCardSql(plan: Plan): GeneratedSql {
     selectParts.push(buildAggExpression(m.aggregation, resolvedName(m), m.alias));
   }
 
-  const groupBy = groupParts.length ? ' GROUP BY ' + groupParts.join(', ') : '';
+  const groupBy = groupParts.length ? ` GROUP BY ${groupParts.join(', ')}` : '';
 
   let orderBy = '';
-  if (plan.orderBy && plan.orderBy.length) {
-    orderBy = ' ORDER BY ' + plan.orderBy.map(orderTerm).join(', ');
+  if (plan.orderBy?.length) {
+    orderBy = ` ORDER BY ${plan.orderBy.map(orderTerm).join(', ')}`;
   } else if (plan.dateGroup) {
     orderBy = ` ORDER BY ${alias(plan.dateGroup)} ASC`;
   } else if (plan.measures.length && plan.dimensions.length) {

@@ -74,7 +74,7 @@ async function getAccessLevel(actor: Actor | null | undefined, dashboardId: stri
   if (actor.isPlatform) return 'admin';
 
   const gate = await accessRepository.gateAndLevels(actor, dashboardId);
-  if (!gate || !gate.available) return null;
+  if (!gate?.available) return null;
 
   if (can(actor, 'access.grant')) return 'admin';
 

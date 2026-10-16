@@ -27,7 +27,8 @@ async function getUserScopes(userId: number): Promise<UserScopes> {
   if (!userId) return {};
   const scopes: UserScopes = {};
   for (const row of await scopeRepository.userScopeRows(userId)) {
-    (scopes[row.dimension] = scopes[row.dimension] || []).push(row.value);
+    scopes[row.dimension] ??= [];
+    scopes[row.dimension].push(row.value);
   }
   return scopes;
 }

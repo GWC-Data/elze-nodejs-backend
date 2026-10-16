@@ -148,7 +148,7 @@ function resolveSourceMetadata(spec: Spec): Promise<Record<string, any>> {
     const dataSource = spec.dataSource || spec.source || {};
     const dateParse =
       (dataSource && (dataSource.dateParse || dataSource.stringDates)) ||
-      (spec && spec.dateParse) ||
+      (spec?.dateParse) ||
       {};
     return {
       source,

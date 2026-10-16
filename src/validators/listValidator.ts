@@ -36,7 +36,7 @@ function parseListQuery(query: Record<string, any>, sortable: Record<string, unk
   const search = typeof query.search === 'string' ? query.search.trim().slice(0, MAX_SEARCH_LENGTH) : '';
 
   const sort = query.sort === undefined || query.sort === '' ? defaults.sort : String(query.sort);
-  if (sort !== undefined && !Object.prototype.hasOwnProperty.call(sortable, sort)) {
+  if (sort !== undefined && !Object.hasOwn(sortable, sort)) {
     throw fail('VALIDATION_ERROR', `sort must be one of: ${Object.keys(sortable).join(', ')}.`);
   }
   const dirRaw = query.dir === undefined || query.dir === '' ? defaults.dir || 'asc' : String(query.dir);

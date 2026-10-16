@@ -25,14 +25,14 @@ function dashboardKey(spec: Spec, meta: Record<string, any> | null | undefined):
   return (
     spec.id ||
     spec.title ||
-    (meta && meta.source ? `${meta.source.database}.${meta.source.table}` : 'default')
+    (meta?.source ? `${meta.source.database}.${meta.source.table}` : 'default')
   );
 }
 
 function describeError(err: any, stage: string): StageError {
   return {
     stage,
-    message: err && err.message ? err.message : String(err),
+    message: err?.message ? err.message : String(err),
   };
 }
 
@@ -212,8 +212,8 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
   const minHeight = spec.layout?.chart?.minHeight ?? DEFAULT_CHART_MIN_HEIGHT;
 
   for (const job of runnable) {
-    if (!job.result || !job.result.ok) {
-      assignJobError(job, (job.result && job.result.error) || describeError(new Error('Query produced no result'), 'execute'));
+    if (!job.result?.ok) {
+      assignJobError(job, (job.result?.error) || describeError(new Error('Query produced no result'), 'execute'));
       continue;
     }
     const rows = job.result.rows;
@@ -281,7 +281,7 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
       cardQueries: countJobs('chart'),
       slicerQueries: countJobs('slicer'),
       totalQueries: runnable.length,
-      cacheHits: results.filter((r: any) => r && r.cached).length,
+      cacheHits: results.filter((r: any) => r?.cached).length,
       errors: errors.length,
     },
   };

@@ -10,7 +10,7 @@ function planSignature(plan: Plan): string {
 }
 
 function mergePeriodKpis(periodPlans: Plan[]): Plan[] {
-  if (!periodPlans || !periodPlans.length) return [];
+  if (!periodPlans?.length) return [];
 
   const groups = new Map<string, Plan[]>();
   for (const plan of periodPlans) {
@@ -29,7 +29,7 @@ function mergePeriodKpis(periodPlans: Plan[]): Plan[] {
     const first = plans[0];
     merged.push({
       kind: 'kpi-period-merged',
-      id: 'kpis:' + plans.map((p) => p.id).join('+'),
+      id: `kpis:${plans.map((p) => p.id).join('+')}`,
       specIndex: Math.min(...plans.map((p) => (p.specIndex == null ? 0 : p.specIndex))),
       source: first.source,
       members: plans.map((p) => ({
@@ -37,7 +37,7 @@ function mergePeriodKpis(periodPlans: Plan[]): Plan[] {
         specIndex: p.specIndex,
         kpi: p.kpi,
         measure: p.measures[0],
-        alias: p.id + '__value',
+        alias: `${p.id}__value`,
       })),
       dateGroup: first.dateGroup,
       orderBy: [],

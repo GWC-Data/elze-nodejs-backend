@@ -1,4 +1,4 @@
-import assert = require('assert');
+import assert = require('node:assert');
 
 process.env.CREDENTIAL_SECRET = process.env.CREDENTIAL_SECRET
   || 'test-only-credential-secret-at-least-32-chars';
@@ -414,7 +414,7 @@ async function cleanup(): Promise<void> {
   check('it took six pages of 50', listCalls.length === 6, String(listCalls.length));
   check('ids are unique across pages', new Set(paged.map((d: any) => d.id)).size === 260);
 
-  const first = new URL('https://x' + listCalls[0].path + (listCalls[0].search || ''));
+  const first = new URL(`https://x${listCalls[0].path}${listCalls[0].search || ''}`);
   const params = new URLSearchParams(listCalls[0].query || '');
   check('limit never exceeds the cap Domo enforces',
     listCalls.every((c) => Number(new URLSearchParams(c.query).get('limit')) <= 50),
@@ -553,7 +553,7 @@ async function cleanup(): Promise<void> {
     byId.datasets.length === 1 && byId.datasets[0].id === KNOWN_DATASET_ID && byId.total === 1 && byId.hasMore === false,
     JSON.stringify(byId.datasets.map((d: any) => d.id)));
   check('by asking Domo for that one dataset',
-    seenRequests.some((r) => r.path === '/api/data/v3/datasources/' + KNOWN_DATASET_ID)
+    seenRequests.some((r) => r.path === `/api/data/v3/datasources/${KNOWN_DATASET_ID}`)
       && !seenRequests.some((r) => r.path === '/api/data/v3/datasources'));
 
   const missing = await service.fetchDatasetPage(adminA, connectionId, { page: 1, pageSize: 25, search: MISSING_DATASET_ID, fresh: true });
@@ -883,7 +883,7 @@ async function cleanup(): Promise<void> {
 
   const connectionRow = await service.requireConnection(adminA, connectionId);
 
-  let summary = await publish.publishSummary(adminA, connectionRow);
+  const summary = await publish.publishSummary(adminA, connectionRow);
   check('the summary counts approved facts only',
     summary.stats.find((s: any) => s.id === 'columns').value === 1,
     JSON.stringify(summary.stats.find((s: any) => s.id === 'columns')));

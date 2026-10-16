@@ -39,7 +39,7 @@ function keyColumns(primaryKey: unknown): Set<string> {
 
 function foreignKeyColumns(payload: Payload): Set<any> {
   return new Set(
-    (Array.isArray(payload.foreign_keys) ? payload.foreign_keys : []).map((fk: any) => fk && fk.column)
+    (Array.isArray(payload.foreign_keys) ? payload.foreign_keys : []).map((fk: any) => fk?.column)
   );
 }
 
@@ -109,7 +109,7 @@ function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, Payload>, joi
 
   for (const [table, payload] of tableFacts) {
     for (const fk of Array.isArray(payload.foreign_keys) ? payload.foreign_keys : []) {
-      if (!fk || !fk.column || typeof fk.references !== 'string') continue;
+      if (!fk?.column || typeof fk.references !== 'string') continue;
       const dot = fk.references.lastIndexOf('.');
       if (dot <= 0) continue;
       const target = fk.references.slice(0, dot);
@@ -192,7 +192,7 @@ async function modelGraph(connectionId: string, { versionId }: { versionId?: str
     const keys = keyColumns(payload.primary_key);
     const foreign = foreignKeyColumns(payload);
     for (const col of Array.isArray(payload.columns) ? payload.columns : []) {
-      if (!col || !col.name) continue;
+      if (!col?.name) continue;
       addColumn(table, {
         name: col.name,
         dataType: col.type ?? null,
@@ -281,7 +281,7 @@ async function snapshotTableProfile(connectionId: string, versionId: string | nu
       );
     }) || (tables.length === 1 ? tables[0] : null);
 
-  const payload: Payload = (table && table.payload) || {};
+  const payload: Payload = (table?.payload) || {};
   const split = columnSplitter(rows);
   const stats = new Map<string, any>();
   if (table) {
@@ -292,7 +292,7 @@ async function snapshotTableProfile(connectionId: string, versionId: string | nu
     }
   }
   const declared: any[] = Array.isArray(payload.columns) ? payload.columns : [];
-  const names: string[] = [...new Set<string>([...declared.map((c) => c && c.name).filter(Boolean), ...stats.keys()])];
+  const names: string[] = [...new Set<string>([...declared.map((c) => c?.name).filter(Boolean), ...stats.keys()])];
   const keyTokens = keyColumns(payload.primary_key);
   const foreign = foreignKeyColumns(payload);
 
@@ -589,7 +589,7 @@ async function understanding(connectionId: string, query: Record<string, any> = 
   terms.sort((a, b) => TERM_ORDER[a.type] - TERM_ORDER[b.type] || a.term.localeCompare(b.term));
 
   const filter = query.filter ? String(query.filter) : 'all';
-  if (!Object.prototype.hasOwnProperty.call(GLOSSARY_FILTERS, filter)) {
+  if (!Object.hasOwn(GLOSSARY_FILTERS, filter)) {
     throw fail('VALIDATION_ERROR', `filter must be one of: ${Object.keys(GLOSSARY_FILTERS).join(', ')}.`);
   }
   const states = GLOSSARY_FILTERS[filter];

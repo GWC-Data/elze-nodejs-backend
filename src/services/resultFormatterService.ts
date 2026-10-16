@@ -36,7 +36,7 @@ function formatShare(value: unknown, total: number): string {
 
 function niceStep(raw: number): number {
   if (!(raw > 0)) return 1;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const mag = 10 ** Math.floor(Math.log10(raw));
   const norm = raw / mag;
   const factor = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
   return factor * mag;

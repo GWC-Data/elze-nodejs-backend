@@ -10,7 +10,7 @@ function getColumn(meta: Meta, name: string): any {
 }
 
 function tableName(meta: Meta | null | undefined): string | undefined {
-  return meta && meta.table ? meta.table.table : undefined;
+  return meta?.table ? meta.table.table : undefined;
 }
 
 function sameColumn(a: unknown, b: unknown): boolean {
@@ -24,13 +24,13 @@ function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
     column,
     grain: resolved.key,
     isString: colMeta.isString,
-    parseFormat: (meta.dateParse && meta.dateParse[column]) || null,
+    parseFormat: (meta.dateParse?.[column]) || null,
     columnMeta: colMeta,
   };
 }
 
 function readDateGrainSpec(node: Spec | null | undefined): { column: string; grain: any } | null {
-  const dg = node && node.dateGrain;
+  const dg = node?.dateGrain;
   if (!dg || typeof dg !== 'object') return null;
   const column = dg.column;
   const grain = dg.dateTimeElement || dg.grain || dg.element;
@@ -54,7 +54,7 @@ function buildFilters(spec: Spec, filters: Record<string, any> | null | undefine
   if (!filters) return list;
   for (const s of spec.slicers || []) {
     const selected = filters[s.id];
-    if (!selected || !selected.length) continue;
+    if (!selected?.length) continue;
     const colMeta = getColumn(meta, s.column);
     list.push({
       column: s.column,
@@ -129,7 +129,7 @@ function kpiValueColumn(kpi: Spec): any {
 }
 
 function readKpiPeriod(kpi: Spec | null | undefined): { column: string; grain: any } | null {
-  if (!kpi || !kpi.comparison) return null;
+  if (!kpi?.comparison) return null;
   return readDateGrainSpec(kpi) || readDateGrainSpec(kpi.series?.main);
 }
 
@@ -162,7 +162,7 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
   const xCol = columns.find((c) => ['XTIME', 'SERIES', 'ITEM'].includes(c.mapping));
 
   const groupByColumns: string[] = [];
-  if (card.groupBy && card.groupBy.length) {
+  if (card.groupBy?.length) {
     for (const g of card.groupBy) {
       if (g.column) groupByColumns.push(g.column);
     }

@@ -1,4 +1,4 @@
-import fs from 'fs';
+import fs from 'node:fs';
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import config from '../config';
@@ -27,7 +27,7 @@ function loadSpec(): Record<string, unknown> | null {
 const spec = loadSpec();
 
 if (spec) {
-  router.get('/openapi.json', (req, res) => {
+  router.get('/openapi.json', (_req, res) => {
     res.json(spec);
   });
   router.use(

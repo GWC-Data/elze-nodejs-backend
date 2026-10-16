@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import { fail } from '../../tools/AppError';
 import { Throttle } from '../../tools/throttle';
 import TtlCache from '../../tools/ttlCache';
@@ -250,7 +250,7 @@ async function listDatasetPage({ host, token, page, pageSize, search, fresh = fa
   if (rows === null) throw unrecognised(host, payload);
 
   const datasets = rows.map(shapeDataset).filter((d): d is Dataset => d !== null);
-  const reported = Number(payload && payload._metaData && payload._metaData.totalCount);
+  const reported = Number(payload?._metaData?.totalCount);
   const total = Number.isFinite(reported) ? reported : null;
   const result = {
     datasets,
@@ -361,9 +361,9 @@ async function storedSizeBytes(host: string, token: string, datasetId: string): 
 async function getTableProfile({ host, token, datasetId }: { host: string; token: string; datasetId: string }): Promise<Record<string, any>> {
   const detail = await callDomo(host, token, datasetDetailPath(datasetId));
   const reportedSize = firstFiniteNumber(
-    detail && detail.sizeInBytes,
-    detail && detail.dataSourceSize,
-    detail && detail.sizeBytes
+    detail?.sizeInBytes,
+    detail?.dataSourceSize,
+    detail?.sizeBytes
   );
 
   const [sample, sizeBytes] = await Promise.all([
@@ -374,11 +374,11 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
     reportedSize ?? storedSizeBytes(host, token, datasetId),
   ]);
 
-  const names: any[] = Array.isArray(sample && sample.columns) ? sample.columns : [];
-  const types = (Array.isArray(sample && sample.metadata) ? sample.metadata : []).map(
-    (m: any) => (m && m.type) || null
+  const names: any[] = Array.isArray(sample?.columns) ? sample.columns : [];
+  const types = (Array.isArray(sample?.metadata) ? sample.metadata : []).map(
+    (m: any) => (m?.type) || null
   );
-  const rows: any[] = Array.isArray(sample && sample.rows) ? sample.rows : [];
+  const rows: any[] = Array.isArray(sample?.rows) ? sample.rows : [];
 
   const columns = profileColumns(names, types, rows);
   const rowCount = Number.isFinite(Number(detail && (detail.rowCount ?? detail.rows)))
@@ -389,18 +389,18 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
     id: String(datasetId),
     datasetId: String(datasetId),
     name: (detail && (detail.name || detail.displayName)) || String(datasetId),
-    description: (detail && detail.description) || null,
+    description: (detail?.description) || null,
     rowCount,
-    columnCount: Number.isFinite(Number(detail && detail.columnCount))
+    columnCount: Number.isFinite(Number(detail?.columnCount))
       ? Number(detail.columnCount)
       : columns.length || null,
     sizeBytes,
     qualityScore: null,
     lastRefreshedAt: (detail && (detail.lastTouched ?? detail.lastUpdated ?? detail.updatedAt)) || null,
     owner:
-      detail && detail.owner && typeof detail.owner === 'object'
+      detail?.owner && typeof detail.owner === 'object'
         ? detail.owner.name || detail.owner.displayName || null
-        : (detail && detail.ownerName) || null,
+        : (detail?.ownerName) || null,
     columns,
     sample: names.length
       ? {

@@ -5,7 +5,7 @@ import * as sharing from '../services/contextSharingService';
 
 const body = (req: Request) => req.body || {};
 
-function connectors(req: Request, res: Response): void {
+function connectors(_req: Request, res: Response): void {
   ok(res, contextLayer.listConnectors());
 }
 

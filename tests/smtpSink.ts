@@ -1,4 +1,4 @@
-import net from 'net';
+import net from 'node:net';
 
 interface SinkMessage {
   headers: Record<string, string>;
@@ -27,14 +27,13 @@ function startSmtpSink(
     let dataLines: string[] = [];
     let expecting: string | null = null;
 
-    const say = (line: string) => socket.write(line + '\r\n');
+    const say = (line: string) => socket.write(`${line}\r\n`);
     say('220 smtp-sink ready');
 
     socket.on('data', (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
 
-      let index;
-      while ((index = buffer.indexOf('\r\n')) !== -1) {
+      for (let index = buffer.indexOf('\r\n'); index !== -1; index = buffer.indexOf('\r\n')) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 2);
 
@@ -127,7 +126,7 @@ function startSmtpSink(
     let text: string;
 
     if (boundaryMatch) {
-      const marker = '--' + boundaryMatch[1];
+      const marker = `--${boundaryMatch[1]}`;
       text = body
         .split(marker)
         .slice(1, -1)

@@ -3,7 +3,7 @@ import { ok } from '../tools/apiResponse';
 import { isRbacReady, rbacError } from '../services/bootstrapService';
 import { describeTransport } from '../services/emailService';
 
-function health(req: Request, res: Response): void {
+function health(_req: Request, res: Response): void {
   const ready = isRbacReady();
   res.status(ready ? 200 : 503);
   ok(res, {

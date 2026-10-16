@@ -65,10 +65,10 @@ function candidateColumns(spec: Spec): string[] {
     if (typeof name === 'string' && name.trim()) columns.add(name.trim());
   };
   const addGroupBy = (list: any[] | undefined) => {
-    for (const g of list || []) add(g && g.column);
+    for (const g of list || []) add(g?.column);
   };
   const addDateGrain = (node: any) => {
-    if (node && node.dateGrain && typeof node.dateGrain === 'object') add(node.dateGrain.column);
+    if (node?.dateGrain && typeof node.dateGrain === 'object') add(node.dateGrain.column);
   };
 
   for (const slicer of spec.slicers || []) add(slicer.column);
@@ -76,7 +76,7 @@ function candidateColumns(spec: Spec): string[] {
   for (const card of spec.cards || []) {
     addDateGrain(card);
     addGroupBy(card.groupBy);
-    if (!(card.groupBy && card.groupBy.length)) {
+    if (!(card.groupBy?.length)) {
       for (const col of card.columns || []) {
         if (['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
       }

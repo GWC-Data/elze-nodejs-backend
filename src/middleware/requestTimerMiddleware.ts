@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 
-function requestTimer(req: Request, res: Response, next: NextFunction): void {
+function requestTimer(_req: Request, res: Response, next: NextFunction): void {
   res.locals.start = Date.now();
   next();
 }

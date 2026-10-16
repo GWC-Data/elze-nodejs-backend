@@ -15,7 +15,7 @@ function sendError(res: Response, err: any, context: string): void {
   const status = (ERROR_STATUS as Record<string, number>)[code];
 
   if (status >= 500) {
-    console.error(`[api] ${context} failed:`, err && err.stack ? err.stack : err);
+    console.error(`[api] ${context} failed:`, err?.stack ? err.stack : err);
   }
 
   const body: ErrorBody = {

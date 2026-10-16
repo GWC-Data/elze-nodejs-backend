@@ -88,7 +88,7 @@ async function createReportingFixture(
   for (let i = 0; i < rows; i++) {
     const row = buildRow(i);
     const base = params.length;
-    values.push('(' + row.map((_, k) => `$${base + k + 1}`).join(', ') + ')');
+    values.push(`(${row.map((_, k) => `$${base + k + 1}`).join(', ')})`);
     params.push(...row);
   }
   await db.raw(`INSERT INTO ${ref} (${cols}) VALUES ${values.join(', ')}`, params);

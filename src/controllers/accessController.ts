@@ -5,9 +5,9 @@ import * as accessService from '../services/accessService';
 
 const userId = (req: Request) => requireId(req.params.userId, 'user id');
 const groupId = (req: Request) => requireId(req.params.groupId, 'group id');
-const levelId = (req: Request) => (req.body || {}).levelId;
+const levelId = (req: Request) => req.body?.levelId;
 
-function levels(req: Request, res: Response): void {
+function levels(_req: Request, res: Response): void {
   ok(res, accessService.describeLevels());
 }
 

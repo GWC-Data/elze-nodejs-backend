@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import config from '../config';
 
 const { JWT_REFRESH_SECRET } = config.auth;

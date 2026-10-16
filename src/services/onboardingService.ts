@@ -74,7 +74,7 @@ async function prepareInvitation(
 async function createAndInvite(actor: Actor, fields: NewAccountFields) {
   const user = await createAccount(fields);
 
-  let invitation;
+  let invitation: Awaited<ReturnType<typeof prepareInvitation>>;
   try {
     invitation = await prepareInvitation(actor, user);
   } catch (err) {

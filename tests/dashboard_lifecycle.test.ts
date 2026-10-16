@@ -1,4 +1,4 @@
-import assert from 'assert';
+import assert from 'node:assert';
 
 process.env.BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'platformowner';
 process.env.BOOTSTRAP_ADMIN_EMAIL = process.env.BOOTSTRAP_ADMIN_EMAIL || 'owner@example.com';

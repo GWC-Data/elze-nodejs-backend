@@ -1,4 +1,4 @@
-import type { Server } from 'http';
+import type { Server } from 'node:http';
 import config from './config';
 import app from './app';
 import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrapService';

@@ -1,5 +1,5 @@
 function quoteIdentifier(name: unknown): string {
-  return '"' + String(name).replace(/"/g, '""') + '"';
+  return `"${String(name).replace(/"/g, '""')}"`;
 }
 
 function quoteQualified(schema: unknown, table: unknown): string {

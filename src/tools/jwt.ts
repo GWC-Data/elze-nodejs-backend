@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import type { JwtPayload } from 'jsonwebtoken';
 import config from '../config';
@@ -30,7 +30,7 @@ function signAccessToken(user: AccessTokenUser, familyId: string): string {
 }
 
 function verifyAccessToken(token: string): JwtPayload {
-  let payload;
+  let payload: JwtPayload;
   try {
     payload = jwt.verify(token, JWT_ACCESS_SECRET) as JwtPayload;
   } catch (err: any) {

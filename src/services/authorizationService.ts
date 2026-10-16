@@ -10,7 +10,7 @@ function buildActor(
   permissions: Iterable<string>,
   features: readonly string[] = featureKeys()
 ): Actor {
-  if (!userRow || !userRow.id) {
+  if (!userRow?.id) {
     throw new Error('buildActor requires a user row');
   }
   const roleScope = scopeOfTier(userRow.role);

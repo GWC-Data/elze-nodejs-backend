@@ -42,7 +42,7 @@ function tablesCovered(rows: Row[], allRows: Row[] = rows): string[] {
   return [...names];
 }
 
-async function publishSummary(actor: Actor, connection: Connection, { version = null }: { version?: Record<string, any> | null } = {}): Promise<Record<string, any>> {
+async function publishSummary(_actor: Actor, connection: Connection, { version = null }: { version?: Record<string, any> | null } = {}): Promise<Record<string, any>> {
   const rows = version
     ? await loadObjects(connection.id, undefined, { versionId: version.id })
     : await loadObjects(connection.id);

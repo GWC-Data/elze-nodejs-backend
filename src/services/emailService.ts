@@ -19,7 +19,7 @@ async function sendEmail(message: EmailMessage, { consequence }: { consequence?:
 
   try {
     const result = await provider.send({ from: EMAIL_FROM!, to, subject, text, html });
-    console.log(`[email] sent "${subject}" to ${to}${result && result.detail ? ` (${result.detail})` : ''}`);
+    console.log(`[email] sent "${subject}" to ${to}${result?.detail ? ` (${result.detail})` : ''}`);
     return result;
   } catch (err: any) {
     console.error(`[email] delivery to ${to} failed: ${err.message}`);

@@ -1,5 +1,5 @@
-import crypto from 'crypto';
-import path from 'path';
+import crypto from 'node:crypto';
+import path from 'node:path';
 import config from '../config';
 import * as dashboardRepository from '../repositories/dashboardRepository';
 import * as accessRepository from '../repositories/accessRepository';

@@ -668,14 +668,14 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('POST', '/api/auth/refresh', undefined, { noCsrf: true, csrf: undefined });
   const noCsrf = await (async () => {
     const headers = { Cookie: alphaUser.cookieHeader() };
-    const res = await fetch(BASE + '/api/auth/refresh', { method: 'POST', headers });
+    const res = await fetch(`${BASE}/api/auth/refresh`, { method: 'POST', headers });
     return { status: res.status, body: await res.json().catch(() => null) };
   })();
   check('refresh without the CSRF header is refused', noCsrf.status === 403 && noCsrf.body?.error?.code === 'CSRF_TOKEN_INVALID', JSON.stringify(noCsrf.body));
 
   const forged = await (async () => {
     const headers = { Cookie: alphaUser.cookieHeader(), 'Content-Type': 'application/json' };
-    const res = await fetch(BASE + '/api/auth/change-password', { method: 'POST', headers, body: '{}' });
+    const res = await fetch(`${BASE}/api/auth/change-password`, { method: 'POST', headers, body: '{}' });
     return { status: res.status, body: await res.json().catch(() => null) };
   })();
   check('a state-changing call without the CSRF header is refused', forged.status === 403 && forged.body?.error?.code === 'CSRF_TOKEN_INVALID', JSON.stringify(forged.body));

@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import config from '../config';
 import * as tokenRepository from '../repositories/tokenRepository';
 import { fail } from '../tools/AppError';

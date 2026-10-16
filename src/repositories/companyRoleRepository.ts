@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import config from '../config';
 import { Prisma } from '../generated/prisma/client';
 import { rawRows } from './baseRepository';
@@ -139,7 +139,7 @@ async function resetCompanyDefault(companyId: number, permissionIds: readonly st
     const before = await tx.role.findUnique({ where: { id: row.id }, select: { modifiedAt: true } });
     await tx.role.update({ where: { id: row.id }, data: { modifiedBy: null, modifiedAt: null, updatedAt: new Date() } });
     await writePermissions(tx, row.id, permissionIds, actorId);
-    return Boolean(before && before.modifiedAt);
+    return Boolean(before?.modifiedAt);
   });
 }
 

@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -17,7 +17,7 @@ app.use(cookieParser());
 app.use('/api', apiRoutes);
 
 app.use(express.static(DIST_DIR));
-app.get('{*splat}', (req, res) => {
+app.get('{*splat}', (_req, res) => {
   res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 

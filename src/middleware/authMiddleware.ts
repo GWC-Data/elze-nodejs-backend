@@ -18,9 +18,10 @@ function requestPath(req: Request): string {
   return req.originalUrl.split('?')[0];
 }
 
-function requireRbac(req: Request, res: Response, next: NextFunction): void {
+function requireRbac(_req: Request, _res: Response, next: NextFunction): void {
   if (!isRbacReady()) {
-    return next(fail('SERVICE_UNAVAILABLE', 'The service is starting up or its database is unreachable. Try again shortly.'));
+    next(fail('SERVICE_UNAVAILABLE', 'The service is starting up or its database is unreachable. Try again shortly.'));
+    return;
   }
   next();
 }
@@ -28,7 +29,7 @@ function requireRbac(req: Request, res: Response, next: NextFunction): void {
 async function actorFromToken(token: string): Promise<{ actor: Actor; account: ReturnType<typeof publicUser> }> {
   const payload = verifyAccessToken(token);
   const found = await findActor(Number(payload.sub));
-  const user = found && found.user;
+  const user = found?.user;
 
   if (!user) throw fail('UNAUTHENTICATED', 'This account no longer exists.');
   if (user.status === USER_STATUS.DISABLED) throw fail('ACCOUNT_DISABLED', 'This account has been deactivated.');
@@ -70,23 +71,30 @@ async function requireAuth(req: Request, res: Response, next: NextFunction): Pro
   }
 }
 
-function requirePasswordCurrent(req: Request, res: Response, next: NextFunction): void {
-  if (req.actor && req.actor.mustChangePassword) {
-    return next(fail('PASSWORD_CHANGE_REQUIRED', 'Choose a new password before continuing.'));
+function requirePasswordCurrent(req: Request, _res: Response, next: NextFunction): void {
+  if (req.actor?.mustChangePassword) {
+    next(fail('PASSWORD_CHANGE_REQUIRED', 'Choose a new password before continuing.'));
+    return;
   }
   next();
 }
 
-function requirePlatform(req: Request, res: Response, next: NextFunction): void {
-  if (!req.actor) return next(fail('UNAUTHENTICATED', 'Sign in to continue.'));
-  if (req.actor.isPlatform) return next();
+function requirePlatform(req: Request, _res: Response, next: NextFunction): void {
+  if (!req.actor) {
+    next(fail('UNAUTHENTICATED', 'Sign in to continue.'));
+    return;
+  }
+  if (req.actor.isPlatform) {
+    next();
+    return;
+  }
 
   denied(req.actor, { reason: 'platform_only', method: req.method, path: requestPath(req) });
   next(fail('TENANT_ACCESS_DENIED', 'This area is restricted to platform administrators.'));
 }
 
 function requirePermission(permission: string): RequestHandler {
-  return function permissionGuard(req: Request, res: Response, next: NextFunction): void {
+  return function permissionGuard(req: Request, _res: Response, next: NextFunction): void {
     try {
       assertPermission(req.actor, permission);
       next();
@@ -106,7 +114,7 @@ function requirePermission(permission: string): RequestHandler {
 }
 
 function requireDashboardAccess(level: string, param = 'dashboardId'): RequestHandler {
-  return async function dashboardGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
+  return async function dashboardGuard(req: Request, _res: Response, next: NextFunction): Promise<void> {
     try {
       const dashboardId = req.params[param] || req.body?.dashboardId || req.query?.dashboardId;
       if (!dashboardId) {

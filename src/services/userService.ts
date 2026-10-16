@@ -23,7 +23,10 @@ async function findActor(id: number) {
   const row = await userRepository.findActorRow(id);
   if (!row) return null;
   const scopes: Record<string, unknown[]> = {};
-  for (const [dimension, value] of row.scopes) (scopes[dimension] = scopes[dimension] || []).push(value);
+  for (const [dimension, value] of row.scopes) {
+    scopes[dimension] ??= [];
+    scopes[dimension].push(value);
+  }
   const features = row.company_id ? effectiveFeatures(featureKeysOf(row.feature_ids)) : featureKeys();
   return {
     user: row,

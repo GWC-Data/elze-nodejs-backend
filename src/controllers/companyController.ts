@@ -61,7 +61,7 @@ async function features(req: Request, res: Response): Promise<void> {
 async function replaceFeatures(req: Request, res: Response): Promise<void> {
   const id = companyId(req);
   await companyService.requireCompany(req.actor, id);
-  ok(res, await featureService.replaceCompanyFeatures(req.actor, id, (req.body || {}).featureIds));
+  ok(res, await featureService.replaceCompanyFeatures(req.actor, id, req.body?.featureIds));
 }
 
 export {

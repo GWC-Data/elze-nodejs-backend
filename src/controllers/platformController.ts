@@ -7,11 +7,11 @@ async function overview(req: Request, res: Response): Promise<void> {
   ok(res, await platformService.overview(req.actor));
 }
 
-async function settings(req: Request, res: Response): Promise<void> {
+async function settings(_req: Request, res: Response): Promise<void> {
   ok(res, await platformService.settings());
 }
 
-function features(req: Request, res: Response): void {
+function features(_req: Request, res: Response): void {
   ok(res, featureService.catalogue());
 }
 
