@@ -38,5 +38,13 @@
   },
   "assist": {
     "enabled": false
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["prisma.config.ts"],
+      "formatter": {
+        "lineEnding": "lf"
+      }
+    }
+  ]
 }
