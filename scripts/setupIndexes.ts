@@ -1,5 +1,5 @@
 import config from '../src/config';
-const { db } = config.database;
+const { db, prisma } = config.database;
 import * as dashboards from '../src/services/dashboardService';
 import { resolveSourceMetadata } from '../src/services/metadataService';
 import { quoteIdentifier, quoteQualified } from '../src/tools/sql';
@@ -116,25 +116,29 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
   return { leading, names };
 }
 
+async function closeDatabase(): Promise<void> {
+  await prisma.$disconnect();
+  await db.end();
+}
+
 (async () => {
   const { ids, dryRun } = parseArgs(process.argv.slice(2));
 
-  // @ts-expect-error -- pre-existing bug kept as-is: this const shadows the imported module and reads itself in its own initializer
-  const dashboards = ids.length ? ids : dashboards.listDashboards().map((d) => d.id);
-  if (!dashboards.length) {
+  const dashboardIds = ids.length ? ids : (await dashboards.listDashboards()).map((d) => d.id);
+  if (!dashboardIds.length) {
     console.log('No dashboards found. Nothing to index.');
-    await db.end();
+    await closeDatabase();
     return;
   }
 
-  console.log(`Dashboards: ${dashboards.join(', ')}${dryRun ? '  (dry run)' : ''}`);
+  console.log(`Dashboards: ${dashboardIds.join(', ')}${dryRun ? '  (dry run)' : ''}`);
 
   const wanted = new Map<string, { schema: string; table: string; columns: Map<string, ColMeta> }>();
 
-  for (const id of dashboards) {
+  for (const id of dashboardIds) {
     let spec: Spec;
     try {
-      spec = dashboards.getSpec(id);
+      spec = await dashboards.getSpec(id);
     } catch (err: any) {
       console.log(`! ${id}: ${err.message}`);
       continue;
@@ -210,7 +214,7 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
   }
 
   console.log(`\n${dryRun ? 'Would create' : 'Created'}: ${created}, skipped: ${skipped}`);
-  await db.end();
+  await closeDatabase();
 })().catch((e: any) => {
   console.error('ERROR', e.message);
   process.exit(1);
