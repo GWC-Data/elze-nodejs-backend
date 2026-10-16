@@ -63,9 +63,11 @@ backend/
 ├── prisma/schema.prisma             the application tables, as Prisma models
 ├── prisma/migrations/               every schema change, applied by `npm run db:migrate`
 ├── docs/context-layer.md            read before touching warehouse connections
+├── docs/openapi.json                the API reference (OpenAPI 3.1), served at /api/docs outside production
 │
 ├── scripts/setupIndexes.ts          creates indexes for slicer/groupBy columns
 ├── scripts/resetAccess.ts           emails an account a fresh activation link
+├── scripts/checkApiDocs.ts          fails when docs/openapi.json and src/routes disagree
 │
 ├── tests/rbac.e2e.ts                the RBAC / tenancy / token / onboarding suite
 ├── tests/smtpSink.ts                an in-process SMTP relay the suite reads mail from
@@ -340,6 +342,30 @@ message is replaced with a generic one before it leaves the process.
 
 The dashboard endpoints are **no longer open to anonymous callers**.
 
+### API reference
+
+The table above is a summary. Every endpoint, with its request body, query parameters,
+response shapes and error codes, is in `docs/openapi.json` (OpenAPI 3.1). Outside
+production the server serves it:
+
+| URL | What |
+|---|---|
+| `/api/docs` | Swagger UI |
+| `/api/docs/openapi.json` | the raw spec, for Postman, Insomnia or a client generator |
+
+With `NODE_ENV=production` neither route is mounted and both return the usual 404.
+
+Swagger UI sends the browser's cookies and copies the `da_csrf` cookie into the
+`x-csrf-token` header on every request, so sign in through `POST /api/auth/login` from the
+page first; after that the signed-in routes, writes included, work without pasting tokens.
+
+The spec is written by hand, so it has to follow the routes. When you add, remove or
+rename a route, update `docs/openapi.json` in the same change and run
+`npm run docs:check`. The check reads `src/routes/` (following each `router.use` mount)
+and the spec, and fails on a route the spec does not have, a documented operation the
+server does not serve, a missing or repeated `operationId`, an operation without a tag,
+or a path parameter that is not declared.
+
 ### Onboarding
 
 There is no self-signup, and no administrator ever sets somebody else's password. An
@@ -603,6 +629,7 @@ npm run reset:access      # email an account a new activation link, without a to
 npm run db:migrate        # apply pending migrations to the database .env points at
 npm run db:status         # list applied and pending migrations
 npm run db:generate       # regenerate the Prisma client after editing schema.prisma
+npm run docs:check        # compare docs/openapi.json with the routes in src/routes
 npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts)
 npm run test:context      # the context layer (see tests/contextLayer.test.ts)
 ```

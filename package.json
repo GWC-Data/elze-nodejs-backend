@@ -14,6 +14,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:status": "prisma migrate status",
     "db:generate": "prisma generate",
+    "docs:check": "tsx scripts/checkApiDocs.ts",
     "test:e2e": "tsx tests/rbac.e2e.ts",
     "test:context": "tsx tests/contextLayer.test.ts"
   },
@@ -33,7 +34,8 @@
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^10.0.10",
     "pg": "^8.23.0",
-    "prisma": "7.10.0"
+    "prisma": "7.10.0",
+    "swagger-ui-express": "5.0.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -44,6 +46,7 @@
     "@types/node": "^22.20.4",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "@types/swagger-ui-express": "4.1.8",
     "nodemon": "^3.1.14",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

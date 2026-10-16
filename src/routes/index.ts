@@ -1,4 +1,5 @@
 import express from 'express';
+import config from '../config';
 import { requestTimer } from '../middleware/requestTimerMiddleware';
 import { notFound, errorHandler } from '../middleware/errorMiddleware';
 import { health } from '../controllers/healthController';
@@ -14,12 +15,17 @@ import dashboardRoutes from './dashboardRoutes';
 import auditRoutes from './auditRoutes';
 import companyRoleRoutes from './companyRoleRoutes';
 import gateRoutes from './gateRoutes';
+import docsRoutes from './docsRoutes';
+
+const { IS_PRODUCTION } = config.env;
 
 const router = express.Router();
 
 router.use(requestTimer);
 
 router.get('/health', health);
+
+if (!IS_PRODUCTION) router.use('/docs', docsRoutes);
 
 router.use('/auth', authRoutes);
 router.use('/platform', platformRoutes);
