@@ -60,6 +60,7 @@ backend/
 │
 ├── biome.json                       lint and format rules
 ├── vitest.config.mts                unit test runner settings
+├── .github/workflows/ci.yml         what every pull request has to pass
 ├── tsconfig.json                    strict, CommonJS output into dist/ (gitignored)
 ├── prisma.config.ts                 Prisma CLI settings; builds the database URL from DB_*
 ├── prisma/schema.prisma             the application tables, as Prisma models
@@ -672,6 +673,14 @@ TEST_DB_PASSWORD=root npm run test:e2e -- --keep
 ```
 
 The `TEST_DB_*` variables can also go in `.env`.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`, on Node 22
+(the version in the Dockerfile) with a PostgreSQL 18 service: `npm ci`, Prisma client
+generation, `tsc --noEmit`, `biome ci`, `docs:check`, a check that a database built from
+`prisma/migrations` matches `schema.prisma` (`prisma migrate diff --exit-code`), the unit
+tests and the integration suites.
 
 ### Lint and format
 
