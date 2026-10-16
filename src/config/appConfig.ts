@@ -15,12 +15,6 @@ const LOGIN_LOCKOUT_SECONDS = 15 * MINUTE;
 
 const QUERY_CONCURRENCY = 6;
 
-const BOOTSTRAP_SUPERADMIN = {
-  username: 'platformowner',
-  email: 'owner@example.com',
-  password: 'ChangeMeAtFirstSignIn1!',
-};
-
 export {
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_SECONDS,
@@ -29,5 +23,4 @@ export {
   LOGIN_WINDOW_SECONDS,
   LOGIN_LOCKOUT_SECONDS,
   QUERY_CONCURRENCY,
-  BOOTSTRAP_SUPERADMIN,
 };

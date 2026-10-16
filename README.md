@@ -25,7 +25,7 @@ backend/
 │   │   ├── configError.ts           required/optional readers that fail loudly
 │   │   ├── pgPool.ts                the driver, `?` placeholders, type coercions
 │   │   ├── database.ts              the one PostgreSQL pool, the Prisma client on it, withTransaction
-│   │   ├── appConfig.ts             fixed in source: TTLs, throttling, bootstrap owner
+│   │   ├── appConfig.ts             fixed in source: TTLs, throttling, query concurrency
 │   │   ├── auth.ts                  tokens, cookies, password policy
 │   │   ├── email.ts                 the SMTP relay, read from the environment
 │   │   ├── engine.ts                DB_SCHEMA, Redis cache, dashboard directory
@@ -444,10 +444,12 @@ a new database before its first start, and again after pulling a change that add
 migration. The server checks at startup and refuses to start while a migration is missing,
 naming it.
 
-`bootstrapAppMeta()` then runs on every start and is idempotent: it seeds the three roles and
-— only when the users table is empty — the platform owner declared in
-`src/config/appConfig.ts`, flagged to change its password at first sign-in. There is no
-database to create: the tables go into `DB_NAME`, beside the reporting data.
+`bootstrapAppMeta()` then runs on every start: it loads the catalogue and — only when the
+users table is empty — creates the platform owner from `BOOTSTRAP_ADMIN_USERNAME`,
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, flagged to change its password at
+first sign-in. Those three variables are read at no other time; once the owner exists they can
+be removed. There is no database to create: the tables go into `DB_NAME`, beside the
+reporting data.
 
 Bootstrap failure **is fatal**. Every endpoint now resolves an actor and checks a grant, so
 a process that cannot reach the database cannot authorize anything; staying up would mean
@@ -523,11 +525,10 @@ Read the SQL before applying it, then run `npm run db:migrate` and `npm run db:g
 |---|---|---|
 | Database, `APPLICATION_URL`, signing secrets, SMTP | `.env` | deployment-specific, or a live credential |
 | Token lifetimes, login throttling, query concurrency | `src/config/appConfig.ts` | product decisions; a value that drifts per deployment is one nobody can reason about |
-| Bootstrap owner's username, email and password | `src/config/appConfig.ts` | a first-use credential, spent the moment it is used |
+| Bootstrap owner's username, email and password | `.env` (`BOOTSTRAP_ADMIN_*`) | a first-use credential, read only while the users table is empty |
 
-The bootstrap password being in source is a real trade-off: it is in version control, stays
-in the history, and is identical in every deployment built from that source. What limits it
-is that the seeded account carries `must_change_password`, so signing in once replaces it.
+The seeded account carries `must_change_password`, so signing in once replaces the bootstrap
+password.
 
 ### PostgreSQL notes
 
@@ -602,14 +603,19 @@ fixture connects through the application's own pool, which otherwise reads `.env
 builds its table in the real database:
 
 ```bash
+# both terminals
+export DB_NAME=app_e2e
+export BOOTSTRAP_ADMIN_USERNAME=platformowner BOOTSTRAP_ADMIN_EMAIL=owner@example.com
+export BOOTSTRAP_ADMIN_PASSWORD='ChangeMeAtFirstSignIn1!'
+
 # terminal 1
-DB_NAME=app_e2e npm run db:migrate
-DB_NAME=app_e2e PORT=8099 \
+npm run db:migrate
+PORT=8099 \
 SMTP_HOST=127.0.0.1 SMTP_PORT=2525 SMTP_USERNAME= SMTP_PASSWORD= \
 EMAIL_FROM=e2e@example.com npm start
 
 # terminal 2
-DB_NAME=app_e2e npm run test:e2e
+npm run test:e2e
 ```
 
 Drop and recreate `app_e2e` between runs, then migrate it again: the suite expects to start

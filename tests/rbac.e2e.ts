@@ -6,7 +6,6 @@ import { accessLevelId, featureIdsOf, loadCatalogue, permissionIdsOf, permission
 
 const pids = (...keys: string[]) => permissionIdsOf(keys);
 const keysIn = (ids: unknown) => permissionKeysOf(Array.isArray(ids) ? ids : []);
-const { BOOTSTRAP_SUPERADMIN } = config.app;
 const { APPLICATION_URL } = config.auth;
 
 interface CallOptions {
@@ -106,7 +105,7 @@ function activationTokenFrom(email: string | null): string | null {
   const fixture = await createReportingFixture();
   console.log(`reporting fixture: ${fixture.schema}.${fixture.table}, ${fixture.rows} rows`);
 
-  const boot = BOOTSTRAP_SUPERADMIN;
+  const boot = config.auth.bootstrapSuperAdmin();
 
   section('Platform owner: first sign-in requires a password change');
 

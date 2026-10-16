@@ -47,13 +47,13 @@ const LOGIN_WINDOW_SECONDS = appConfig.LOGIN_WINDOW_SECONDS;
 const LOGIN_LOCKOUT_SECONDS = appConfig.LOGIN_LOCKOUT_SECONDS;
 
 function bootstrapSuperAdmin() {
-  const { username, email, password } = appConfig.BOOTSTRAP_SUPERADMIN;
-  if (!username || !email || !password) {
-    throw new ConfigError(
-      'BOOTSTRAP_SUPERADMIN in config/appConfig.js needs a username, an email and a password.'
-    );
-  }
-  return { username, email, password };
+  const purpose = 'the database has no accounts yet, so the platform owner is created from it. ' +
+    'Remove it once the owner has signed in.';
+  return {
+    username: required('BOOTSTRAP_ADMIN_USERNAME', purpose),
+    email: required('BOOTSTRAP_ADMIN_EMAIL', purpose),
+    password: required('BOOTSTRAP_ADMIN_PASSWORD', purpose),
+  };
 }
 
 export {

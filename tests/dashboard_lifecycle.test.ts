@@ -1,4 +1,9 @@
 import assert from 'assert';
+
+process.env.BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'platformowner';
+process.env.BOOTSTRAP_ADMIN_EMAIL = process.env.BOOTSTRAP_ADMIN_EMAIL || 'owner@example.com';
+process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'ChangeMeAtFirstSignIn1!';
+
 import config from '../src/config';
 const { db } = config.database;
 import { T, V } from '../src/models/rbacModel';
