@@ -1,7 +1,7 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
+import { Prisma } from '../generated/prisma/client';
+import { rawRows } from './baseRepository';
 import { quoteIdentifier } from '../tools/sql';
-import type { Queryable } from '../config/pgPool';
 
 const { db, prisma, withTransaction } = config.database;
 
@@ -40,40 +40,37 @@ async function distinctValues(dimension: ScopeDimension): Promise<string[]> {
 }
 
 async function userScopeRows(userId: number) {
-  const { rows } = await db.query(
-    `SELECT d.key AS dimension, v.value
-       FROM ${T.userDataScopes} s
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT d.key AS dimension, v.value
+       FROM access_control.user_data_scopes s
        CROSS JOIN LATERAL jsonb_each(s.scopes) AS d
        CROSS JOIN LATERAL jsonb_array_elements_text(d.value) AS v(value)
-      WHERE s.user_id = ?
-      ORDER BY d.key, v.value`,
-    [userId]
+      WHERE s.user_id = ${userId}
+      ORDER BY d.key, v.value`
   );
-  return rows;
 }
 
 async function replaceUserScopes(userId: number, scopes: Record<string, readonly string[]>, actorId: number | null = null): Promise<void> {
-  await withTransaction(async (conn: Queryable) => {
-    const { rows } = await conn.query(
-      `SELECT scopes FROM ${T.userDataScopes} WHERE user_id = ? FOR UPDATE`,
-      [userId]
+  await withTransaction(async (tx) => {
+    const [current] = await rawRows<{ scopes: Record<string, string[]> }>(
+      tx,
+      Prisma.sql`SELECT scopes FROM access_control.user_data_scopes WHERE user_id = ${userId} FOR UPDATE`
     );
-    const next: Record<string, string[]> = { ...((rows[0] && rows[0].scopes) || {}) };
+    const next: Record<string, string[]> = { ...((current && current.scopes) || {}) };
     for (const [dimension, values] of Object.entries(scopes)) {
       if (values.length) next[dimension] = [...values].sort();
       else delete next[dimension];
     }
     if (!Object.keys(next).length) {
-      await conn.query(`DELETE FROM ${T.userDataScopes} WHERE user_id = ?`, [userId]);
+      await tx.userDataScope.deleteMany({ where: { userId } });
       return;
     }
-    await conn.query(
-      `INSERT INTO ${T.userDataScopes} (user_id, scopes, updated_by)
-       VALUES (?, ?::jsonb, ?)
-       ON CONFLICT (user_id) DO UPDATE
-         SET scopes = EXCLUDED.scopes, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [userId, JSON.stringify(next), actorId]
-    );
+    await tx.userDataScope.upsert({
+      where: { userId },
+      create: { userId, scopes: next, updatedBy: actorId },
+      update: { scopes: next, updatedBy: actorId, updatedAt: new Date() },
+    });
   });
 }
 

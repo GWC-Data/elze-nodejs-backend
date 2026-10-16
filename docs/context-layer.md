@@ -14,9 +14,9 @@ services/versionService.ts              draft -> published -> next draft lifecyc
 services/publishService.ts              publish = flip the draft to published + store the snapshot
 services/mcpService.ts                  how an MCP client reaches a published context
 services/providers/domoProvider.ts      the only implemented provider
-repositories/connectionRepository.ts    SQL for connections and datasets
-repositories/contextRepository.ts       SQL for context_objects and review decisions
-repositories/versionRepository.ts       SQL for context_layer_versions
+repositories/connectionRepository.ts    connections and datasets
+repositories/contextRepository.ts       context_objects (raw SQL: not a Prisma model) and review decisions
+repositories/versionRepository.ts       context_layer_versions
 models/contextModel.ts                  this feature's table names
 constants/context.ts                     editable keys, glossary vocabulary, MCP tool list
 validators/contextValidator.ts          limit, dataset selection and extraction payload checks

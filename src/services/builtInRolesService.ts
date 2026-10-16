@@ -2,7 +2,7 @@ import * as companyRoleRepository from '../repositories/companyRoleRepository';
 import * as roleRepository from '../repositories/roleRepository';
 import { USER } from '../constants/roles';
 import { isAdminOnly, isPlatformOnly, permissionIdsOf, permissionKeysOf, systemRoleId } from './catalogueService';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 const COPIED_ROLES = [USER];
 
@@ -15,7 +15,7 @@ async function defaultIdsFor(roleName: string): Promise<string[]> {
   return permissionIdsOf(await defaultsFor(roleName));
 }
 
-async function seedForCompany(companyId: number, conn: Queryable): Promise<void> {
+async function seedForCompany(companyId: number, conn: Tx): Promise<void> {
   await companyRoleRepository.seedCompanyDefault(companyId, await defaultIdsFor(USER), conn);
 }
 

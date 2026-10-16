@@ -7,8 +7,9 @@ import { accountActivation } from '../views/templates/accountActivationTemplate'
 import { usernameProblem, emailProblem, assertValid } from '../validators/userValidator';
 import { fail } from '../tools/AppError';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
+import { sqlState } from '../tools/dbError';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
@@ -23,7 +24,7 @@ interface NewAccountFields {
 
 async function createAccount(
   { companyId, username, email, displayName, role, roleId }: NewAccountFields,
-  conn?: Queryable
+  conn?: Tx
 ) {
   assertRoleCompanyPairing(role, companyId);
   assertValid(usernameProblem(username));
@@ -42,7 +43,7 @@ async function createAccount(
     );
     return await userRepository.findById(id, conn);
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
       throw fail('CONFLICT', 'An account with that username or email already exists.');
     }
     throw err;
@@ -52,7 +53,7 @@ async function createAccount(
 async function prepareInvitation(
   actor: Actor,
   user: Record<string, any>,
-  { companyName = null, conn }: { companyName?: string | null; conn?: Queryable } = {}
+  { companyName = null, conn }: { companyName?: string | null; conn?: Tx } = {}
 ) {
   const { token } = await issueActivationToken(user.id, actor.id, conn);
 

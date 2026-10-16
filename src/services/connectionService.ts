@@ -13,6 +13,7 @@ import {
 import * as domo from './providers/domoProvider';
 import { CONNECTION_STATUS } from '../constants/statuses';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
+import { sqlState } from '../tools/dbError';
 import { MAX_CONTEXTS_PAGE, MAX_SEARCH_LENGTH } from '../constants/pagination';
 import { pageOf } from '../tools/pagination';
 import { accessOf, assertLevel, isContextAdmin } from './contextAccessService';
@@ -166,7 +167,7 @@ async function tableProfile(actor: Actor, id: unknown, tableId: unknown): Promis
   );
 }
 
-async function createConnection(actor: Actor, companyId: number | null, { provider, name, host, token, limit }: { provider: string; name: unknown; host: unknown; token: unknown; limit?: number }): Promise<Record<string, any>> {
+async function createConnection(actor: Actor, companyId: number, { provider, name, host, token, limit }: { provider: string; name: unknown; host: unknown; token: unknown; limit?: number }): Promise<Record<string, any>> {
   const impl = providerFor(provider);
   const providerId = String(provider).trim().toLowerCase();
 
@@ -193,7 +194,7 @@ async function createConnection(actor: Actor, companyId: number | null, { provid
       createdBy: actor.id,
     });
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
       throw fail('CONFLICT', `This company already has a ${providerId} connection called "${cleanName}".`);
     }
     throw err;

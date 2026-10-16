@@ -8,8 +8,9 @@ import { resolveTargetCompany } from './authorizationService';
 import { requireCompany } from './companyService';
 import { audit, EVENTS } from './auditService';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
+import { sqlState } from '../tools/dbError';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 const { withTransaction } = config.database;
 
@@ -40,7 +41,7 @@ async function requireGroupInScope(actor: Actor, id: number) {
   return shapeGroup(row) as unknown as GroupRecord;
 }
 
-async function writeMembers(conn: Queryable, group: { id: number; companyId: number }, userIds: unknown[]): Promise<void> {
+async function writeMembers(conn: Tx, group: { id: number; companyId: number }, userIds: unknown[]): Promise<void> {
   const unique = [...new Set(userIds.map(Number))];
   if (unique.some((id) => !Number.isInteger(id) || id <= 0)) {
     throw fail('VALIDATION_ERROR', 'userIds must be positive integers');
@@ -67,7 +68,7 @@ async function uniqueName<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) throw fail('CONFLICT', DUPLICATE_NAME);
+    if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', DUPLICATE_NAME);
     throw err;
   }
 }
@@ -80,7 +81,7 @@ async function createGroup(actor: Actor, { name, active = true, userIds = [], co
   await requireCompany(actor, companyId);
 
   const id = await uniqueName(() =>
-    withTransaction(async (conn: Queryable) => {
+    withTransaction(async (conn: Tx) => {
       const groupId = await groupRepository.insert(conn, {
         companyId,
         name: groupName,
@@ -111,21 +112,15 @@ async function updateGroup(actor: Actor, id: number, { name, active, userIds }: 
 
   if (userIds !== undefined) requireArray(userIds, 'userIds must be an array');
 
-  const updates: string[] = [];
-  const params: unknown[] = [];
-  if (name !== undefined) {
-    updates.push('name = ?');
-    params.push(requireString(name, 'Group name', { max: 100 }));
-  }
-  if (typeof active === 'boolean') {
-    updates.push('active = ?');
-    params.push(active);
-  }
-  if (!updates.length && userIds === undefined) throw fail('VALIDATION_ERROR', 'Nothing to update');
+  const changes: { name?: string; active?: boolean } = {};
+  if (name !== undefined) changes.name = requireString(name, 'Group name', { max: 100 });
+  if (typeof active === 'boolean') changes.active = active;
+  const hasChanges = Object.keys(changes).length > 0;
+  if (!hasChanges && userIds === undefined) throw fail('VALIDATION_ERROR', 'Nothing to update');
 
   await uniqueName(() =>
-    withTransaction(async (conn: Queryable) => {
-      if (updates.length) await groupRepository.updateColumns(conn, id, updates, params);
+    withTransaction(async (conn: Tx) => {
+      if (hasChanges) await groupRepository.updateColumns(conn, id, changes);
       if (Array.isArray(userIds)) await writeMembers(conn, group, userIds);
     })
   );

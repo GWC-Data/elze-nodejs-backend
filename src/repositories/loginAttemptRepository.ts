@@ -1,48 +1,41 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
+import { Prisma } from '../generated/prisma/client';
 
-const { db } = config.database;
+const { prisma } = config.database;
 
 async function lockedUntil(key: string): Promise<Date | null> {
-  const { rows } = await db.query(
-    `SELECT locked_until FROM ${T.loginAttempts} WHERE identifier = ?`,
-    [key]
-  );
-  return rows[0] ? rows[0].locked_until : null;
+  const row = await prisma.loginAttempt.findUnique({ where: { identifier: key }, select: { lockedUntil: true } });
+  return row ? row.lockedUntil : null;
 }
 
 async function recordFailure(
   key: string,
   { windowSeconds, maxAttempts, lockoutSeconds }: { windowSeconds: number; maxAttempts: number; lockoutSeconds: number }
 ): Promise<void> {
-  const windowElapsed = `${T.loginAttempts}.window_started_at < now() - (? * interval '1 second')`;
-  const nextAttempts = `CASE WHEN ${windowElapsed} THEN 1 ELSE ${T.loginAttempts}.attempts + 1 END`;
+  const windowElapsed = Prisma.sql`login_attempts.window_started_at < now() - (${windowSeconds} * interval '1 second')`;
+  const nextAttempts = Prisma.sql`CASE WHEN ${windowElapsed} THEN 1 ELSE login_attempts.attempts + 1 END`;
 
-  await db.query(
-    `INSERT INTO ${T.loginAttempts} (identifier, attempts, window_started_at)
-     VALUES (?, 1, now())
-     ON CONFLICT (identifier) DO UPDATE SET
-       attempts = ${nextAttempts},
-       window_started_at = CASE WHEN ${windowElapsed} THEN now()
-                                ELSE ${T.loginAttempts}.window_started_at END,
-       locked_until = CASE WHEN (${nextAttempts}) >= ?
-                           THEN now() + (? * interval '1 second')
-                           ELSE ${T.loginAttempts}.locked_until END`,
-    [key, windowSeconds, windowSeconds, windowSeconds, maxAttempts, lockoutSeconds]
-  );
+  await prisma.$executeRaw`
+    INSERT INTO login_attempts (identifier, attempts, window_started_at)
+    VALUES (${key}, 1, now())
+    ON CONFLICT (identifier) DO UPDATE SET
+      attempts = ${nextAttempts},
+      window_started_at = CASE WHEN ${windowElapsed} THEN now()
+                               ELSE login_attempts.window_started_at END,
+      locked_until = CASE WHEN (${nextAttempts}) >= ${maxAttempts}
+                          THEN now() + (${lockoutSeconds} * interval '1 second')
+                          ELSE login_attempts.locked_until END`;
 }
 
 async function clear(key: string): Promise<void> {
-  await db.query(`DELETE FROM ${T.loginAttempts} WHERE identifier = ?`, [key]);
+  await prisma.loginAttempt.deleteMany({ where: { identifier: key } });
 }
 
-async function prune(): Promise<number | null> {
-  const result = await db.query(
-    `DELETE FROM ${T.loginAttempts}
-      WHERE (locked_until IS NULL OR locked_until < now())
-        AND window_started_at < now() - interval '1 day'`
-  );
-  return result.rowCount;
+async function prune(): Promise<number> {
+  return prisma.$executeRaw`
+    DELETE FROM login_attempts
+     WHERE (locked_until IS NULL OR locked_until < now())
+       AND window_started_at < now() - interval '1 day'`;
 }
 
 export { lockedUntil, recordFailure, clear, prune };

@@ -22,8 +22,9 @@ import {
   systemRoles,
 } from './catalogueService';
 import { UNIQUE_VIOLATION, FOREIGN_KEY_VIOLATION } from '../constants/pgErrors';
+import { sqlState } from '../tools/dbError';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 type Row = Record<string, any>;
 
@@ -241,7 +242,7 @@ async function createRole(actor: Actor, body: Row) {
       createdBy: actor.id,
     });
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
+    if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
     throw err;
   }
 
@@ -266,7 +267,7 @@ async function updateRole(actor: Actor, id: unknown, body: Row) {
   try {
     await companyRoleRepository.update(before.id, changes, actor.id);
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
+    if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
     throw err;
   }
 
@@ -292,13 +293,13 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
   try {
     await companyRoleRepository.remove(role.id);
   } catch (err: any) {
-    if (err.code === FOREIGN_KEY_VIOLATION) throw fail('CONFLICT', 'A member was just given this role. Try again.');
+    if (sqlState(err) === FOREIGN_KEY_VIOLATION) throw fail('CONFLICT', 'A member was just given this role. Try again.');
     throw err;
   }
   audit(EVENTS.ROLE_DELETED, actor, { companyId: role.companyId, roleId: role.id, role: role.name });
 }
 
-async function builtInRoleId(tier: string, companyId: number | null, conn?: Queryable): Promise<string> {
+async function builtInRoleId(tier: string, companyId: number | null, conn?: Tx): Promise<string> {
   if (tier !== USER || !companyId) return systemRoleId(tier);
   const member = await companyRoleRepository.findCompanyDefault(companyId, conn);
   return member ? member.id : systemRoleId(USER);

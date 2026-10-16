@@ -1,65 +1,70 @@
 import crypto from 'crypto';
 import config from '../config';
-import { CT } from '../models/contextModel';
-import { T } from '../models/rbacModel';
-import { companyScope, queryOrNotFound } from './baseRepository';
+import { Prisma } from '../generated/prisma/client';
+import { companyScope, orNotFound, rawRows } from './baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import { likePattern } from '../tools/listQuery';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { Actor } from '../types/actor';
 
-const { db } = config.database;
+const { prisma } = config.database;
 
-const COLUMNS = `id, connection_id, name, version, status, current_step, dataset_ids,
+interface DraftChanges {
+  step?: string;
+  datasetIds?: unknown[];
+  sessionId?: string | null;
+  extraction?: { report: string; mode: string | null; datasetIds: unknown[] };
+}
+
+const COLUMNS = Prisma.sql`id, connection_id, name, version, status, current_step, dataset_ids,
   based_on_id, session_id, extraction_mode, extracted_at, object_count, stats,
   created_by, created_at, updated_at, published_by, published_at`;
 
 const VERSION_NOT_FOUND = 'Published version not found';
 
 async function listForConnection(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS} FROM ${CT.versions}
-      WHERE connection_id = ?::uuid
-      ORDER BY created_at DESC, version DESC`,
-    [connectionId]
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid
+      ORDER BY created_at DESC, version DESC`
   );
-  return rows;
 }
 
-async function nextVersion(conn: Queryable, connectionId: string, name: string, excludeId: string | null = null): Promise<number> {
-  const { rows } = await conn.query(
-    `SELECT COALESCE(MAX(version), 0) AS v
-       FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND name = ?
-        AND (?::uuid IS NULL OR id <> ?::uuid)`,
-    [connectionId, name, excludeId, excludeId]
+async function nextVersion(tx: Tx, connectionId: string, name: string, excludeId: string | null = null): Promise<number> {
+  const [row] = await rawRows(
+    tx,
+    Prisma.sql`SELECT COALESCE(MAX(version), 0) AS v
+       FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND name = ${name}
+        AND (${excludeId}::uuid IS NULL OR id <> ${excludeId}::uuid)`
   );
-  return Number(rows[0].v) + 1;
+  return Number(row.v) + 1;
 }
 
-async function lockDraft(conn: Queryable, connectionId: string) {
-  const { rows } = await conn.query(
-    `SELECT * FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND status = 'draft'
-      FOR UPDATE`,
-    [connectionId]
+async function lockDraft(tx: Tx, connectionId: string) {
+  const rows = await rawRows(
+    tx,
+    Prisma.sql`SELECT * FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND status = 'draft'
+      FOR UPDATE`
   );
   return rows[0] || null;
 }
 
-async function latestPublishedName(conn: Queryable, connectionId: string) {
-  const { rows } = await conn.query(
-    `SELECT id, name FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND status = 'published'
+async function latestPublishedName(tx: Tx, connectionId: string) {
+  const rows = await rawRows(
+    tx,
+    Prisma.sql`SELECT id, name FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND status = 'published'
       ORDER BY published_at DESC
-      LIMIT 1`,
-    [connectionId]
+      LIMIT 1`
   );
   return rows[0] || null;
 }
 
 async function insertDraft(
-  conn: Queryable,
+  tx: Tx,
   { connectionId, companyId, name, version, step, datasetIds, basedOnId, createdBy }: {
     connectionId: string;
     companyId: number | null;
@@ -71,42 +76,55 @@ async function insertDraft(
     createdBy: number | null;
   }
 ) {
-  const { rows } = await conn.query(
-    `INSERT INTO ${CT.versions}
+  const [row] = await rawRows(
+    tx,
+    Prisma.sql`INSERT INTO context_layer_versions
        (id, connection_id, company_id, name, version, status, current_step,
         dataset_ids, based_on_id, created_by)
-     VALUES (?::uuid, ?::uuid, ?, ?, ?, 'draft', ?, ?::jsonb, ?::uuid, ?)
-     RETURNING *`,
-    [crypto.randomUUID(), connectionId, companyId, name, version, step, JSON.stringify(datasetIds), basedOnId, createdBy]
+     VALUES (${crypto.randomUUID()}::uuid, ${connectionId}::uuid, ${companyId}, ${name}, ${version}, 'draft', ${step},
+             ${JSON.stringify(datasetIds)}::jsonb, ${basedOnId}::uuid, ${createdBy}::int)
+     RETURNING *`
   );
-  return rows[0];
+  return row;
 }
 
-async function updateDraft(conn: Queryable, draftId: string, sets: string[], params: unknown[]) {
-  const { rows } = await conn.query(
-    `UPDATE ${CT.versions} SET ${sets.join(', ')} WHERE id = ?::uuid RETURNING *`,
-    [...params, draftId]
+async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges) {
+  const sets: Prisma.Sql[] = [Prisma.sql`updated_at = now()`];
+  if (changes.step !== undefined) sets.push(Prisma.sql`current_step = ${changes.step}`);
+  if (changes.datasetIds !== undefined) sets.push(Prisma.sql`dataset_ids = ${JSON.stringify(changes.datasetIds)}::jsonb`);
+  if (changes.sessionId !== undefined) sets.push(Prisma.sql`session_id = ${changes.sessionId}`);
+  if (changes.extraction) {
+    sets.push(
+      Prisma.sql`extraction_report = ${changes.extraction.report}`,
+      Prisma.sql`extraction_mode = ${changes.extraction.mode}`,
+      Prisma.sql`extraction_dataset_ids = ${JSON.stringify(changes.extraction.datasetIds)}::jsonb`,
+      Prisma.sql`extracted_at = now()`
+    );
+  }
+  const [row] = await rawRows(
+    tx,
+    Prisma.sql`UPDATE context_layer_versions SET ${Prisma.join(sets, ', ')} WHERE id = ${draftId}::uuid RETURNING *`
   );
-  return rows[0];
+  return row;
 }
 
 async function advanceDraftStep(connectionId: string, steps: readonly string[], step: string) {
-  const { rows } = await db.query(
-    `UPDATE ${CT.versions}
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`UPDATE context_layer_versions
         SET current_step = CASE
-              WHEN COALESCE(array_position(?::text[], current_step::text), 0)
-                   < array_position(?::text[], ?::text)
-              THEN ? ELSE current_step END,
+              WHEN COALESCE(array_position(${[...steps]}::text[], current_step::text), 0)
+                   < array_position(${[...steps]}::text[], ${step}::text)
+              THEN ${step} ELSE current_step END,
             updated_at = now()
-      WHERE connection_id = ?::uuid AND status = 'draft'
-      RETURNING ${COLUMNS}`,
-    [steps, steps, step, step, connectionId]
+      WHERE connection_id = ${connectionId}::uuid AND status = 'draft'
+      RETURNING ${COLUMNS}`
   );
   return rows[0] || null;
 }
 
 async function markPublished(
-  conn: Queryable,
+  tx: Tx,
   draftId: string,
   { name, version, sessionId, snapshot, stats, notifyTeam, datasets, publishedBy }: {
     name: string;
@@ -119,142 +137,128 @@ async function markPublished(
     publishedBy: number | null;
   }
 ) {
-  const { rows } = await conn.query(
-    `UPDATE ${CT.versions}
-        SET name = ?, version = ?, status = 'published', current_step = 'publish',
-            session_id = COALESCE(?, session_id),
-            object_count = ?, stats = ?::jsonb, snapshot = ?::jsonb, notify_team = ?,
-            datasets = ?::jsonb, dataset_ids = COALESCE(?::jsonb, dataset_ids),
-            published_by = ?, published_at = now(), updated_at = now()
-      WHERE id = ?::uuid
-      RETURNING ${COLUMNS}`,
-    [
-      name,
-      version,
-      sessionId,
-      snapshot.length,
-      JSON.stringify(stats),
-      JSON.stringify(snapshot),
-      Boolean(notifyTeam),
-      JSON.stringify(datasets),
-      datasets.length ? JSON.stringify(datasets.map((d) => d.id)) : null,
-      publishedBy,
-      draftId,
-    ]
+  const datasetIds = datasets.length ? JSON.stringify(datasets.map((d) => d.id)) : null;
+  const [row] = await rawRows(
+    tx,
+    Prisma.sql`UPDATE context_layer_versions
+        SET name = ${name}, version = ${version}, status = 'published', current_step = 'publish',
+            session_id = COALESCE(${sessionId}::text, session_id),
+            object_count = ${snapshot.length}, stats = ${JSON.stringify(stats)}::jsonb,
+            snapshot = ${JSON.stringify(snapshot)}::jsonb, notify_team = ${Boolean(notifyTeam)},
+            datasets = ${JSON.stringify(datasets)}::jsonb, dataset_ids = COALESCE(${datasetIds}::jsonb, dataset_ids),
+            published_by = ${publishedBy}::int, published_at = now(), updated_at = now()
+      WHERE id = ${draftId}::uuid
+      RETURNING ${COLUMNS}`
   );
-  return rows[0];
+  return row;
 }
 
 async function latestPublished(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS} FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND status = 'published'
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND status = 'published'
       ORDER BY published_at DESC
-      LIMIT 1`,
-    [connectionId]
+      LIMIT 1`
   );
   return rows[0] || null;
 }
 
 async function findPublished(connectionId: string, versionId: unknown) {
-  const { rows } = await queryOrNotFound(
-    db,
-    `SELECT ${COLUMNS}, datasets FROM ${CT.versions}
-      WHERE id = ?::uuid AND connection_id = ?::uuid AND status = 'published'`,
-    [versionId, connectionId],
+  const rows = await orNotFound(
+    rawRows(
+      prisma,
+      Prisma.sql`SELECT ${COLUMNS}, datasets FROM context_layer_versions
+        WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND status = 'published'`
+    ),
     VERSION_NOT_FOUND
   );
   return rows[0] || null;
 }
 
-async function deletePublished(conn: Queryable, connectionId: string, versionId: unknown) {
-  const { rows } = await queryOrNotFound(
-    conn,
-    `DELETE FROM ${CT.versions}
-      WHERE id = ?::uuid AND connection_id = ?::uuid AND status = 'published'
-      RETURNING id, name, version, object_count`,
-    [versionId, connectionId],
+async function deletePublished(tx: Tx, connectionId: string, versionId: unknown) {
+  const rows = await orNotFound(
+    rawRows(
+      tx,
+      Prisma.sql`DELETE FROM context_layer_versions
+        WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND status = 'published'
+        RETURNING id, name, version, object_count`
+    ),
     VERSION_NOT_FOUND
   );
   return rows[0] || null;
 }
 
-async function deleteLegacyPublication(conn: Queryable, connectionId: string, versionId: unknown): Promise<void> {
-  await conn.query(
-    `DELETE FROM ${CT.publications} WHERE id = ?::uuid AND connection_id = ?::uuid`,
-    [versionId, connectionId]
-  );
+async function deleteLegacyPublication(tx: Tx, connectionId: string, versionId: unknown): Promise<void> {
+  await tx.$executeRaw`DELETE FROM context_publications WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid`;
 }
 
 async function currentDraft(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS} FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND status = 'draft'`,
-    [connectionId]
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND status = 'draft'`
   );
   return rows[0] || null;
 }
 
 async function latestExtraction(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
-       FROM ${CT.versions}
-      WHERE connection_id = ?::uuid AND extraction_report IS NOT NULL
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
+       FROM context_layer_versions
+      WHERE connection_id = ${connectionId}::uuid AND extraction_report IS NOT NULL
       ORDER BY extracted_at DESC
-      LIMIT 1`,
-    [connectionId]
+      LIMIT 1`
   );
   return rows[0] || null;
 }
 
 async function versionExtraction(connectionId: string, versionId: string) {
-  const { rows } = await db.query(
-    `SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
-       FROM ${CT.versions}
-      WHERE id = ?::uuid AND connection_id = ?::uuid AND extraction_report IS NOT NULL`,
-    [versionId, connectionId]
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
+       FROM context_layer_versions
+      WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND extraction_report IS NOT NULL`
   );
   return rows[0] || null;
 }
 
 async function statusHeadlines(connectionIds: readonly string[]) {
-  const { rows } = await db.query(
-    `SELECT DISTINCT ON (connection_id, status)
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT DISTINCT ON (connection_id, status)
             connection_id, name, version, status, published_at, updated_at
-       FROM ${CT.versions}
-      WHERE connection_id = ANY(?::uuid[])
-      ORDER BY connection_id, status, COALESCE(published_at, updated_at) DESC`,
-    [connectionIds]
+       FROM context_layer_versions
+      WHERE connection_id = ANY(${[...connectionIds]}::uuid[])
+      ORDER BY connection_id, status, COALESCE(published_at, updated_at) DESC`
   );
-  return rows;
 }
 
 async function listCompanyPublished(actor: Actor, seeAll: boolean, search?: string | null) {
-  const scope = companyScope(actor, 'c.company_id');
-  const access = accessColumns(actor);
-  const visible = visibleClause(actor, seeAll);
-  const where = [`v.status = 'published'`, scope.clause, visible.sql];
-  const params: unknown[] = [...access.params, ...scope.params, ...visible.params];
+  const conditions = [
+    Prisma.sql`v.status = 'published'`,
+    companyScope(actor, 'c.company_id'),
+    visibleClause(actor, seeAll),
+  ];
   if (search) {
-    where.push('(v.name ILIKE ? OR c.name ILIKE ?)');
     const pattern = likePattern(search);
-    params.push(pattern, pattern);
+    conditions.push(Prisma.sql`(v.name ILIKE ${pattern} OR c.name ILIKE ${pattern})`);
   }
 
-  const { rows } = await db.query(
-    `SELECT v.id, v.connection_id, v.name, v.version, v.published_at, v.object_count,
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT v.id, v.connection_id, v.name, v.version, v.published_at, v.object_count,
             c.name AS connection_name, c.provider, c.host,
             c.company_id, co.name AS company_name,
-            COALESCE(u.display_name, u.username) AS published_by, ${access.sql}
-       FROM ${CT.versions} v
-       JOIN ${CT.connections} c ON c.id = v.connection_id
-       LEFT JOIN ${T.companies} co ON co.id = c.company_id
-       LEFT JOIN ${T.users} u ON u.id = v.published_by
-      WHERE ${where.join(' AND ')}
-      ORDER BY v.connection_id, v.name, v.version DESC`,
-    params
+            COALESCE(u.display_name, u.username) AS published_by, ${accessColumns(actor)}
+       FROM context_layer_versions v
+       JOIN connections c ON c.id = v.connection_id
+       LEFT JOIN companies co ON co.id = c.company_id
+       LEFT JOIN users u ON u.id = v.published_by
+      WHERE ${Prisma.join(conditions, ' AND ')}
+      ORDER BY v.connection_id, v.name, v.version DESC`
   );
-  return rows;
 }
 
 export {
@@ -276,3 +280,4 @@ export {
   statusHeadlines,
   listCompanyPublished,
 };
+export type { DraftChanges };

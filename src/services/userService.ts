@@ -1,7 +1,6 @@
 import config from '../config';
 import * as userRepository from '../repositories/userRepository';
 import { fail } from '../tools/AppError';
-import { likePattern } from '../tools/listQuery';
 import { publicUser, userListItem } from '../views/serializers/userSerializer';
 import { resolveTargetCompany, assertCanAssignRole, assertCanManageUser } from './authorizationService';
 import { assertRoleCompanyPairing } from './roleService';
@@ -15,7 +14,7 @@ import { USER, scopeOfTier } from '../constants/roles';
 import { effectiveFeatures, featureKeys, featureKeysOf } from './catalogueService';
 import { USER_STATUS, USER_STATUSES } from '../constants/statuses';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { ListWindow } from '../repositories/baseRepository';
 
 const { withTransaction } = config.database;
@@ -51,39 +50,30 @@ async function listUsers(
   list: ListWindow,
   { companyId, role, status }: { companyId?: unknown; role?: unknown; status?: unknown } = {}
 ) {
-  const where: string[] = [];
-  const params: unknown[] = [];
+  const filter: userRepository.UserFilter = {};
 
   if (actor.isPlatform) {
     if (companyId !== undefined && companyId !== null && companyId !== '') {
       const id = Number(companyId);
       if (!Number.isInteger(id) || id < 1) throw fail('VALIDATION_ERROR', 'companyId must be a positive integer.');
-      where.push('u.company_id = ?');
-      params.push(id);
+      filter.companyId = id;
     }
   } else {
-    where.push('u.company_id = ?');
-    params.push(actor.companyId);
+    filter.companyId = actor.companyId as number;
   }
   if (role) {
     if (!scopeOfTier(String(role))) throw fail('VALIDATION_ERROR', `Unknown role: "${role}"`);
-    where.push('r.tier = ?');
-    params.push(String(role));
+    filter.role = String(role);
   }
   if (status) {
     if (!USER_STATUSES.includes(String(status))) {
       throw fail('VALIDATION_ERROR', `status must be one of: ${USER_STATUSES.join(', ')}.`);
     }
-    where.push('u.status = ?');
-    params.push(String(status));
+    filter.status = String(status);
   }
-  if (list.search) {
-    where.push(`(u.username ILIKE ? OR u.email ILIKE ? OR u.display_name ILIKE ?)`);
-    const pattern = likePattern(list.search);
-    params.push(pattern, pattern, pattern);
-  }
+  if (list.search) filter.search = list.search;
 
-  return userRepository.listPage(where, params, list, (row: Record<string, any>) => userListItem(row, actor.isPlatform));
+  return userRepository.listPage(filter, list, (row: Record<string, any>) => userListItem(row, actor.isPlatform));
 }
 
 async function currentUser(id: number) {
@@ -138,7 +128,7 @@ async function updateUser(
 ) {
   const target = await requireManageable(actor, id);
 
-  const updates: Record<string, unknown> = {};
+  const updates: { displayName?: string | null } = {};
   let roleChanged = false;
   let finalRole: string = target.role;
 
@@ -162,7 +152,7 @@ async function updateUser(
   const customRoleChanged = roleIdChanged && !roleChanged;
 
   if (displayName !== undefined) {
-    updates.display_name = displayName ? String(displayName).trim().slice(0, 120) : null;
+    updates.displayName = displayName ? String(displayName).trim().slice(0, 120) : null;
   }
 
   if (!Object.keys(updates).length && !roleIdChanged) throw fail('VALIDATION_ERROR', 'Nothing to update');
@@ -219,7 +209,7 @@ async function reissueActivation(actor: Actor, id: number) {
     throw fail('CONFLICT', 'Reactivate the account before sending it a new link.');
   }
 
-  const invitation = await withTransaction(async (conn: Queryable) => {
+  const invitation = await withTransaction(async (conn: Tx) => {
     await userRepository.clearCredential(conn, id);
     await revokeAllForUser(id, 'access_reissued', conn);
     return prepareInvitation(actor, target, { conn });

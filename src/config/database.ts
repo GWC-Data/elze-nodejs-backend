@@ -1,8 +1,7 @@
 import './env';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client';
+import { Prisma, PrismaClient } from '../generated/prisma/client';
 import { createPool } from './pgPool';
-import type { Queryable } from './pgPool';
 import { required, optional, integer, boolean } from './configError';
 
 function sslConfig(): false | { rejectUnauthorized: boolean } {
@@ -24,10 +23,19 @@ const pool = createPool({
   idleTimeoutMillis: 30000,
 });
 
-const prisma = new PrismaClient({ adapter: new PrismaPg(pool.pool) });
+const prisma = new PrismaClient({
+  adapter: new PrismaPg(pool.pool),
+  transactionOptions: {
+    maxWait: integer('DB_TRANSACTION_WAIT_MS', 10000, { min: 1000 }),
+    timeout: integer('DB_TRANSACTION_TIMEOUT_MS', 30000, { min: 1000 }),
+  },
+});
 
-function withTransaction<T>(work: (tx: Queryable) => Promise<T>): Promise<T> {
-  return pool.transaction(work);
+type Tx = Prisma.TransactionClient;
+
+function withTransaction<T>(work: (tx: Tx) => Promise<T>): Promise<T> {
+  return prisma.$transaction(work);
 }
 
 export { pool as db, prisma, withTransaction, DB_NAME };
+export type { Tx };

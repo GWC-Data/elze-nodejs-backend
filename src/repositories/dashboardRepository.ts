@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import config from '../config';
-import { T } from '../models/rbacModel';
-import type { Queryable } from '../config/pgPool';
+import type { Prisma } from '../generated/prisma/client';
 
-const { db, withTransaction } = config.database;
+const { prisma, withTransaction } = config.database;
 const { DASHBOARD_DIR } = config.engine;
 
 const DEFAULT_SPEC_PATH = path.join(DASHBOARD_DIR, 'default.json');
@@ -31,33 +30,29 @@ function listJsonFiles(dir: string = DASHBOARD_DIR): string[] {
 }
 
 async function findById(id: string) {
-  const { rows } = await db.query(
-    `SELECT id, title, description, company_id, spec FROM ${T.dashboards} WHERE id = ?`,
-    [id]
-  );
-  return rows[0] || null;
+  const row = await prisma.dashboard.findUnique({
+    where: { id },
+    select: { id: true, title: true, description: true, companyId: true, spec: true },
+  });
+  if (!row) return null;
+  return { id: row.id, title: row.title, description: row.description, company_id: row.companyId, spec: row.spec as any };
 }
 
 async function existsInDb(id: string): Promise<boolean> {
-  const { rows } = await db.query(`SELECT 1 FROM ${T.dashboards} WHERE id = ?`, [id]);
-  return rows.length > 0;
+  return (await prisma.dashboard.count({ where: { id } })) > 0;
 }
 
 async function list(companyId?: number | null) {
-  let sql = `SELECT id, title, description, company_id AS "companyId", created_by AS "createdBy"
-               FROM ${T.dashboards}`;
-  const params: unknown[] = [];
-  if (companyId !== undefined) {
-    if (companyId === null) {
-      sql += ' WHERE company_id IS NULL';
-    } else {
-      sql += ' WHERE company_id = ? OR company_id IS NULL';
-      params.push(companyId);
-    }
-  }
-  sql += ' ORDER BY title ASC';
-  const { rows } = await db.query(sql, params);
-  return rows;
+  const where = companyId === undefined
+    ? {}
+    : companyId === null
+      ? { companyId: null }
+      : { OR: [{ companyId }, { companyId: null }] };
+  return prisma.dashboard.findMany({
+    where,
+    select: { id: true, title: true, description: true, companyId: true, createdBy: true },
+    orderBy: { title: 'asc' },
+  });
 }
 
 async function upsert({ id, title, description, companyId, userId, spec }: {
@@ -68,24 +63,20 @@ async function upsert({ id, title, description, companyId, userId, spec }: {
   userId: number | null;
   spec: unknown;
 }): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.dashboards} (id, title, description, company_id, created_by, spec, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, now())
-     ON CONFLICT (id) DO UPDATE SET
-       title = EXCLUDED.title,
-       description = EXCLUDED.description,
-       spec = EXCLUDED.spec,
-       updated_at = now()`,
-    [id, title, description, companyId, userId, JSON.stringify(spec)]
-  );
+  const json = spec as Prisma.InputJsonValue;
+  await prisma.dashboard.upsert({
+    where: { id },
+    create: { id, title, description: description ?? null, companyId, createdBy: userId, spec: json, updatedAt: new Date() },
+    update: { title, description: description ?? null, spec: json, updatedAt: new Date() },
+  });
 }
 
 async function removeWithGrants(id: string): Promise<void> {
-  await withTransaction(async (conn: Queryable) => {
-    await conn.query(`DELETE FROM ${T.dashboardUserAccess} WHERE dashboard_id = ?`, [id]);
-    await conn.query(`DELETE FROM ${T.dashboardGroupAccess} WHERE dashboard_id = ?`, [id]);
-    await conn.query(`DELETE FROM ${T.companyDashboards} WHERE dashboard_id = ?`, [id]);
-    await conn.query(`DELETE FROM ${T.dashboards} WHERE id = ?`, [id]);
+  await withTransaction(async (tx) => {
+    await tx.dashboardUserAccess.deleteMany({ where: { dashboardId: id } });
+    await tx.dashboardGroupAccess.deleteMany({ where: { dashboardId: id } });
+    await tx.companyDashboard.deleteMany({ where: { dashboardId: id } });
+    await tx.dashboard.deleteMany({ where: { id } });
   });
 }
 

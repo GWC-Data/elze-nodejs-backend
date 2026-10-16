@@ -2,7 +2,6 @@ import config from '../config';
 import * as companyRepository from '../repositories/companyRepository';
 import * as userRepository from '../repositories/userRepository';
 import { fail } from '../tools/AppError';
-import { likePattern } from '../tools/listQuery';
 import { slugify } from '../tools/slugify';
 import { requireString } from '../validators/commonValidator';
 import { shapeCompany, companyOption } from '../views/serializers/companySerializer';
@@ -17,8 +16,9 @@ import { seedForCompany } from './builtInRolesService';
 import { effectiveFeatures, featureIdsOf, systemRoleId, toggleableFeatureKeys } from './catalogueService';
 import { COMPANY_ADMIN } from '../constants/roles';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
+import { sqlState } from '../tools/dbError';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { ListWindow } from '../repositories/baseRepository';
 
 const { withTransaction } = config.database;
@@ -26,24 +26,15 @@ const { withTransaction } = config.database;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
 
 async function listCompanies(actor: Actor, list: ListWindow, { active }: { active?: unknown } = {}) {
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (!actor.isPlatform) {
-    where.push('c.id = ?');
-    params.push(actor.companyId);
-  }
+  const filter: companyRepository.CompanyFilter = {};
+  if (!actor.isPlatform) filter.companyId = actor.companyId as number;
   if (active === 'true' || active === 'false') {
-    where.push('c.active = ?');
-    params.push(active === 'true');
+    filter.active = active === 'true';
   } else if (active !== undefined && active !== '') {
     throw fail('VALIDATION_ERROR', 'active must be true or false.');
   }
-  if (list.search) {
-    where.push('(c.name ILIKE ? OR c.slug ILIKE ?)');
-    const pattern = likePattern(list.search);
-    params.push(pattern, pattern);
-  }
-  return companyRepository.listPage(where, params, list, shapeCompany);
+  if (list.search) filter.search = list.search;
+  return companyRepository.listPage(filter, list, shapeCompany);
 }
 
 async function listCompanyOptions(actor: Actor) {
@@ -67,7 +58,7 @@ async function requireActiveCompany(actor: Actor, id: number, message: string) {
   return company;
 }
 
-async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug?: unknown }, conn?: Queryable) {
+async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug?: unknown }, conn?: Tx) {
   const cleanName = requireString(name, 'Company name', { max: 150, min: 2 });
   const cleanSlug = slug ? String(slug).trim().toLowerCase() : slugify(cleanName);
 
@@ -81,7 +72,7 @@ async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug
   try {
     return await companyRepository.insert({ name: cleanName, slug: cleanSlug, createdBy: actor.id }, conn);
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
       throw fail('CONFLICT', 'A company with that name or slug already exists.');
     }
     throw err;
@@ -103,7 +94,7 @@ async function createCompany(
 
   const featureKeys = featureIds === undefined ? toggleableFeatureKeys() : parseFeatureIds(featureIds);
 
-  const { company, user, invitation } = await withTransaction(async (conn: Queryable) => {
+  const { company, user, invitation } = await withTransaction(async (conn: Tx) => {
     const companyRow = await insertCompany(actor, { name, slug }, conn);
     await setInitialFeatures(actor, companyRow.id, featureKeys, conn);
     await seedForCompany(companyRow.id, conn);
@@ -155,22 +146,15 @@ async function createCompany(
 async function updateCompany(actor: Actor, id: number, { name, active }: { name?: unknown; active?: unknown }) {
   const before = await requireCompany(actor, id);
 
-  const updates: string[] = [];
-  const params: unknown[] = [];
-  if (name !== undefined) {
-    updates.push('name = ?');
-    params.push(requireString(name, 'Company name', { max: 150, min: 2 }));
-  }
-  if (typeof active === 'boolean') {
-    updates.push('active = ?');
-    params.push(active);
-  }
-  if (!updates.length) throw fail('VALIDATION_ERROR', 'Nothing to update');
+  const changes: { name?: string; active?: boolean } = {};
+  if (name !== undefined) changes.name = requireString(name, 'Company name', { max: 150, min: 2 });
+  if (typeof active === 'boolean') changes.active = active;
+  if (!Object.keys(changes).length) throw fail('VALIDATION_ERROR', 'Nothing to update');
 
   try {
-    await companyRepository.updateColumns(id, updates, params);
+    await companyRepository.updateColumns(id, changes);
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION) throw fail('CONFLICT', 'A company with that name already exists.');
+    if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'A company with that name already exists.');
     throw err;
   }
   const company = shapeCompany(await companyRepository.findWithCounts(id))!;

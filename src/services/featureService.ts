@@ -10,7 +10,7 @@ import {
   toggleableFeatureKeys,
 } from './catalogueService';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 function catalogue() {
   return allFeatures().map(({ id, key, label, description, locked, covers }) => ({ id, key, label, description, locked, covers }));
@@ -29,7 +29,7 @@ function parseFeatureIds(featureIds: unknown): string[] {
   return featureKeysOf(unique).filter((key) => toggleable.includes(key));
 }
 
-async function enabledFor(companyId: number, conn?: Queryable): Promise<string[]> {
+async function enabledFor(companyId: number, conn?: Tx): Promise<string[]> {
   return effectiveFeatures(featureKeysOf(await featureRepository.listForCompany(companyId, conn)));
 }
 
@@ -49,7 +49,7 @@ async function companyFeatures(companyId: number) {
   return { companyId, features: describe(await enabledFor(companyId)) };
 }
 
-async function setInitialFeatures(actor: Actor, companyId: number, featureKeys: readonly string[], conn: Queryable) {
+async function setInitialFeatures(actor: Actor, companyId: number, featureKeys: readonly string[], conn: Tx) {
   await featureRepository.replace(companyId, featureIdsOf(featureKeys), actor.id, conn);
 }
 

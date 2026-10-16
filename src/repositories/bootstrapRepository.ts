@@ -1,29 +1,28 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
-import type { Queryable } from '../config/pgPool';
+import { Prisma } from '../generated/prisma/client';
+import { rawRows } from './baseRepository';
 
-const { db } = config.database;
+const { prisma, withTransaction } = config.database;
 
 async function appliedMigrations(): Promise<string[]> {
-  const { rows } = await db.query(`SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`);
-  if (!rows[0].present) return [];
-  const applied = await db.query(
-    `SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
+  const [{ present }] = await rawRows(
+    prisma,
+    Prisma.sql`SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`
   );
-  return applied.rows.map((r) => r.migration_name);
+  if (!present) return [];
+  const applied = await rawRows(
+    prisma,
+    Prisma.sql`SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
+  );
+  return applied.map((r) => r.migration_name);
 }
 
 async function countUsers(): Promise<number> {
-  const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM ${T.users}`);
-  return rows[0].n;
+  return prisma.user.count();
 }
 
 async function countUsersWithoutRole(): Promise<number> {
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM ${T.users} u
-      WHERE NOT EXISTS (SELECT 1 FROM ${T.userRoles} ur WHERE ur.user_id = u.id)`
-  );
-  return rows[0].n;
+  return prisma.user.count({ where: { role: null } });
 }
 
 async function insertSuperAdmin({ username, email, passwordHash, roleId }: {
@@ -32,13 +31,12 @@ async function insertSuperAdmin({ username, email, passwordHash, roleId }: {
   passwordHash: string;
   roleId: string;
 }): Promise<void> {
-  await db.transaction(async (conn: Queryable) => {
-    const { rows } = await conn.query(
-      `INSERT INTO ${T.users} (company_id, username, email, password_hash, status, must_change_password)
-       VALUES (NULL, ?, ?, ?, 'active', TRUE) RETURNING id`,
-      [username, email, passwordHash]
-    );
-    await conn.query(`INSERT INTO ${T.userRoles} (user_id, role_id) VALUES (?, ?)`, [rows[0].id, roleId]);
+  await withTransaction(async (tx) => {
+    const user = await tx.user.create({
+      data: { companyId: null, username, email, passwordHash, status: 'active', mustChangePassword: true },
+      select: { id: true },
+    });
+    await tx.userRole.create({ data: { userId: user.id, roleId } });
   });
 }
 
@@ -48,12 +46,10 @@ async function insertDashboardIfMissing({ id, title, description, spec }: {
   description?: string | null;
   spec: unknown;
 }): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.dashboards} (id, title, description, company_id, created_by, spec)
-     VALUES (?, ?, ?, NULL, NULL, ?)
-     ON CONFLICT (id) DO NOTHING`,
-    [id, title, description, JSON.stringify(spec)]
-  );
+  await prisma.dashboard.createMany({
+    data: [{ id, title, description: description ?? null, companyId: null, createdBy: null, spec: spec as Prisma.InputJsonValue }],
+    skipDuplicates: true,
+  });
 }
 
 export {

@@ -4,7 +4,7 @@ import app from './app';
 import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrapService';
 
 const { APPLICATION_URL } = config.auth;
-const { db } = config.database;
+const { db, prisma } = config.database;
 
 const PORT = process.env.PORT || 8080;
 const SHUTDOWN_GRACE_MS = 10000;
@@ -46,6 +46,7 @@ function shutdown(signal: string): void {
     : Promise.resolve();
 
   closeServer
+    .then(() => prisma.$disconnect())
     .then(() => db.end())
     .catch((err) => console.warn('[shutdown] cleanup failed:', err.message))
     .finally(() => process.exit(0));

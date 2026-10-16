@@ -1,5 +1,6 @@
 import { Pool, types } from 'pg';
 import type { PoolClient, PoolConfig, QueryResult, QueryResultRow } from 'pg';
+import { splitPlaceholders } from '../tools/sql';
 
 const PG_INT8 = 20;
 const PG_NUMERIC = 1700;
@@ -21,71 +22,7 @@ interface Db extends Queryable {
 }
 
 function toPositionalParams(sql: string): string {
-  let out = '';
-  let index = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inLineComment = false;
-  let inBlockComment = false;
-
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i];
-    const next = sql[i + 1];
-
-    if (inLineComment) {
-      out += ch;
-      if (ch === '\n') inLineComment = false;
-      continue;
-    }
-    if (inBlockComment) {
-      out += ch;
-      if (ch === '*' && next === '/') {
-        out += next;
-        i++;
-        inBlockComment = false;
-      }
-      continue;
-    }
-    if (!inSingle && !inDouble && ch === '-' && next === '-') {
-      inLineComment = true;
-      out += ch;
-      continue;
-    }
-    if (!inSingle && !inDouble && ch === '/' && next === '*') {
-      inBlockComment = true;
-      out += ch;
-      continue;
-    }
-
-    if (ch === "'" && !inDouble) {
-      if (inSingle && next === "'") {
-        out += ch + next;
-        i++;
-        continue;
-      }
-      inSingle = !inSingle;
-      out += ch;
-      continue;
-    }
-    if (ch === '"' && !inSingle) {
-      if (inDouble && next === '"') {
-        out += ch + next;
-        i++;
-        continue;
-      }
-      inDouble = !inDouble;
-      out += ch;
-      continue;
-    }
-
-    if (ch === '?' && !inSingle && !inDouble) {
-      out += `$${++index}`;
-      continue;
-    }
-    out += ch;
-  }
-
-  return out;
+  return splitPlaceholders(sql).map((piece, index) => (index ? `$${index}${piece}` : piece)).join('');
 }
 
 function wrap(client: Pool | PoolClient): Queryable {

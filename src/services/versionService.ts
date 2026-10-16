@@ -4,7 +4,8 @@ import { fail } from '../tools/AppError';
 import { shapeVersion, shapeExtraction, headline, deletedVersion } from '../views/serializers/versionSerializer';
 import { CONTEXT_STEPS, VERSION_STATUS } from '../constants/statuses';
 import { UNIQUE_VIOLATION } from '../constants/pgErrors';
-import type { Queryable } from '../config/pgPool';
+import { sqlState } from '../tools/dbError';
+import type { Tx } from '../config/database';
 import type { Actor } from '../types/actor';
 
 const { withTransaction } = config.database;
@@ -39,7 +40,7 @@ async function versionState(connection: Connection): Promise<Record<string, any>
   };
 }
 
-async function openDraft(conn: Queryable, actor: Actor | null | undefined, connection: Connection, step: string | null | undefined): Promise<Row> {
+async function openDraft(conn: Tx, actor: Actor | null | undefined, connection: Connection, step: string | null | undefined): Promise<Row> {
   const basedOn = await versionRepository.latestPublishedName(conn, connection.id);
   const name = basedOn ? basedOn.name : String(connection.name).slice(0, 120);
   const version = await versionRepository.nextVersion(conn, connection.id, name);
@@ -56,49 +57,32 @@ async function openDraft(conn: Queryable, actor: Actor | null | undefined, conne
   });
 }
 
-function draftPatch(draft: Row, patch: Record<string, any>): { sets: string[]; params: unknown[] } {
-  const sets = ['updated_at = now()'];
-  const params: unknown[] = [];
+function draftPatch(draft: Row, patch: Record<string, any>): versionRepository.DraftChanges {
+  const changes: versionRepository.DraftChanges = {};
   const step = patch.step ? furthest(draft.current_step, patch.step) : null;
-  if (step && step !== draft.current_step) {
-    sets.push('current_step = ?');
-    params.push(step);
-  }
-  if (Array.isArray(patch.datasetIds)) {
-    sets.push('dataset_ids = ?::jsonb');
-    params.push(JSON.stringify(patch.datasetIds));
-  }
-  if (patch.sessionId !== undefined) {
-    sets.push('session_id = ?');
-    params.push(patch.sessionId);
-  }
+  if (step && step !== draft.current_step) changes.step = step;
+  if (Array.isArray(patch.datasetIds)) changes.datasetIds = patch.datasetIds;
+  if (patch.sessionId !== undefined) changes.sessionId = patch.sessionId;
   if (patch.extractionReport !== undefined) {
-    sets.push(
-      'extraction_report = ?',
-      'extraction_mode = ?',
-      'extraction_dataset_ids = ?::jsonb',
-      'extracted_at = now()'
-    );
-    params.push(
-      patch.extractionReport,
-      patch.extractionMode || null,
-      JSON.stringify(Array.isArray(patch.extractionDatasetIds) ? patch.extractionDatasetIds : [])
-    );
+    changes.extraction = {
+      report: patch.extractionReport,
+      mode: patch.extractionMode || null,
+      datasetIds: Array.isArray(patch.extractionDatasetIds) ? patch.extractionDatasetIds : [],
+    };
   }
-  return { sets, params };
+  return changes;
 }
 
 async function touchDraft(actor: Actor | null | undefined, connection: Connection, patch: Record<string, any> = {}, attempt = 0): Promise<Version | null> {
   try {
-    const row = await withTransaction(async (conn: Queryable) => {
+    const row = await withTransaction(async (conn: Tx) => {
       let draft = await versionRepository.lockDraft(conn, connection.id);
       if (!draft) draft = await openDraft(conn, actor, connection, patch.step);
-      const { sets, params } = draftPatch(draft, patch);
-      return versionRepository.updateDraft(conn, draft.id, sets, params);
+      return versionRepository.updateDraft(conn, draft.id, draftPatch(draft, patch));
     });
     return shapeVersion(row);
   } catch (err: any) {
-    if (err.code === UNIQUE_VIOLATION && attempt === 0) {
+    if (sqlState(err) === UNIQUE_VIOLATION && attempt === 0) {
       return touchDraft(actor, connection, patch, attempt + 1);
     }
     throw err;
@@ -112,7 +96,7 @@ async function trackStep(connection: Connection, step: string): Promise<Version 
   return shapeVersion(await versionRepository.advanceDraftStep(connection.id, CONTEXT_STEPS, step));
 }
 
-async function publishDraft(conn: Queryable, actor: Actor, connection: Connection, { name, snapshot, datasets = [], stats, sessionId, notifyTeam }: { name: string; snapshot: any; datasets?: any[]; stats: any; sessionId: any; notifyTeam: any }): Promise<Version> {
+async function publishDraft(conn: Tx, actor: Actor, connection: Connection, { name, snapshot, datasets = [], stats, sessionId, notifyTeam }: { name: string; snapshot: any; datasets?: any[]; stats: any; sessionId: any; notifyTeam: any }): Promise<Version> {
   let draft = await versionRepository.lockDraft(conn, connection.id);
   if (!draft) draft = await openDraft(conn, actor, connection, 'publish');
 
@@ -157,7 +141,7 @@ async function requirePublishedVersion(connection: Connection, versionId: unknow
 }
 
 async function deletePublishedVersion(connection: Connection, versionId: unknown): Promise<any> {
-  return withTransaction(async (conn: Queryable) => {
+  return withTransaction(async (conn: Tx) => {
     const row = await versionRepository.deletePublished(conn, connection.id, versionId);
     if (!row) throw fail('RESOURCE_NOT_FOUND', VERSION_NOT_FOUND);
     await versionRepository.deleteLegacyPublication(conn, connection.id, versionId);

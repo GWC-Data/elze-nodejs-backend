@@ -1,11 +1,11 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
+import { Prisma } from '../generated/prisma/client';
 import { pagedRows } from './baseRepository';
 import { likePattern, orderBy } from '../tools/listQuery';
 import { AUDIT_SORTS } from '../constants/auditEvents';
 import type { ListWindow } from './baseRepository';
 
-const { db } = config.database;
+const { prisma } = config.database;
 
 interface AuditRecord {
   event: string;
@@ -32,78 +32,56 @@ interface AuditFilter {
   search?: string | null;
 }
 
-const COLUMNS = `a.id, a.ts, a.event, a.actor_id, a.actor, a.actor_company_id, a.company_id,
+const COLUMNS = Prisma.sql`a.id, a.ts, a.event, a.actor_id, a.actor, a.actor_company_id, a.company_id,
                  a.target_user_id, a.detail, c.name AS company_name`;
 
 async function append(record: AuditRecord): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.auditLogs}
-       (event, actor_id, actor, actor_company_id, company_id, target_user_id, detail)
-     VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)`,
-    [
-      record.event,
-      record.actorId,
-      record.actor,
-      record.actorCompanyId,
-      record.companyId,
-      record.targetUserId,
-      JSON.stringify(record.detail),
-    ]
-  );
+  await prisma.auditLog.create({
+    data: {
+      event: record.event,
+      actorId: record.actorId,
+      actor: record.actor,
+      actorCompanyId: record.actorCompanyId,
+      companyId: record.companyId,
+      targetUserId: record.targetUserId,
+      detail: record.detail as Prisma.InputJsonValue,
+    },
+  });
 }
 
-function whereFor(filter: AuditFilter): { sql: string; params: unknown[] } {
-  const where: string[] = [];
-  const params: unknown[] = [];
+function whereFor(filter: AuditFilter): Prisma.Sql {
+  const conditions: Prisma.Sql[] = [];
   const { scope } = filter;
   if (scope.kind === 'company') {
-    where.push('(a.company_id = ? OR a.actor_company_id = ?)');
-    params.push(scope.companyId, scope.companyId);
+    conditions.push(Prisma.sql`(a.company_id = ${scope.companyId} OR a.actor_company_id = ${scope.companyId})`);
   } else if (scope.kind === 'self') {
-    where.push('(a.actor_id = ? OR a.target_user_id = ?)');
-    params.push(scope.userId, scope.userId);
+    conditions.push(Prisma.sql`(a.actor_id = ${scope.userId} OR a.target_user_id = ${scope.userId})`);
   }
-  if (filter.event) {
-    where.push('a.event = ?');
-    params.push(filter.event);
-  }
-  if (filter.categoryEvents) {
-    where.push('a.event = ANY (?::text[])');
-    params.push(filter.categoryEvents);
-  }
-  if (filter.actionEvents) {
-    where.push('a.event = ANY (?::text[])');
-    params.push(filter.actionEvents);
-  }
-  if (filter.from) {
-    where.push('a.ts >= ?::date');
-    params.push(filter.from);
-  }
-  if (filter.to) {
-    where.push("a.ts < (?::date + INTERVAL '1 day')");
-    params.push(filter.to);
-  }
+  if (filter.event) conditions.push(Prisma.sql`a.event = ${filter.event}`);
+  if (filter.categoryEvents) conditions.push(Prisma.sql`a.event = ANY (${filter.categoryEvents}::text[])`);
+  if (filter.actionEvents) conditions.push(Prisma.sql`a.event = ANY (${filter.actionEvents}::text[])`);
+  if (filter.from) conditions.push(Prisma.sql`a.ts >= ${filter.from}::date`);
+  if (filter.to) conditions.push(Prisma.sql`a.ts < (${filter.to}::date + INTERVAL '1 day')`);
   if (filter.search) {
     const pattern = likePattern(filter.search);
-    where.push(`(a.event ILIKE ? OR a.actor ILIKE ? OR a.detail::text ILIKE ? OR c.name ILIKE ?)`);
-    params.push(pattern, pattern, pattern, pattern);
+    conditions.push(
+      Prisma.sql`(a.event ILIKE ${pattern} OR a.actor ILIKE ${pattern} OR a.detail::text ILIKE ${pattern} OR c.name ILIKE ${pattern})`
+    );
   }
-  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+  return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 }
 
 async function listPage<R>(filter: AuditFilter, list: ListWindow, shape: (row: any) => R) {
   const where = whereFor(filter);
-  const from = `FROM ${T.auditLogs} a LEFT JOIN ${T.companies} c ON c.id = a.company_id`;
+  const from = Prisma.sql`FROM audit_logs a LEFT JOIN companies c ON c.id = a.company_id`;
   return pagedRows(
-    db,
-    `SELECT ${COLUMNS}, COUNT(*) OVER () AS "__total"
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS}, COUNT(*) OVER () AS "__total"
        ${from}
-      ${where.sql}
-      ${orderBy(list, AUDIT_SORTS, 'a.id DESC')}
-      LIMIT ? OFFSET ?`,
-    [...where.params, list.pageSize, list.offset],
-    `SELECT COUNT(*) AS n ${from} ${where.sql}`,
-    where.params,
+      ${where}
+      ${Prisma.raw(orderBy(list, AUDIT_SORTS, 'a.id DESC'))}
+      LIMIT ${list.pageSize} OFFSET ${list.offset}`,
+    Prisma.sql`SELECT COUNT(*) AS n ${from} ${where}`,
     shape
   );
 }

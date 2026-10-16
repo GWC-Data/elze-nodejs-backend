@@ -4,14 +4,14 @@ import * as tokenRepository from '../repositories/tokenRepository';
 import { fail } from '../tools/AppError';
 import { hashToken, randomToken } from '../tools/hash';
 import { USER_STATUS } from '../constants/statuses';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 const { ACTIVATION_TOKEN_TTL_SECONDS, APPLICATION_URL } = config.auth;
 
 async function issueActivationToken(
   userId: number,
   issuedBy: number | null | undefined,
-  conn?: Queryable
+  conn?: Tx
 ): Promise<{ token: string; expiresAt: Date }> {
   await tokenRepository.retireActivations(userId, conn);
 
@@ -53,7 +53,7 @@ async function resolveActivationToken(raw: unknown) {
   return row;
 }
 
-async function consumeActivationToken(tokenId: string, conn?: Queryable): Promise<void> {
+async function consumeActivationToken(tokenId: string, conn?: Tx): Promise<void> {
   if (!(await tokenRepository.consumeActivation(tokenId, conn))) {
     throw fail('INVALID_ACTIVATION_TOKEN', 'That activation link has already been used.');
   }

@@ -1,31 +1,26 @@
 import config from '../config';
-import { CT } from '../models/contextModel';
-import { companyScope, queryOrNotFound } from './baseRepository';
+import { Prisma } from '../generated/prisma/client';
+import { companyScope, orNotFound, rawRows } from './baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import { likePattern } from '../tools/listQuery';
-import type { Queryable } from '../config/pgPool';
 import type { Actor } from '../types/actor';
 
-const { db } = config.database;
+const { prisma, withTransaction } = config.database;
 
-const COLUMNS = `c.id, c.company_id, c.provider, c.name, c.host, c.secret_hint,
+const COLUMNS = Prisma.sql`c.id, c.company_id, c.provider, c.name, c.host, c.secret_hint,
                  c.status, c.last_error, c.last_verified_at, c.created_at`;
 
 const NOT_FOUND = 'Connection not found';
 
 async function listForActor(actor: Actor, seeAll: boolean) {
-  const scope = companyScope(actor, 'c.company_id');
-  const access = accessColumns(actor);
-  const visible = visibleClause(actor, seeAll);
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS}, ${access.sql},
-            (SELECT COUNT(*) FROM ${CT.datasets} d WHERE d.connection_id = c.id) AS "selectedDatasetCount"
-       FROM ${CT.connections} c
-      WHERE ${scope.clause} AND ${visible.sql}
-      ORDER BY c.provider, c.name`,
-    [...access.params, ...scope.params, ...visible.params]
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)},
+            (SELECT COUNT(*) FROM datasets d WHERE d.connection_id = c.id) AS "selectedDatasetCount"
+       FROM connections c
+      WHERE ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+      ORDER BY c.provider, c.name`
   );
-  return rows;
 }
 
 async function listDrafts(
@@ -33,134 +28,130 @@ async function listDrafts(
   seeAll: boolean,
   { search, offset, limit }: { search: string; offset: number; limit: number }
 ): Promise<{ rows: any[]; total: number }> {
-  const scope = companyScope(actor, 'c.company_id');
-  const access = accessColumns(actor);
-  const visible = visibleClause(actor, seeAll);
-  const where = [
-    scope.clause,
-    visible.sql,
-    `(d.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM ${CT.versions} p
+  const conditions = [
+    companyScope(actor, 'c.company_id'),
+    visibleClause(actor, seeAll),
+    Prisma.sql`(d.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM context_layer_versions p
                                         WHERE p.connection_id = c.id AND p.status = 'published'))`,
   ];
-  const params: unknown[] = [...scope.params, ...visible.params];
   if (search) {
-    where.push('(c.name ILIKE ? OR d.name ILIKE ?)');
     const pattern = likePattern(search);
-    params.push(pattern, pattern);
+    conditions.push(Prisma.sql`(c.name ILIKE ${pattern} OR d.name ILIKE ${pattern})`);
   }
-  const from = `FROM ${CT.connections} c
-       LEFT JOIN ${CT.versions} d ON d.connection_id = c.id AND d.status = 'draft'
-      WHERE ${where.join(' AND ')}`;
+  const from = Prisma.sql`FROM connections c
+       LEFT JOIN context_layer_versions d ON d.connection_id = c.id AND d.status = 'draft'
+      WHERE ${Prisma.join(conditions, ' AND ')}`;
 
-  const { rows: [{ n }] } = await db.query(`SELECT COUNT(*)::int AS n ${from}`, params);
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS}, ${access.sql},
-            (SELECT COUNT(*) FROM ${CT.datasets} ds WHERE ds.connection_id = c.id) AS "selectedDatasetCount",
+  const [{ n }] = await rawRows(prisma, Prisma.sql`SELECT COUNT(*)::int AS n ${from}`);
+  const rows = await rawRows(
+    prisma,
+    Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)},
+            (SELECT COUNT(*) FROM datasets ds WHERE ds.connection_id = c.id) AS "selectedDatasetCount",
             d.name AS draft_name, d.version AS draft_version, d.current_step AS draft_step,
             d.updated_at AS draft_updated_at
        ${from}
       ORDER BY COALESCE(d.updated_at, c.created_at) DESC, c.name
-      LIMIT ? OFFSET ?`,
-    [...access.params, ...params, limit, offset]
+      LIMIT ${limit} OFFSET ${offset}`
   );
   return { rows, total: n };
 }
 
 async function listPublished(actor: Actor, seeAll: boolean) {
-  const scope = companyScope(actor, 'c.company_id');
-  const visible = visibleClause(actor, seeAll);
-  const { rows } = await db.query(
-    `SELECT c.id, c.name
-       FROM ${CT.connections} c
-      WHERE ${scope.clause} AND ${visible.sql}
-        AND EXISTS (SELECT 1 FROM ${CT.versions} v
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT c.id, c.name
+       FROM connections c
+      WHERE ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+        AND EXISTS (SELECT 1 FROM context_layer_versions v
                      WHERE v.connection_id = c.id AND v.status = 'published')
-      ORDER BY c.name, c.id`,
-    [...scope.params, ...visible.params]
+      ORDER BY c.name, c.id`
   );
-  return rows;
 }
 
 async function listPublishedVersions(actor: Actor, seeAll: boolean) {
-  const scope = companyScope(actor, 'c.company_id');
-  const visible = visibleClause(actor, seeAll);
-  const { rows } = await db.query(
-    `SELECT v.id, v.connection_id, c.name AS connection_name, v.name, v.version, v.published_at,
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT v.id, v.connection_id, c.name AS connection_name, v.name, v.version, v.published_at,
             v.version = MAX(v.version) OVER (PARTITION BY v.connection_id, v.name) AS live
-       FROM ${CT.versions} v
-       JOIN ${CT.connections} c ON c.id = v.connection_id
-      WHERE v.status = 'published' AND ${scope.clause} AND ${visible.sql}
-      ORDER BY v.name, c.name, v.connection_id, v.version DESC`,
-    [...scope.params, ...visible.params]
+       FROM context_layer_versions v
+       JOIN connections c ON c.id = v.connection_id
+      WHERE v.status = 'published' AND ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+      ORDER BY v.name, c.name, v.connection_id, v.version DESC`
   );
-  return rows;
 }
 
 async function findWithSecret(actor: Actor, id: string) {
-  const scope = companyScope(actor, 'c.company_id');
-  const access = accessColumns(actor);
-  const { rows } = await queryOrNotFound(
-    db,
-    `SELECT ${COLUMNS}, ${access.sql}, c.secret
-       FROM ${CT.connections} c
-      WHERE c.id = ? AND ${scope.clause}`,
-    [...access.params, id, ...scope.params],
+  const rows = await orNotFound(
+    rawRows(
+      prisma,
+      Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)}, c.secret
+         FROM connections c
+        WHERE c.id = ${id}::uuid AND ${companyScope(actor, 'c.company_id')}`
+    ),
     NOT_FOUND
   );
   return rows[0] || null;
 }
 
 async function findId(actor: Actor, id: string) {
-  const scope = companyScope(actor, 'c.company_id');
-  const access = accessColumns(actor);
-  const { rows } = await queryOrNotFound(
-    db,
-    `SELECT c.id, c.name, c.company_id, ${access.sql}
-       FROM ${CT.connections} c
-      WHERE c.id = ? AND ${scope.clause}`,
-    [...access.params, id, ...scope.params],
+  const rows = await orNotFound(
+    rawRows(
+      prisma,
+      Prisma.sql`SELECT c.id, c.name, c.company_id, ${accessColumns(actor)}
+         FROM connections c
+        WHERE c.id = ${id}::uuid AND ${companyScope(actor, 'c.company_id')}`
+    ),
     NOT_FOUND
   );
   return rows[0] || null;
 }
 
 async function selectedDatasets(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT dataset_id, name, row_count, column_count, selected_at
-       FROM ${CT.datasets}
-      WHERE connection_id = ?
-      ORDER BY name NULLS LAST, dataset_id`,
-    [connectionId]
-  );
-  return rows;
+  const rows = await prisma.dataset.findMany({
+    where: { connectionId },
+    orderBy: [{ name: { sort: 'asc', nulls: 'last' } }, { datasetId: 'asc' }],
+  });
+  return rows.map((d) => ({
+    dataset_id: d.datasetId,
+    name: d.name,
+    row_count: d.rowCount === null ? null : Number(d.rowCount),
+    column_count: d.columnCount,
+    selected_at: d.selectedAt,
+  }));
 }
 
 async function insert({ id, companyId, provider, name, host, secret, secretHint, createdBy }: {
   id: string;
-  companyId: number | null;
+  companyId: number;
   provider: string;
   name: string;
-  host: string | null;
+  host: string;
   secret: string;
-  secretHint: string | null;
+  secretHint: string;
   createdBy: number | null;
 }): Promise<void> {
-  await db.query(
-    `INSERT INTO ${CT.connections}
-       (id, company_id, provider, name, host, secret, secret_hint, status, last_verified_at, created_by,
-        general_access)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'connected', now(), ?, 'restricted')`,
-    [id, companyId, provider, name, host, secret, secretHint, createdBy]
-  );
+  await prisma.connection.create({
+    data: {
+      id,
+      companyId,
+      provider,
+      name,
+      host,
+      secret,
+      secretHint,
+      status: 'connected',
+      lastVerifiedAt: new Date(),
+      createdBy,
+      generalAccess: 'restricted',
+    },
+  });
 }
 
 async function markStatus(id: string, status: string, lastError: string | null): Promise<void> {
-  await db.query(
-    `UPDATE ${CT.connections}
-        SET status = ?, last_error = ?, last_verified_at = CASE WHEN ? = 'connected' THEN now() ELSE last_verified_at END
-      WHERE id = ?`,
-    [status, lastError, status, id]
-  );
+  await prisma.connection.updateMany({
+    where: { id },
+    data: { status, lastError, ...(status === 'connected' ? { lastVerifiedAt: new Date() } : {}) },
+  });
 }
 
 async function replaceSelection(
@@ -168,21 +159,24 @@ async function replaceSelection(
   datasets: readonly { id: string; name?: string | null; rowCount?: number | null; columnCount?: number | null }[],
   selectedBy: number | null
 ): Promise<void> {
-  await db.transaction(async (conn: Queryable) => {
-    await conn.query(`DELETE FROM ${CT.datasets} WHERE connection_id = ?`, [connectionId]);
-    for (const dataset of datasets) {
-      await conn.query(
-        `INSERT INTO ${CT.datasets}
-           (connection_id, dataset_id, name, row_count, column_count, selected_by)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [connectionId, dataset.id, dataset.name, dataset.rowCount, dataset.columnCount, selectedBy]
-      );
-    }
+  await withTransaction(async (tx) => {
+    await tx.dataset.deleteMany({ where: { connectionId } });
+    if (!datasets.length) return;
+    await tx.dataset.createMany({
+      data: datasets.map((dataset) => ({
+        connectionId,
+        datasetId: dataset.id,
+        name: dataset.name ?? null,
+        rowCount: dataset.rowCount === null || dataset.rowCount === undefined ? null : BigInt(Math.trunc(dataset.rowCount)),
+        columnCount: dataset.columnCount ?? null,
+        selectedBy,
+      })),
+    });
   });
 }
 
 async function remove(id: string): Promise<void> {
-  await db.query(`DELETE FROM ${CT.connections} WHERE id = ?`, [id]);
+  await prisma.connection.deleteMany({ where: { id } });
 }
 
 export {

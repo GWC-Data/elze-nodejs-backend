@@ -1,30 +1,19 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
-const { db, withTransaction } = config.database;
+const { prisma } = config.database;
 
-async function listForCompany(companyId: number, conn?: Queryable): Promise<string[]> {
-  const client = conn || db;
-  const { rows } = await client.query(
-    `SELECT feature_ids FROM ${T.companyFeatures} WHERE company_id = ?`,
-    [companyId]
-  );
-  return rows[0] ? rows[0].feature_ids : [];
+async function listForCompany(companyId: number, tx: Tx = prisma): Promise<string[]> {
+  const row = await tx.companyFeatures.findUnique({ where: { companyId }, select: { featureIds: true } });
+  return row ? row.featureIds : [];
 }
 
-async function replace(companyId: number, featureIds: readonly string[], actorId: number | null, conn?: Queryable) {
-  const work = async (client: Queryable) => {
-    await client.query(
-      `INSERT INTO ${T.companyFeatures} (company_id, feature_ids, updated_by)
-       VALUES (?, ?::uuid[], ?)
-       ON CONFLICT (company_id) DO UPDATE
-         SET feature_ids = EXCLUDED.feature_ids, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-      [companyId, featureIds, actorId]
-    );
-  };
-  if (conn) return work(conn);
-  return withTransaction(work);
+async function replace(companyId: number, featureIds: readonly string[], actorId: number | null, tx: Tx = prisma) {
+  await tx.companyFeatures.upsert({
+    where: { companyId },
+    create: { companyId, featureIds: [...featureIds], updatedBy: actorId },
+    update: { featureIds: [...featureIds], updatedBy: actorId, updatedAt: new Date() },
+  });
 }
 
 export { listForCompany, replace };

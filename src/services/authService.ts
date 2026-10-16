@@ -14,7 +14,7 @@ import { listAccessibleDashboards } from './accessService';
 import { audit, EVENTS } from './auditService';
 import { AUTH_STATE, USER_STATUS } from '../constants/statuses';
 import type { Actor } from '../types/actor';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { IssuedRefreshToken } from './tokenService';
 
 const { withTransaction } = config.database;
@@ -170,7 +170,7 @@ async function changePassword(
     throw fail('VALIDATION_ERROR', 'Your new password must differ from the current one.');
   }
 
-  await withTransaction(async (conn: Queryable) => {
+  await withTransaction(async (conn: Tx) => {
     await userRepository.setActivePassword(conn, user.id, hashPassword(newPassword));
     await tokens.revokeAllForUser(user.id, 'password_changed', conn);
   });
@@ -198,7 +198,7 @@ async function activate(body: RequestBody = {}) {
 
   const row = await resolveActivationToken(token);
 
-  await withTransaction(async (conn: Queryable) => {
+  await withTransaction(async (conn: Tx) => {
     await consumeActivationToken(row.id, conn);
     await userRepository.setActivePassword(conn, row.user_id, hashPassword(password));
     await tokens.revokeAllForUser(row.user_id, 'account_activated', conn);

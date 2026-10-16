@@ -9,7 +9,7 @@ import * as versions from './versionService';
 import { accessOf, isContextAdmin } from './contextAccessService';
 import { REVIEW_STATUS, VERSION_STATUS } from '../constants/statuses';
 import { MAX_CONTEXTS_PAGE, MAX_SEARCH_LENGTH } from '../constants/pagination';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { Actor } from '../types/actor';
 
 const { withTransaction } = config.database;
@@ -213,7 +213,7 @@ async function publishContext(actor: Actor, connection: Connection, { name, noti
   const counts = countByType(approved);
   const snapshot = approved.map(snapshotEntry);
 
-  const published = await withTransaction((conn: Queryable) =>
+  const published = await withTransaction((conn: Tx) =>
     versions.publishDraft(conn, actor, connection, {
       name: cleanName,
       snapshot,

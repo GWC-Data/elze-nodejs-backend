@@ -6,7 +6,6 @@ process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || '
 
 import config from '../src/config';
 const { db } = config.database;
-import { T, V } from '../src/models/rbacModel';
 import { bootstrapAppMeta } from '../src/services/bootstrapService';
 import * as registry from '../src/services/dashboardService';
 import * as access from '../src/services/accessService';
@@ -63,7 +62,7 @@ async function runTests(): Promise<void> {
   console.log('  ✓ dashboards table has company_id, created_by, spec columns');
 
   const rolePermRows = await db.query(
-    `SELECT role_id, permissions FROM ${V.rolePermissionSummary} WHERE role_id IN (?, ?)`,
+    `SELECT role_id, permissions FROM access_control.role_permission_summary WHERE role_id IN (?, ?)`,
     [systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
   );
   const permsOf = (roleId: string): string[] => rolePermRows.rows.find((r) => r.role_id === roleId)?.permissions || [];
@@ -95,14 +94,14 @@ async function runTests(): Promise<void> {
   const dashB_Id = 'test-dash-corp-b';
 
   await db.query(
-    `INSERT INTO ${T.companies} (id, name, slug)
+    `INSERT INTO companies (id, name, slug)
      VALUES
        (9991, 'Test Corp A', 'test-corp-a'),
        (9992, 'Test Corp B', 'test-corp-b')
      ON CONFLICT (id) DO NOTHING`
   );
   await db.query(
-    `INSERT INTO ${T.users} (id, company_id, username, email, status)
+    `INSERT INTO users (id, company_id, username, email, status)
      VALUES
        (8881, 9991, 'testuser_a', 'user_a@test.com', 'active'),
        (8882, 9992, 'testuser_b', 'user_b@test.com', 'active'),
@@ -110,7 +109,7 @@ async function runTests(): Promise<void> {
      ON CONFLICT (id) DO NOTHING`
   );
   await db.query(
-    `INSERT INTO ${T.userRoles} (user_id, role_id)
+    `INSERT INTO access_control.user_roles (user_id, role_id)
      VALUES (8881, ?), (8882, ?), (8883, ?)
      ON CONFLICT (user_id) DO NOTHING`,
     [systemRoleId(COMPANY_ADMIN), systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
@@ -181,8 +180,8 @@ async function runTests(): Promise<void> {
   await registry.deleteDashboard(dashB_Id);
   console.log('  ✓ Cleaned up test dashboards');
 
-  await db.query(`DELETE FROM ${T.users} WHERE id IN (8881, 8882, 8883)`);
-  await db.query(`DELETE FROM ${T.companies} WHERE id IN (9991, 9992)`);
+  await db.query(`DELETE FROM users WHERE id IN (8881, 8882, 8883)`);
+  await db.query(`DELETE FROM companies WHERE id IN (9991, 9992)`);
   console.log('  ✓ Cleaned up test users and companies');
 
   console.log('\n=== All Multi-Tenant Dashboard Architecture Tests PASSED! ===');

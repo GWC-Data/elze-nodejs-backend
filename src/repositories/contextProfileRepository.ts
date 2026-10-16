@@ -1,35 +1,46 @@
 import crypto from 'crypto';
 import config from '../config';
-import { CT } from '../models/contextModel';
 
-const { db } = config.database;
+const { prisma } = config.database;
 
-const COLUMNS = `id, connection_id, name, description, created_by, created_at, updated_at`;
+function asRow(profile: {
+  id: string;
+  connectionId: string;
+  name: string;
+  description: string | null;
+  createdBy: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: profile.id,
+    connection_id: profile.connectionId,
+    name: profile.name,
+    description: profile.description,
+    created_by: profile.createdBy,
+    created_at: profile.createdAt,
+    updated_at: profile.updatedAt,
+  };
+}
 
 async function find(connectionId: string) {
-  const { rows } = await db.query(
-    `SELECT ${COLUMNS} FROM ${CT.profiles} WHERE connection_id = ?::uuid`,
-    [connectionId]
-  );
-  return rows[0] || null;
+  const profile = await prisma.contextProfile.findUnique({ where: { connectionId } });
+  return profile ? asRow(profile) : null;
 }
 
 async function upsert({ connectionId, companyId, name, description, createdBy }: {
   connectionId: string;
-  companyId: number | null;
+  companyId: number;
   name: string;
   description: string | null;
   createdBy: number | null;
 }) {
-  const { rows } = await db.query(
-    `INSERT INTO ${CT.profiles} (id, connection_id, company_id, name, description, created_by)
-     VALUES (?::uuid, ?::uuid, ?, ?, ?, ?)
-     ON CONFLICT (connection_id) DO UPDATE
-        SET name = EXCLUDED.name, description = EXCLUDED.description, updated_at = now()
-     RETURNING ${COLUMNS}`,
-    [crypto.randomUUID(), connectionId, companyId, name, description, createdBy]
-  );
-  return rows[0];
+  const profile = await prisma.contextProfile.upsert({
+    where: { connectionId },
+    create: { id: crypto.randomUUID(), connectionId, companyId, name, description, createdBy },
+    update: { name, description, updatedAt: new Date() },
+  });
+  return asRow(profile);
 }
 
 export { find, upsert };

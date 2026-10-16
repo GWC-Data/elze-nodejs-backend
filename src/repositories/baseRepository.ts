@@ -1,52 +1,71 @@
+import { Prisma } from '../generated/prisma/client';
 import { fail } from '../tools/AppError';
+import { sqlState } from '../tools/dbError';
+import { splitPlaceholders } from '../tools/sql';
 import { INVALID_TEXT_REPRESENTATION } from '../constants/pgErrors';
-import type { QueryResult } from 'pg';
-import type { Queryable, Params } from '../config/pgPool';
+import type { Tx } from '../config/database';
 import type { Actor } from '../types/actor';
 
 type ListWindow = { pageSize: number; offset: number } & Record<string, any>;
+type Row = Record<string, any>;
 
-interface CompanyScope {
-  clause: string;
-  params: (number | null)[];
+function plain(value: unknown): unknown {
+  if (typeof value === 'bigint') return Number(value);
+  if (value instanceof Prisma.Decimal) return value.toNumber();
+  return value;
+}
+
+function plainRow<T = any>(row: Row): T {
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, plain(value)])) as T;
+}
+
+function sqlOf(text: string, params: readonly unknown[] = []): Prisma.Sql {
+  const pieces = splitPlaceholders(text);
+  if (pieces.length - 1 !== params.length) {
+    throw new Error(`SQL has ${pieces.length - 1} placeholder(s) but ${params.length} parameter(s) were given.`);
+  }
+  return new Prisma.Sql(pieces, params as Prisma.Sql[]);
+}
+
+async function rawRows<T = any>(tx: Tx, query: Prisma.Sql): Promise<T[]> {
+  const rows = await tx.$queryRaw<Row[]>(query);
+  return rows.map((row) => plainRow<T>(row));
 }
 
 async function pagedRows<T>(
-  client: Queryable,
-  sql: string,
-  params: Params,
-  countSql: string,
-  countParams: Params,
+  tx: Tx,
+  query: Prisma.Sql,
+  countQuery: Prisma.Sql,
   shape: (row: any) => T
 ): Promise<{ items: T[]; total: number }> {
-  const { rows } = await client.query(sql, params);
+  const rows = await rawRows(tx, query);
   let total;
   if (rows.length) {
     total = Number(rows[0].__total);
   } else {
-    const counted = await client.query(countSql, countParams);
-    total = Number(counted.rows[0].n);
+    const counted = await rawRows(tx, countQuery);
+    total = Number(counted[0].n);
   }
   return { items: rows.map(shape), total };
 }
 
-async function queryOrNotFound(client: Queryable, sql: string, params: Params, message: string): Promise<QueryResult<any>> {
+async function orNotFound<T>(work: Promise<T>, message: string): Promise<T> {
   try {
-    return await client.query(sql, params);
-  } catch (err: any) {
-    if (err.code === INVALID_TEXT_REPRESENTATION) throw fail('RESOURCE_NOT_FOUND', message);
+    return await work;
+  } catch (err) {
+    if (sqlState(err) === INVALID_TEXT_REPRESENTATION) throw fail('RESOURCE_NOT_FOUND', message);
     throw err;
   }
 }
 
-function companyScope(actor: Pick<Actor, 'isPlatform' | 'companyId'>, column: string): CompanyScope {
-  if (actor.isPlatform) return { clause: '1 = 1', params: [] };
-  return { clause: `${column} = ?`, params: [actor.companyId] };
+function companyScope(actor: Pick<Actor, 'isPlatform' | 'companyId'>, column: string): Prisma.Sql {
+  if (actor.isPlatform) return Prisma.sql`TRUE`;
+  return Prisma.sql`${Prisma.raw(column)} = ${actor.companyId}`;
 }
 
-function numericRow(row: Record<string, unknown>): Record<string, number> {
-  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)]));
+function numericRow(row: Row): Record<string, number> {
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(plain(value))]));
 }
 
-export { pagedRows, queryOrNotFound, companyScope, numericRow };
-export type { ListWindow, CompanyScope };
+export { plain, plainRow, sqlOf, rawRows, pagedRows, orNotFound, companyScope, numericRow };
+export type { ListWindow };

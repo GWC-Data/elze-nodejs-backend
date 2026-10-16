@@ -23,7 +23,7 @@ backend/
 │   │   ├── index.ts                 lazy namespaces over the files below
 │   │   ├── env.ts                   loads .env once, resolves directory roots
 │   │   ├── configError.ts           required/optional readers that fail loudly
-│   │   ├── pgPool.ts                the driver, `?` placeholders, type coercions
+│   │   ├── pgPool.ts                the driver for the query engine, `?` placeholders, type coercions
 │   │   ├── database.ts              the one PostgreSQL pool, the Prisma client on it, withTransaction
 │   │   ├── appConfig.ts             fixed in source: TTLs, throttling, query concurrency
 │   │   ├── auth.ts                  tokens, cookies, password policy
@@ -46,8 +46,8 @@ backend/
 │   │   ├── connection, context, version, publish, mcp  the context layer
 │   │   ├── email, bootstrap
 │   │   └── providers/               smtpProvider.ts, domoProvider.ts
-│   ├── repositories/                every SQL statement and file read/write (baseRepository.ts: paging, scoping)
-│   ├── models/                      rbacModel.ts, contextModel.ts (table names), cardModel.ts
+│   ├── repositories/                every database call and file read/write (baseRepository.ts: raw-SQL helpers, paging, scoping)
+│   ├── models/                      contextModel.ts (context store table names), cardModel.ts
 │   ├── generated/prisma/            Prisma client, written by `prisma generate` (gitignored)
 │   ├── views/
 │   │   ├── templates/               accountActivationTemplate.ts
@@ -519,6 +519,27 @@ npx prisma migrate diff --from-schema /tmp/before.prisma --to-schema prisma/sche
 
 Read the SQL before applying it, then run `npm run db:migrate` and `npm run db:generate`.
 
+### Talking to the database
+
+Repositories use the Prisma client (`config.database.prisma`). Where a query needs something
+Prisma's model API cannot express - a window function, a UNION, `ON CONFLICT` against a partial
+index, an ordering on an expression, the access-control views, or the agent service's
+`context_objects` table, which is not a Prisma model - it stays SQL, run through
+`tx.$queryRaw`/`$executeRaw` with `Prisma.sql` templates (`rawRows` in `baseRepository.ts`). Either
+way it goes through Prisma, so it joins the caller's transaction.
+
+`withTransaction(async (tx) => ...)` is `prisma.$transaction`; repository functions that take a
+`tx` default to the plain client. Repositories return the same row shapes as before (snake_case
+columns), so services and serializers did not change with the move to Prisma.
+
+A database error from Prisma carries the PostgreSQL code under
+`meta.driverAdapterError.cause.originalCode`; `sqlState(err)` in `tools/dbError.ts` reads it from
+either a Prisma or a `pg` error, so `UNIQUE_VIOLATION` and friends are checked the same way.
+
+The query engine (`queryRepository.ts`, `sqlGeneratorService.ts`), `scopeRepository.distinctValues`
+and `scripts/setupIndexes.ts` query reporting tables named at runtime by a dashboard spec, and keep
+using `config.database.db`, the `pg` pool.
+
 ### What is configured where
 
 | | Where | Why |
@@ -537,11 +558,11 @@ The engine targets PostgreSQL only. The differences that shaped the code:
 | | How it is handled |
 |---|---|
 | **Identifiers** | Double-quoted everywhere, always using the name read from the catalogue. Unquoted identifiers fold to lower case, so a real column `"Booking Date"` is unreachable without quotes - and a spec that spells it `booking date` must still emit the catalogue's spelling. `sqlGenerator` therefore *references* the catalogue name and *aliases* to the spec's, because the formatter reads rows back by the latter. |
-| **Placeholders** | `config/pgPool.ts` rewrites `?` into `$1, $2, …`, skipping anything inside quotes. The SQL here is frequently assembled - IN lists, multi-row inserts, optional fragments - and hand-numbering those is where an off-by-one hides as a wrong *value* bound to the right position. |
+| **Placeholders** | Repositories bind values through `Prisma.sql` templates, so a value is never pasted into SQL. The query engine and the context store queries still assemble SQL with `?` placeholders - IN lists, optional fragments - and `tools/sql.ts`'s `splitPlaceholders` finds them outside quotes and comments, for `config/pgPool.ts` (`$1, $2, …`) and for `sqlOf` in `baseRepository.ts`. Hand-numbering is where an off-by-one hides as a wrong *value* bound to the right position. |
 | **Date bucketing** | `to_char(col, 'YYYY-MM')`, and `to_char(to_date(col, <template>), …)` for string date columns. ISO weeks use `IYYY"-W"IW`, which cannot disagree with itself the way `YYYY` + `IW` would at a year boundary. |
 | **Slicer filters** | Values arrive from a URL as strings, so a non-text column is compared as `col::text = $1` - comparing text to an integer is refused outright. `setup:indexes` creates a matching expression index, because a plain index cannot serve a cast. |
-| **int8 and numeric** | node-postgres returns both as strings to protect precision. `config/pgPool.ts` parses them to Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
-| **One database** | The RBAC tables and the reporting tables share `DB_NAME` and one pool. The RBAC tables are unqualified and resolve through `search_path`; reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
+| **int8 and numeric** | node-postgres returns both as strings to protect precision, and Prisma returns them as `BigInt` and `Decimal`, which `res.json` cannot serialize. `config/pgPool.ts` (query engine) and `plainRow` in `baseRepository.ts` (raw SQL through Prisma) turn them into Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
+| **One database** | The application tables and the reporting tables share `DB_NAME` and one pool: Prisma runs on the same `pg` pool through `@prisma/adapter-pg`. Application tables are reached through Prisma (or unqualified raw SQL resolving through `search_path`); reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
 | **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `repositories/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
 
 ## Audit trail

@@ -4,7 +4,7 @@ import * as tokenRepository from '../repositories/tokenRepository';
 import { fail } from '../tools/AppError';
 import { hashToken, randomToken } from '../tools/hash';
 import { signAccessToken, verifyAccessToken } from '../tools/jwt';
-import type { Queryable } from '../config/pgPool';
+import type { Tx } from '../config/database';
 
 const { REFRESH_TOKEN_TTL_SECONDS } = config.auth;
 
@@ -24,7 +24,7 @@ function expiryDate(seconds: number): Date {
 async function issueRefreshToken(
   userId: number,
   { familyId, replaces, notAfter }: { familyId?: string; replaces?: string; notAfter?: Date } = {},
-  conn?: Queryable
+  conn?: Tx
 ): Promise<IssuedRefreshToken> {
   const id = crypto.randomUUID();
   const family = familyId || crypto.randomUUID();

@@ -1,242 +1,228 @@
 import config from '../config';
-import { T } from '../models/rbacModel';
+import { Prisma } from '../generated/prisma/client';
+import { rawRows } from './baseRepository';
 import { accessLevelId } from '../services/catalogueService';
-import type { Queryable } from '../config/pgPool';
 import type { Actor } from '../types/actor';
 
-const { db, withTransaction } = config.database;
+const { prisma, withTransaction } = config.database;
 
-const levelOf = (alias: string) => `(SELECT l.key FROM ${T.accessLevels} l WHERE l.id = ${alias}.access_level_id)`;
 const dashboardLevel = (level: string) => accessLevelId('dashboard', level);
 
-const COMPANY_DASHBOARD_IDS_SQL = `
-  SELECT dashboard_id FROM ${T.companyDashboards} WHERE company_id = ?
+const companyDashboardIdsSql = (companyId: number | null) => Prisma.sql`
+  SELECT dashboard_id FROM access_control.company_dashboards WHERE company_id = ${companyId}
   UNION
-  SELECT id FROM ${T.dashboards} WHERE company_id = ?`;
+  SELECT id FROM dashboards WHERE company_id = ${companyId}`;
+
+const GROUP_GRANTS = Prisma.sql`access_control.dashboard_group_access gda
+       JOIN access_control.access_levels l ON l.id = gda.access_level_id
+       JOIN group_users gu ON gu.group_id = gda.group_id
+       JOIN groups g ON g.id = gda.group_id`;
 
 async function companyDashboardIds(companyId: number | null): Promise<Set<string>> {
-  const { rows } = await db.query(COMPANY_DASHBOARD_IDS_SQL, [companyId, companyId]);
+  const rows = await rawRows(prisma, companyDashboardIdsSql(companyId));
   return new Set(rows.map((r) => r.dashboard_id));
 }
 
 async function assign(companyId: number, dashboardId: string, assignedBy: number | null): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.companyDashboards} (company_id, dashboard_id, assigned_by)
-     VALUES (?, ?, ?)
-     ON CONFLICT (company_id, dashboard_id)
-       DO UPDATE SET assigned_by = EXCLUDED.assigned_by, assigned_at = now()`,
-    [companyId, dashboardId, assignedBy]
-  );
+  await prisma.companyDashboard.upsert({
+    where: { companyId_dashboardId: { companyId, dashboardId } },
+    create: { companyId, dashboardId, assignedBy },
+    update: { assignedBy, assignedAt: new Date() },
+  });
 }
 
 async function assignIfMissing(companyId: number, dashboardId: string, assignedBy: number | null): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.companyDashboards} (company_id, dashboard_id, assigned_by)
-     VALUES (?, ?, ?)
-     ON CONFLICT (company_id, dashboard_id) DO NOTHING`,
-    [companyId, dashboardId, assignedBy]
-  );
+  await prisma.companyDashboard.createMany({ data: [{ companyId, dashboardId, assignedBy }], skipDuplicates: true });
 }
 
 async function unassign(companyId: number, dashboardId: string): Promise<boolean> {
-  return withTransaction(async (conn: Queryable) => {
-    await conn.query(
-      `DELETE FROM ${T.dashboardUserAccess}
-        WHERE dashboard_id = ?
-          AND user_id IN (SELECT id FROM ${T.users} WHERE company_id = ?)`,
-      [dashboardId, companyId]
-    );
-    await conn.query(
-      `DELETE FROM ${T.dashboardGroupAccess}
-        WHERE dashboard_id = ?
-          AND group_id IN (SELECT id FROM ${T.groups} WHERE company_id = ?)`,
-      [dashboardId, companyId]
-    );
-    const result = await conn.query(
-      `DELETE FROM ${T.companyDashboards} WHERE company_id = ? AND dashboard_id = ?`,
-      [companyId, dashboardId]
-    );
-    return result.rowCount! > 0;
+  return withTransaction(async (tx) => {
+    await tx.dashboardUserAccess.deleteMany({ where: { dashboardId, user: { companyId } } });
+    await tx.dashboardGroupAccess.deleteMany({ where: { dashboardId, group: { companyId } } });
+    const result = await tx.companyDashboard.deleteMany({ where: { companyId, dashboardId } });
+    return result.count > 0;
   });
 }
 
 async function isAvailable(companyId: number | null, dashboardId: string): Promise<boolean> {
-  const { rows } = await db.query(
-    `SELECT EXISTS (
-       SELECT 1 FROM ${T.companyDashboards} WHERE company_id = ? AND dashboard_id = ?
+  const [row] = await rawRows(
+    prisma,
+    Prisma.sql`SELECT EXISTS (
+       SELECT 1 FROM access_control.company_dashboards WHERE company_id = ${companyId} AND dashboard_id = ${dashboardId}
        UNION ALL
-       SELECT 1 FROM ${T.dashboards} WHERE company_id = ? AND id = ?
-     ) AS available`,
-    [companyId, dashboardId, companyId, dashboardId]
+       SELECT 1 FROM dashboards WHERE company_id = ${companyId} AND id = ${dashboardId}
+     ) AS available`
   );
-  return Boolean(rows[0] && rows[0].available);
+  return Boolean(row && row.available);
 }
 
 async function gateAndLevels(actor: Actor, dashboardId: string): Promise<{ available: boolean; levels: string[] } | null> {
-  const { rows: [gate] } = await db.query(
-    `SELECT EXISTS (
-              SELECT 1 FROM ${T.companyDashboards} WHERE company_id = ? AND dashboard_id = ?
+  const [gate] = await rawRows<{ available: boolean; levels: string[] }>(
+    prisma,
+    Prisma.sql`SELECT EXISTS (
+              SELECT 1 FROM access_control.company_dashboards
+               WHERE company_id = ${actor.companyId} AND dashboard_id = ${dashboardId}
               UNION ALL
-              SELECT 1 FROM ${T.dashboards} WHERE company_id = ? AND id = ?
+              SELECT 1 FROM dashboards WHERE company_id = ${actor.companyId} AND id = ${dashboardId}
             ) AS available,
             ARRAY(
-              SELECT ${levelOf('a')} FROM ${T.dashboardUserAccess} a
-               WHERE a.user_id = ? AND a.dashboard_id = ?
+              SELECT l.key FROM access_control.dashboard_user_access a
+                JOIN access_control.access_levels l ON l.id = a.access_level_id
+               WHERE a.user_id = ${actor.id} AND a.dashboard_id = ${dashboardId}
               UNION ALL
-              SELECT ${levelOf('gda')}
-                FROM ${T.dashboardGroupAccess} gda
-                JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
-                JOIN ${T.groups} g ON g.id = gda.group_id
-               WHERE gu.user_id = ? AND gda.dashboard_id = ? AND g.active AND g.company_id = ?
-            ) AS levels`,
-    [actor.companyId, dashboardId, actor.companyId, dashboardId,
-      actor.id, dashboardId, actor.id, dashboardId, actor.companyId]
+              SELECT l.key FROM ${GROUP_GRANTS}
+               WHERE gu.user_id = ${actor.id} AND gda.dashboard_id = ${dashboardId}
+                 AND g.active AND g.company_id = ${actor.companyId}
+            ) AS levels`
   );
   return gate || null;
 }
 
 async function directUserLevel(userId: unknown, dashboardId: string): Promise<string | null> {
-  const { rows } = await db.query(
-    `SELECT ${levelOf('a')} AS access_level FROM ${T.dashboardUserAccess} a WHERE a.user_id = ? AND a.dashboard_id = ?`,
-    [userId, dashboardId]
-  );
-  return rows[0] ? rows[0].access_level : null;
+  const id = Number(userId);
+  if (!Number.isSafeInteger(id)) return null;
+  const grant = await prisma.dashboardUserAccess.findUnique({
+    where: { userId_dashboardId: { userId: id, dashboardId } },
+    select: { accessLevel: { select: { key: true } } },
+  });
+  return grant ? grant.accessLevel.key : null;
 }
 
 async function grantRowsForUser(actor: Actor) {
-  const { rows } = await db.query(
-    `SELECT a.dashboard_id, ${levelOf('a')} AS access_level FROM ${T.dashboardUserAccess} a WHERE a.user_id = ?
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT a.dashboard_id, l.key AS access_level
+       FROM access_control.dashboard_user_access a
+       JOIN access_control.access_levels l ON l.id = a.access_level_id
+      WHERE a.user_id = ${actor.id}
      UNION ALL
-     SELECT gda.dashboard_id, ${levelOf('gda')}
-       FROM ${T.dashboardGroupAccess} gda
-       JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
-       JOIN ${T.groups} g ON g.id = gda.group_id
-      WHERE gu.user_id = ? AND g.active AND g.company_id = ?`,
-    [actor.id, actor.id, actor.companyId]
+     SELECT gda.dashboard_id, l.key
+       FROM ${GROUP_GRANTS}
+      WHERE gu.user_id = ${actor.id} AND g.active AND g.company_id = ${actor.companyId}`
   );
-  return rows;
 }
 
 async function countCompanyDashboards(companyId: number | null): Promise<number> {
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n FROM (${COMPANY_DASHBOARD_IDS_SQL}) avail`,
-    [companyId, companyId]
+  const [row] = await rawRows(
+    prisma,
+    Prisma.sql`SELECT COUNT(*)::int AS n FROM (${companyDashboardIdsSql(companyId)}) avail`
   );
-  return rows[0].n;
+  return row.n;
 }
 
 async function countGrantedDashboards(actor: Actor): Promise<number> {
-  const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS n
-       FROM (${COMPANY_DASHBOARD_IDS_SQL}) avail
+  const [row] = await rawRows(
+    prisma,
+    Prisma.sql`SELECT COUNT(*)::int AS n
+       FROM (${companyDashboardIdsSql(actor.companyId)}) avail
        JOIN (
-         SELECT dashboard_id FROM ${T.dashboardUserAccess} WHERE user_id = ?
+         SELECT dashboard_id FROM access_control.dashboard_user_access WHERE user_id = ${actor.id}
          UNION
          SELECT gda.dashboard_id
-           FROM ${T.dashboardGroupAccess} gda
-           JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
-           JOIN ${T.groups} g ON g.id = gda.group_id
-          WHERE gu.user_id = ? AND g.active AND g.company_id = ?
-       ) granted ON granted.dashboard_id = avail.dashboard_id`,
-    [actor.companyId, actor.companyId, actor.id, actor.id, actor.companyId]
+           FROM access_control.dashboard_group_access gda
+           JOIN group_users gu ON gu.group_id = gda.group_id
+           JOIN groups g ON g.id = gda.group_id
+          WHERE gu.user_id = ${actor.id} AND g.active AND g.company_id = ${actor.companyId}
+       ) granted ON granted.dashboard_id = avail.dashboard_id`
   );
-  return rows[0].n;
+  return row.n;
 }
 
 async function userGrantRows(userId: number) {
-  const { rows } = await db.query(
-    `SELECT a.dashboard_id AS "dashboardId", ${levelOf('a')} AS level, a.access_level_id AS "levelId",
+  return rawRows(
+    prisma,
+    Prisma.sql`SELECT a.dashboard_id AS "dashboardId", l.key AS level, a.access_level_id AS "levelId",
             'direct' AS origin, NULL::int AS "groupId", NULL::text AS "groupName"
-       FROM ${T.dashboardUserAccess} a WHERE a.user_id = ?
+       FROM access_control.dashboard_user_access a
+       JOIN access_control.access_levels l ON l.id = a.access_level_id
+      WHERE a.user_id = ${userId}
      UNION ALL
-     SELECT gda.dashboard_id, ${levelOf('gda')}, gda.access_level_id, 'group', g.id, g.name
-       FROM ${T.dashboardGroupAccess} gda
-       JOIN ${T.groups} g ON g.id = gda.group_id
-       JOIN ${T.groupUsers} gu ON gu.group_id = gda.group_id
-      WHERE gu.user_id = ? AND g.active
-      ORDER BY 1`,
-    [userId, userId]
+     SELECT gda.dashboard_id, l.key, gda.access_level_id, 'group', g.id, g.name
+       FROM ${GROUP_GRANTS}
+      WHERE gu.user_id = ${userId} AND g.active
+      ORDER BY 1`
   );
-  return rows;
 }
 
 async function dashboardUserGrants(companyId: number | null, dashboardId: string) {
-  const { rows } = await db.query(
-    `SELECT a.user_id AS "userId", u.username, u.email, ${levelOf('a')} AS level, a.access_level_id AS "levelId"
-       FROM ${T.dashboardUserAccess} a
-       JOIN ${T.users} u ON u.id = a.user_id
-      WHERE a.dashboard_id = ? AND u.company_id = ?
-      ORDER BY u.username`,
-    [dashboardId, companyId]
-  );
-  return rows;
+  if (companyId === null) return [];
+  const grants = await prisma.dashboardUserAccess.findMany({
+    where: { dashboardId, user: { companyId } },
+    include: { user: { select: { username: true, email: true } }, accessLevel: { select: { key: true } } },
+    orderBy: { user: { username: 'asc' } },
+  });
+  return grants.map((g) => ({
+    userId: g.userId,
+    username: g.user.username,
+    email: g.user.email,
+    level: g.accessLevel.key,
+    levelId: g.accessLevelId,
+  }));
 }
 
 async function dashboardGroupGrants(companyId: number | null, dashboardId: string) {
-  const { rows } = await db.query(
-    `SELECT gda.group_id AS "groupId", g.name AS "groupName", ${levelOf('gda')} AS level,
-            gda.access_level_id AS "levelId", g.active
-       FROM ${T.dashboardGroupAccess} gda
-       JOIN ${T.groups} g ON g.id = gda.group_id
-      WHERE gda.dashboard_id = ? AND g.company_id = ?
-      ORDER BY g.name`,
-    [dashboardId, companyId]
-  );
-  return rows;
+  if (companyId === null) return [];
+  const grants = await prisma.dashboardGroupAccess.findMany({
+    where: { dashboardId, group: { companyId } },
+    include: { group: { select: { name: true, active: true } }, accessLevel: { select: { key: true } } },
+    orderBy: { group: { name: 'asc' } },
+  });
+  return grants.map((g) => ({
+    groupId: g.groupId,
+    groupName: g.group.name,
+    level: g.accessLevel.key,
+    levelId: g.accessLevelId,
+    active: g.group.active,
+  }));
 }
 
 async function groupGrantLevels(groupId: number) {
-  const { rows } = await db.query(
-    `SELECT gda.dashboard_id, ${levelOf('gda')} AS access_level, gda.access_level_id
-       FROM ${T.dashboardGroupAccess} gda WHERE gda.group_id = ?`,
-    [groupId]
-  );
-  return rows;
+  const grants = await prisma.dashboardGroupAccess.findMany({
+    where: { groupId },
+    include: { accessLevel: { select: { key: true } } },
+  });
+  return grants.map((g) => ({
+    dashboard_id: g.dashboardId,
+    access_level: g.accessLevel.key,
+    access_level_id: g.accessLevelId,
+  }));
 }
 
 async function grantUser(userId: number, dashboardId: string, level: string, grantedBy: number | null): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.dashboardUserAccess} (user_id, dashboard_id, access_level_id, granted_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (user_id, dashboard_id)
-       DO UPDATE SET access_level_id = EXCLUDED.access_level_id, granted_by = EXCLUDED.granted_by`,
-    [userId, dashboardId, dashboardLevel(level), grantedBy]
-  );
+  const accessLevelId = dashboardLevel(level);
+  await prisma.dashboardUserAccess.upsert({
+    where: { userId_dashboardId: { userId, dashboardId } },
+    create: { userId, dashboardId, accessLevelId, grantedBy },
+    update: { accessLevelId, grantedBy },
+  });
 }
 
 async function grantCreatorAdmin(userId: number, dashboardId: string): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.dashboardUserAccess} (user_id, dashboard_id, access_level_id, granted_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (user_id, dashboard_id) DO UPDATE SET access_level_id = EXCLUDED.access_level_id`,
-    [userId, dashboardId, dashboardLevel('admin'), userId]
-  );
+  const accessLevelId = dashboardLevel('admin');
+  await prisma.dashboardUserAccess.upsert({
+    where: { userId_dashboardId: { userId, dashboardId } },
+    create: { userId, dashboardId, accessLevelId, grantedBy: userId },
+    update: { accessLevelId },
+  });
 }
 
 async function revokeUser(userId: number, dashboardId: string): Promise<boolean> {
-  const result = await db.query(
-    `DELETE FROM ${T.dashboardUserAccess} WHERE user_id = ? AND dashboard_id = ?`,
-    [userId, dashboardId]
-  );
-  return result.rowCount! > 0;
+  const result = await prisma.dashboardUserAccess.deleteMany({ where: { userId, dashboardId } });
+  return result.count > 0;
 }
 
 async function grantGroup(groupId: number, dashboardId: string, level: string, grantedBy: number | null): Promise<void> {
-  await db.query(
-    `INSERT INTO ${T.dashboardGroupAccess} (group_id, dashboard_id, access_level_id, granted_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (group_id, dashboard_id)
-       DO UPDATE SET access_level_id = EXCLUDED.access_level_id, granted_by = EXCLUDED.granted_by`,
-    [groupId, dashboardId, dashboardLevel(level), grantedBy]
-  );
+  const accessLevelId = dashboardLevel(level);
+  await prisma.dashboardGroupAccess.upsert({
+    where: { groupId_dashboardId: { groupId, dashboardId } },
+    create: { groupId, dashboardId, accessLevelId, grantedBy },
+    update: { accessLevelId, grantedBy },
+  });
 }
 
 async function revokeGroup(groupId: number, dashboardId: string): Promise<boolean> {
-  const result = await db.query(
-    `DELETE FROM ${T.dashboardGroupAccess} WHERE group_id = ? AND dashboard_id = ?`,
-    [groupId, dashboardId]
-  );
-  return result.rowCount! > 0;
+  const result = await prisma.dashboardGroupAccess.deleteMany({ where: { groupId, dashboardId } });
+  return result.count > 0;
 }
 
 export {
