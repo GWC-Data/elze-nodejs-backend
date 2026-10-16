@@ -133,6 +133,18 @@ describe('buildFilters', () => {
     expect(resolveColumn).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts a single value as a one-item selection', () => {
+    expect(buildFilters({ slicers: SLICERS }, { sGenre: 'Drama' }, meta)).toEqual([
+      { column: 'Genre', operator: 'IN', values: ['Drama'], columnMeta: col('Genre') },
+    ]);
+  });
+
+  it.each([[{ $ne: null }], [['Drama', { $ne: null }]], [[null]]])('refuses the selection %j', (selection) => {
+    expect(() => buildFilters({ slicers: SLICERS }, { sGenre: selection }, meta)).toThrow(
+      'The selection for slicer "sGenre" must be a value or a list of values.'
+    );
+  });
+
   it('returns no filters when the spec has no slicers', () => {
     expect(buildFilters({}, { sGenre: ['Drama'] }, meta)).toEqual([]);
   });
@@ -466,15 +478,39 @@ describe('planCard', () => {
   it.each([
     [5, 5],
     ['10', 10],
-    ['12 rows', 12],
+    ['all', null],
+    ['', null],
     [undefined, null],
     [0, null],
   ])('parses limits %j as %j', (limits, expected) => {
     expect(planCard({ ...revenueByMovie, limits }, [], meta, 0).limit).toBe(expected);
   });
 
-  it('parses a limit with trailing SQL down to its leading integer', () => {
-    expect(planCard({ ...revenueByMovie, limits: '5; DROP TABLE cinema_analysis' }, [], meta, 0).limit).toBe(5);
+  it.each(['5; DROP TABLE cinema_analysis', '12 rows', '-5', '2.5'])('rejects limits %j', (limits) => {
+    expect(() => planCard({ ...revenueByMovie, limits }, [], meta, 0)).toThrow(
+      `Card "limits" must be a whole number of rows, 0 or "all" for no limit (got "${limits}").`
+    );
+  });
+
+  it('finds the date parse format whatever the case of the column name', () => {
+    const card = {
+      id: 'byMonth',
+      columns: [{ column: 'Revenue', mapping: 'VALUE' }],
+      dateGrain: { column: 'booking date', dateTimeElement: 'MONTH' },
+    };
+    expect(planCard(card, [], meta, 0).dateGroup.parseFormat).toBe('DD-Mon-YY');
+  });
+
+  it('refuses a column that is both a group and a value', () => {
+    const card = {
+      id: 'countByGenre',
+      columns: [
+        { column: 'Genre', mapping: 'SERIES' },
+        { column: 'genre', mapping: 'VALUE', aggregation: 'COUNT' },
+      ],
+      groupBy: [{ column: 'Genre' }],
+    };
+    expect(() => planCard(card, [], meta, 0)).toThrow('"genre" is both a group and a value in this card');
   });
 
   it('rejects a dimension that is not in the table', () => {
@@ -525,6 +561,17 @@ describe('planCard', () => {
           0
         ).orderBy
       ).toEqual([{ column: 'Seats Sold', direction: 'DESC', columnMeta: col('Seats Sold'), aggregation: 'MAX' }]);
+    });
+
+    it('refuses to order a card that only has measures by a raw column', () => {
+      const totals = {
+        id: 'totals',
+        columns: [{ column: 'Revenue', mapping: 'VALUE', aggregation: 'SUM' }],
+        orderBy: 'Genre',
+      };
+      expect(() => planCard(totals, [], meta, 0)).toThrow(
+        `orderBy column "Genre" must be one of the card's groupBy dimensions or measures`
+      );
     });
 
     it('lets an explicit aggregation override the measure aggregation', () => {

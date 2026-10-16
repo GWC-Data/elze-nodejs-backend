@@ -17,6 +17,13 @@ function sameColumn(a: unknown, b: unknown): boolean {
   return String(a || '').toLowerCase() === String(b || '').toLowerCase();
 }
 
+function parseFormatOf(meta: Meta, column: string, colMeta: any): string | null {
+  const formats: Record<string, string> = meta.dateParse || {};
+  if (formats[column]) return formats[column];
+  const key = Object.keys(formats).find((k) => sameColumn(k, column) || sameColumn(k, colMeta?.name));
+  return key ? formats[key] : null;
+}
+
 function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
   const colMeta = getColumn(meta, column);
   const resolved = resolveDateGrain(grain);
@@ -24,7 +31,7 @@ function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
     column,
     grain: resolved.key,
     isString: colMeta.isString,
-    parseFormat: meta.dateParse?.[column] || null,
+    parseFormat: parseFormatOf(meta, column, colMeta),
     columnMeta: colMeta,
   };
 }
@@ -54,12 +61,17 @@ function buildFilters(spec: Spec, filters: Record<string, any> | null | undefine
   if (!filters) return list;
   for (const s of spec.slicers || []) {
     const selected = filters[s.id];
-    if (!selected?.length) continue;
+    if (selected === undefined || selected === null || selected === '') continue;
+    const values: unknown[] = Array.isArray(selected) ? selected : [selected];
+    if (values.some((v) => v === null || typeof v === 'object')) {
+      throw new Error(`The selection for slicer "${s.id}" must be a value or a list of values.`);
+    }
+    if (!values.length) continue;
     const colMeta = getColumn(meta, s.column);
     list.push({
       column: s.column,
       operator: 'IN',
-      values: selected.map(String),
+      values: values.map(String),
       columnMeta: colMeta,
     });
   }
@@ -110,7 +122,7 @@ function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan
     }
 
     const isDimension = dimensions.some((d) => sameColumn(d.column, column));
-    if (!isDimension && (dimensions.length || dateGroup)) {
+    if (!isDimension && (dimensions.length || dateGroup || measures.length)) {
       throw new Error(
         `orderBy column "${column}" must be one of the card's groupBy dimensions or measures, ` +
           'or must specify an "aggregation".'
@@ -119,6 +131,15 @@ function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan
 
     return { column, direction, columnMeta: colMeta, aggregation: null };
   });
+}
+
+function readLimit(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '' || String(raw).toLowerCase() === 'all') return null;
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error(`Card "limits" must be a whole number of rows, 0 or "all" for no limit (got "${raw}").`);
+  }
+  return limit || null;
 }
 
 function cardColumns(card: Spec | null | undefined): any[] {
@@ -181,6 +202,15 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
     .filter((c) => !dateGroup || !sameColumn(c, dateGroup.column))
     .map((c) => ({ column: c, columnMeta: getColumn(meta, c) }));
 
+  const grouped = [...dimensions.map((d) => d.column), ...(dateGroup ? [dateGroup.column] : [])];
+  const clash = measures.find((m) => grouped.some((g) => sameColumn(g, m.column)));
+  if (clash) {
+    throw new Error(
+      `"${clash.column}" is both a group and a value in this card, so their results would overwrite each other. ` +
+        `Use another column as the value; to count rows per ${clash.column}, count a column that is never empty.`
+    );
+  }
+
   return {
     kind: 'card',
     id: card.id,
@@ -192,7 +222,7 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
     dimensions,
     dateGroup,
     orderBy: buildOrderBy(card, meta, measures, dimensions, dateGroup),
-    limit: card.limits ? parseInt(card.limits, 10) : null,
+    limit: readLimit(card.limits),
     filters: filtersList,
   };
 }

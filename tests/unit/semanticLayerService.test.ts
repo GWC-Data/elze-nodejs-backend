@@ -415,6 +415,24 @@ describe('buildWhereSql', () => {
       if (value !== '?') expect(where).not.toContain(value);
     }
   });
+
+  it('compares number and date columns as their own type, not as text', () => {
+    expect(buildWhereSql([filter(revenue, ['9', '100'], 'BETWEEN')])).toEqual({
+      where: ' WHERE "Revenue" BETWEEN ? AND ?',
+      params: ['9', '100'],
+    });
+    expect(buildWhereSql([filter(showDate, ['2026-01-01'], 'GTE')])).toEqual({
+      where: ' WHERE "Show Date" >= ?',
+      params: ['2026-01-01'],
+    });
+  });
+
+  it('refuses a comparison on a number column with a value that is not a number', () => {
+    expect(() => buildWhereSql([filter(revenue, ['lots'], 'GT')])).toThrow(
+      'Filter on "Revenue" needs numeric values: it is a number column.'
+    );
+    expect(() => buildWhereSql([filter(seats, ['', '10'], 'BETWEEN')])).toThrow('needs numeric values');
+  });
 });
 
 describe('parsePeriodKey', () => {

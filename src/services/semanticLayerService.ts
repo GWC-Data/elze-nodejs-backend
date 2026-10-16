@@ -221,32 +221,34 @@ function buildNonEmptyCondition(column: string, colMeta: ColumnMeta): string {
   return parts.join(' AND ');
 }
 
+function isNumberLike(value: unknown): boolean {
+  return value !== null && value !== undefined && String(value).trim() !== '' && Number.isFinite(Number(value));
+}
+
 function buildWhereSql(filters: PlanNode[] | null | undefined): { where: string; params: string[] } {
   const conditions: string[] = [];
   const params: string[] = [];
   for (const f of filters || []) {
     const col = quoteIdentifier(resolvedName(f));
     const op = resolveOperator(f.operator || 'IN');
-
-    const cmp = isStringColumn(f.columnMeta) ? col : `${col}::text`;
+    const values = Array.isArray(f.values) ? f.values : [];
 
     if (op === 'IN') {
-      const values = Array.isArray(f.values) ? f.values : [];
       if (!values.length) continue;
+      const cmp = isStringColumn(f.columnMeta) ? col : `${col}::text`;
       const placeholders = values.map(() => '?').join(', ');
       conditions.push(`${cmp} IN (${placeholders})`);
       params.push(...values.map(String));
-    } else if (op === 'BETWEEN') {
-      const values = Array.isArray(f.values) ? f.values : [];
-      if (values.length < 2) continue;
-      conditions.push(`${cmp} BETWEEN ? AND ?`);
-      params.push(String(values[0]), String(values[1]));
-    } else {
-      const values = Array.isArray(f.values) ? f.values : [];
-      if (!values.length) continue;
-      conditions.push(`${cmp} ${op} ?`);
-      params.push(String(values[0]));
+      continue;
     }
+
+    const operands = values.slice(0, op === 'BETWEEN' ? 2 : 1);
+    if (operands.length < (op === 'BETWEEN' ? 2 : 1)) continue;
+    if (isNumericColumn(f.columnMeta) && !operands.every(isNumberLike)) {
+      throw new Error(`Filter on "${resolvedName(f)}" needs numeric values: it is a number column.`);
+    }
+    conditions.push(op === 'BETWEEN' ? `${col} BETWEEN ? AND ?` : `${col} ${op} ?`);
+    params.push(...operands.map(String));
   }
   return {
     where: conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '',

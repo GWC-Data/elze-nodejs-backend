@@ -581,11 +581,11 @@ describe('generateSql from planned dashboard specs', () => {
     expect(splitPlaceholders(sql)).toHaveLength(params.length + 1);
   });
 
-  it('inlines nothing but the leading integer of a card limit', () => {
-    const card = { ...revenueByMovie, limits: '5; DROP TABLE cinema_analysis' };
-    const { sql } = generateSql(planCard(card, [], meta, 0));
-    expect(sql.endsWith(' LIMIT 5')).toBe(true);
-    expect(sql).not.toContain('DROP');
+  it('never inlines anything but a whole number as the card limit', () => {
+    expect(generateSql(planCard({ ...revenueByMovie, limits: '5' }, [], meta, 0)).sql.endsWith(' LIMIT 5')).toBe(true);
+    expect(() => planCard({ ...revenueByMovie, limits: '5; DROP TABLE cinema_analysis' }, [], meta, 0)).toThrow(
+      'Card "limits" must be a whole number'
+    );
   });
 
   it('omits LIMIT when a card limit is not a number', () => {
