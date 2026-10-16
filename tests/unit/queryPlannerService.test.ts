@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/constants/query';
-import { resolveColumn } from '../../src/services/metadataService';
+import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/modules/queryEngine/queryConstants';
+import { resolveColumn } from '../../src/modules/queryEngine/metadataService';
 import {
   buildFilters,
   kpiValueColumn,
@@ -8,9 +8,9 @@ import {
   planKpi,
   planSlicer,
   readKpiPeriod,
-} from '../../src/services/queryPlannerService';
+} from '../../src/modules/queryEngine/queryPlannerService';
 
-vi.mock('../../src/services/metadataService', () => ({
+vi.mock('../../src/modules/queryEngine/metadataService', () => ({
   resolveColumn: vi.fn((table: any, name: string) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       throw new Error('Invalid column name: empty or non-string');

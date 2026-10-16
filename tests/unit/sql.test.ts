@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escapeLiteral, quoteIdentifier, quoteQualified, splitPlaceholders } from '../../src/tools/sql';
+import { escapeLiteral, quoteIdentifier, quoteQualified, splitPlaceholders } from '../../src/shared/db/sql';
 
 describe('quoteIdentifier', () => {
   it('wraps a name in double quotes', () => {

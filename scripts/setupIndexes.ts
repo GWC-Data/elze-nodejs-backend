@@ -1,8 +1,8 @@
 import config from '../src/config';
 const { db, prisma } = config.database;
-import * as dashboards from '../src/services/dashboardService';
-import { resolveSourceMetadata } from '../src/services/metadataService';
-import { quoteIdentifier, quoteQualified } from '../src/tools/sql';
+import * as dashboards from '../src/modules/dashboards/dashboardService';
+import { resolveSourceMetadata } from '../src/modules/queryEngine/metadataService';
+import { quoteIdentifier, quoteQualified } from '../src/shared/db/sql';
 
 type ColMeta = Record<string, any>;
 type Spec = Record<string, any>;

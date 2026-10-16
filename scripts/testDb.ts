@@ -4,7 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from 'pg';
 import { BACKEND_ROOT } from '../src/config/env';
-import { quoteIdentifier } from '../src/tools/sql';
+import { quoteIdentifier } from '../src/shared/db/sql';
 
 interface Suite {
   file: string;

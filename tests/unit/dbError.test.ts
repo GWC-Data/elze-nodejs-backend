@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { constraintOf, dbMessage, sqlState } from '../../src/tools/dbError';
+import { constraintOf, dbMessage, sqlState } from '../../src/shared/db/dbError';
 
 const adapterError = {
   code: 'P2002',

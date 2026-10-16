@@ -1,6 +1,6 @@
 import config from '../src/config';
 const { db } = config.database;
-import { quoteIdentifier } from '../src/tools/sql';
+import { quoteIdentifier } from '../src/shared/db/sql';
 
 const COLUMNS: [string, string][] = [
   ['Booking Date', 'text'],

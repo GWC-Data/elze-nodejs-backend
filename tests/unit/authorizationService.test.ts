@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as catalogueRepository from '../../src/repositories/catalogueRepository';
-import { loadCatalogue } from '../../src/services/catalogueService';
+import * as catalogueRepository from '../../src/modules/catalogue/catalogueRepository';
+import { loadCatalogue } from '../../src/modules/catalogue/catalogueService';
 import {
   assertCanAssignRole,
   assertCanManageUser,
@@ -12,11 +12,11 @@ import {
   missingFeature,
   resolveTargetCompany,
   strongestLevel,
-} from '../../src/services/authorizationService';
+} from '../../src/modules/auth/authorizationService';
 import { catalogueRows } from './support/catalogueRows';
 import { errorCode } from './support/errorCode';
 
-vi.mock('../../src/repositories/catalogueRepository', () => ({ loadAll: vi.fn() }));
+vi.mock('../../src/modules/catalogue/catalogueRepository', () => ({ loadAll: vi.fn() }));
 
 const ALL_FEATURES = ['metadata_lakehouse', 'agents', 'context_layer'];
 

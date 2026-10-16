@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/constants/query';
-import { optimizePlans } from '../../src/services/queryOptimizerService';
-import { buildFilters, planCard, planKpi, planSlicer } from '../../src/services/queryPlannerService';
-import { generateSql } from '../../src/services/sqlGeneratorService';
-import { splitPlaceholders } from '../../src/tools/sql';
+import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/modules/queryEngine/queryConstants';
+import { optimizePlans } from '../../src/modules/queryEngine/queryOptimizerService';
+import { buildFilters, planCard, planKpi, planSlicer } from '../../src/modules/queryEngine/queryPlannerService';
+import { generateSql } from '../../src/modules/queryEngine/sqlGeneratorService';
+import { splitPlaceholders } from '../../src/shared/db/sql';
 
-vi.mock('../../src/services/metadataService', () => ({
+vi.mock('../../src/modules/queryEngine/metadataService', () => ({
   resolveColumn: vi.fn((table: any, name: string) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       throw new Error('Invalid column name: empty or non-string');

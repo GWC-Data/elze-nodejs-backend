@@ -1,0 +1,64 @@
+import * as scopeRepository from './scopeRepository';
+import { fail } from '../../shared/errors/AppError';
+import { scopeProblem } from './scopeValidator';
+import { audit, EVENTS } from '../audit/auditService';
+import type { Actor } from '../../shared/types/actor';
+import type { ScopeDimension } from './scopeRepository';
+
+type UserScopes = Record<string, string[]>;
+
+const ENFORCED = false;
+
+async function scopeOptions() {
+  const out: Array<{ dimension: string; label: string; values: unknown[]; error?: string }> = [];
+  for (const dimension of await scopeRepository.listDimensions()) {
+    const label = dimension.label || dimension.dimension;
+    try {
+      out.push({ dimension: dimension.dimension, label, values: await scopeRepository.distinctValues(dimension) });
+    } catch (err: any) {
+      console.warn(`[rbac] scope dimension "${dimension.dimension}" is unreadable: ${err.message}`);
+      out.push({ dimension: dimension.dimension, label, values: [], error: err.message });
+    }
+  }
+  return { enforced: ENFORCED, dimensions: out };
+}
+
+async function getUserScopes(userId: number): Promise<UserScopes> {
+  if (!userId) return {};
+  const scopes: UserScopes = {};
+  for (const row of await scopeRepository.userScopeRows(userId)) {
+    scopes[row.dimension] ??= [];
+    scopes[row.dimension].push(row.value);
+  }
+  return scopes;
+}
+
+async function describeUserScopes(user: { id: number }) {
+  return { userId: user.id, scopes: await getUserScopes(user.id), enforced: ENFORCED };
+}
+
+async function replaceUserScopes(
+  actor: Actor,
+  user: { id: number; username: string },
+  scopes: Record<string, unknown[]>
+) {
+  const dimensions = new Map<string, ScopeDimension>(
+    (await scopeRepository.listDimensions()).map((d) => [d.dimension, d])
+  );
+  const problem = scopeProblem(scopes, (key) => dimensions.get(key) || null);
+  if (problem) throw fail('VALIDATION_ERROR', problem);
+
+  const unique = Object.fromEntries(
+    Object.entries(scopes).map(([dimension, values]) => [dimension, [...new Set(values.map((v) => String(v)))]])
+  );
+  await scopeRepository.replaceUserScopes(user.id, unique, actor.id);
+
+  audit(EVENTS.USER_SCOPE_UPDATED, actor, {
+    userId: user.id,
+    targetUsername: user.username,
+    dimensions: Object.keys(scopes),
+  });
+  return { userId: user.id, scopes, enforced: ENFORCED };
+}
+
+export { scopeOptions, describeUserScopes, replaceUserScopes };

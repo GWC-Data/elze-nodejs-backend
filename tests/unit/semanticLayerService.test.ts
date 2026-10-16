@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/constants/query';
+import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES } from '../../src/modules/queryEngine/queryConstants';
 import {
   buildAggExpression,
   buildDateGroupExpression,
@@ -11,7 +11,7 @@ import {
   resolvedName,
   resolveSortDirection,
   validateAggregation,
-} from '../../src/services/semanticLayerService';
+} from '../../src/modules/queryEngine/semanticLayerService';
 
 function column(name: string, typname: string, columnType: string = typname) {
   return {

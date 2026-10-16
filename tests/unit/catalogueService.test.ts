@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import * as catalogueRepository from '../../src/repositories/catalogueRepository';
-import * as catalogue from '../../src/services/catalogueService';
+import * as catalogueRepository from '../../src/modules/catalogue/catalogueRepository';
+import * as catalogue from '../../src/modules/catalogue/catalogueService';
 import { catalogueRows, FEATURE } from './support/catalogueRows';
 
-vi.mock('../../src/repositories/catalogueRepository', () => ({ loadAll: vi.fn() }));
+vi.mock('../../src/modules/catalogue/catalogueRepository', () => ({ loadAll: vi.fn() }));
 
 const loadAll = vi.mocked(catalogueRepository.loadAll);
 

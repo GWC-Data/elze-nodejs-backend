@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PAGE_SIZE, MAX_SEARCH_LENGTH } from '../../src/constants/pagination';
-import { parseListQuery } from '../../src/validators/listValidator';
+import { MAX_PAGE_SIZE, MAX_SEARCH_LENGTH } from '../../src/shared/validation/pageLimits';
+import { parseListQuery } from '../../src/shared/validation/listValidator';
 import { errorCode } from './support/errorCode';
 
 const SORTABLE = { name: 'u.name', created: 'u.created_at' };

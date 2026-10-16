@@ -1,12 +1,12 @@
 import config from '../src/config';
 const { prisma, withTransaction } = config.database;
 import { Prisma } from '../src/generated/prisma/client';
-import { rawRows } from '../src/repositories/baseRepository';
-import { bootstrapAppMeta } from '../src/services/bootstrapService';
-import { issueActivationToken, activationUrl } from '../src/services/activationService';
-import { revokeAllForUser } from '../src/services/tokenService';
-import { sendEmail } from '../src/services/emailService';
-import { accountActivation } from '../src/views/templates/accountActivationTemplate';
+import { rawRows } from '../src/shared/db/baseRepository';
+import { bootstrapAppMeta } from '../src/modules/system/bootstrapService';
+import { issueActivationToken, activationUrl } from '../src/modules/auth/activationService';
+import { revokeAllForUser } from '../src/modules/auth/tokenService';
+import { sendEmail } from '../src/shared/email/emailService';
+import { accountActivation } from '../src/modules/auth/accountActivationTemplate';
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
 interface Args {

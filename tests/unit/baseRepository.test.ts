@@ -9,7 +9,7 @@ import {
   plainRow,
   rawRows,
   sqlOf,
-} from '../../src/repositories/baseRepository';
+} from '../../src/shared/db/baseRepository';
 import { rejectionCode } from './support/errorCode';
 
 function fakeTx(...results: Record<string, unknown>[][]) {

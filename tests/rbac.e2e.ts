@@ -9,7 +9,7 @@ import {
   permissionIdsOf,
   permissionKeysOf,
   systemRoleId,
-} from '../src/services/catalogueService';
+} from '../src/modules/catalogue/catalogueService';
 
 const pids = (...keys: string[]) => permissionIdsOf(keys);
 const keysIn = (ids: unknown) => permissionKeysOf(Array.isArray(ids) ? ids : []);

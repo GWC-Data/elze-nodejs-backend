@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import config from './config';
 import app from './app';
-import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrapService';
+import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './modules/system/bootstrapService';
 
 const { APPLICATION_URL } = config.auth;
 const { db, prisma } = config.database;

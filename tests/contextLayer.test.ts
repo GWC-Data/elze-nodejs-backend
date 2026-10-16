@@ -7,23 +7,23 @@ process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || '
 
 import config = require('../src/config');
 const { db } = config.database;
-import contextModel = require('../src/models/contextModel');
+import contextModel = require('../src/modules/contextLayer/contextModel');
 const { CT } = contextModel;
-import bootstrapService = require('../src/services/bootstrapService');
+import bootstrapService = require('../src/modules/system/bootstrapService');
 const { bootstrapAppMeta } = bootstrapService;
-import secretBox = require('../src/tools/secretBox');
+import secretBox = require('../src/shared/security/secretBox');
 const { seal, open, hint } = secretBox;
-import domo = require('../src/services/providers/domoProvider');
-import throttleTools = require('../src/tools/throttle');
+import domo = require('../src/modules/contextLayer/domoProvider');
+import throttleTools = require('../src/modules/contextLayer/throttle');
 const { Throttle } = throttleTools;
-import service = require('../src/services/connectionService');
-import store = require('../src/services/contextService');
-import publish = require('../src/services/publishService');
-import sharing = require('../src/services/contextSharingService');
-import agentGate = require('../src/services/agentGateService');
-import catalogue = require('../src/services/catalogueService');
+import service = require('../src/modules/contextLayer/connectionService');
+import store = require('../src/modules/contextLayer/contextService');
+import publish = require('../src/modules/contextLayer/publishService');
+import sharing = require('../src/modules/contextLayer/contextSharingService');
+import agentGate = require('../src/modules/contextLayer/agentGateService');
+import catalogue = require('../src/modules/catalogue/catalogueService');
 const { accessLevelId, systemRoleId } = catalogue;
-import type { Actor } from '../src/types/actor';
+import type { Actor } from '../src/shared/types/actor';
 
 const level = (key: string) => ({ levelId: accessLevelId('context', key) });
 

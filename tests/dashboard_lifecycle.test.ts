@@ -6,19 +6,19 @@ process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || '
 
 import config from '../src/config';
 const { db } = config.database;
-import { bootstrapAppMeta } from '../src/services/bootstrapService';
-import * as registry from '../src/services/dashboardService';
-import * as access from '../src/services/accessService';
-import * as roleRepository from '../src/repositories/roleRepository';
-import { COMPANY_ADMIN, USER } from '../src/constants/roles';
+import { bootstrapAppMeta } from '../src/modules/system/bootstrapService';
+import * as registry from '../src/modules/dashboards/dashboardService';
+import * as access from '../src/modules/access/accessService';
+import * as roleRepository from '../src/modules/roles/roleRepository';
+import { COMPANY_ADMIN, USER } from '../src/modules/catalogue/roleTiers';
 import {
   isPlatformOnly,
   loadCatalogue,
   permissionKeys,
   permissionKeysOf,
   systemRoleId,
-} from '../src/services/catalogueService';
-import type { Actor } from '../src/types/actor';
+} from '../src/modules/catalogue/catalogueService';
+import type { Actor } from '../src/shared/types/actor';
 
 async function runTests(): Promise<void> {
   console.log('=== Starting Multi-Tenant Dashboard Architecture Tests ===\n');

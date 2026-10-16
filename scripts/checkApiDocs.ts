@@ -2,14 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BACKEND_ROOT, OPENAPI_FILE } from '../src/config/env';
 
-const ROUTES_DIR = path.join(BACKEND_ROOT, 'src', 'routes');
-const ENTRY_FILE = 'index.ts';
+const ENTRY_FILE = path.join(BACKEND_ROOT, 'src', 'routes.ts');
 const API_PREFIX = '/api';
 const UNDOCUMENTED_MOUNTS = new Set([`${API_PREFIX}/docs`]);
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 
 const ROUTE_CALL = /router\.(get|post|put|patch|delete|use)\(\s*(['"`])([^'"`]*)\2(?:\s*,\s*([A-Za-z_$][\w$]*))?/g;
-const ROUTE_IMPORT = /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"]\.\/([\w]+)['"]/g;
+const ROUTE_IMPORT = /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"](\.{1,2}\/[^'"]+Routes)['"]/g;
 
 function joinPath(prefix: string, route: string): string {
   const joined = `${prefix}/${route}`.replace(/\/+/g, '/');
@@ -22,9 +21,11 @@ function toOpenApiPath(route: string): string {
 
 function routesOf(file: string, prefix: string, seen: Set<string>, out: Set<string>): void {
   if (seen.has(file)) throw new Error(`route files mount each other in a loop at ${file}`);
-  const source = fs.readFileSync(path.join(ROUTES_DIR, file), 'utf8');
+  const source = fs.readFileSync(file, 'utf8');
   const imports = new Map<string, string>();
-  for (const [, name, module] of source.matchAll(ROUTE_IMPORT)) imports.set(name, `${module}.ts`);
+  for (const [, name, module] of source.matchAll(ROUTE_IMPORT)) {
+    imports.set(name, path.resolve(path.dirname(file), `${module}.ts`));
+  }
 
   for (const [, method, , route, handler] of source.matchAll(ROUTE_CALL)) {
     const full = joinPath(prefix, route);
@@ -34,7 +35,8 @@ function routesOf(file: string, prefix: string, seen: Set<string>, out: Set<stri
     }
     if (UNDOCUMENTED_MOUNTS.has(full)) continue;
     const child = handler && imports.get(handler);
-    if (!child) throw new Error(`${file}: cannot follow router.use('${route}', ${handler ?? '?'})`);
+    if (!child)
+      throw new Error(`${path.relative(BACKEND_ROOT, file)}: cannot follow router.use('${route}', ${handler ?? '?'})`);
     routesOf(child, full, new Set([...seen, file]), out);
   }
 }

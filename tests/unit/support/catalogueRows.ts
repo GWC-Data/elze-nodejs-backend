@@ -1,5 +1,5 @@
-import { EVENTS } from '../../../src/constants/auditEvents';
-import { COMPANY_ADMIN, SUPER_ADMIN, USER } from '../../../src/constants/roles';
+import { EVENTS } from '../../../src/modules/audit/auditEvents';
+import { COMPANY_ADMIN, SUPER_ADMIN, USER } from '../../../src/modules/catalogue/roleTiers';
 
 const FEATURE = {
   lakehouse: 'feature-lakehouse',

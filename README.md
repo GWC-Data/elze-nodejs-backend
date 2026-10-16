@@ -1,30 +1,32 @@
 # Backend — API + Query Engine
 
 Express API in front of a generic, metadata-driven query engine, on PostgreSQL. Nothing in
-the query engine (`src/services/query*.service.ts`, `sqlGenerator`, `semanticLayer`) knows anything about a particular dashboard: table names, columns, measures,
+the query engine (`src/modules/queryEngine/`) knows anything about a particular dashboard: table names, columns, measures,
 dimensions, filters, aggregations and date grains all arrive from dashboard JSON and are
 validated against the live catalogue before reaching SQL.
 
 ## Layout
 
-Layered MVC + service. A request goes route -> middleware -> controller -> service ->
-repository, and each layer has one job: routes declare paths and guards, controllers
-parse the request and send the response, services hold the business rules (they never
-see `req`/`res`), and repositories are the only code that touches the database or the
-runtime files.
+Feature modules over a shared core. Each module in `src/modules/` holds one feature end to
+end, with the files named after their layer: `<name>Routes.ts` declares paths and guards,
+`<name>Controller.ts` parses the request and sends the response, `<name>Service.ts` holds
+the business rules (services never see `req`/`res`), `<name>Repository.ts` is the only code
+that touches the database, and `<name>Serializer.ts` / `<name>Validator.ts` shape responses
+and check input. A request still goes route -> middleware -> controller -> service ->
+repository. Modules import each other's services directly; `src/shared/` holds what every
+module uses and imports nothing from `src/modules/`.
 
 ```
 backend/
 ├── src/
 │   ├── server.ts                    listen, startup tasks, graceful shutdown
 │   ├── app.ts                       express app: cors, json, cookies, /api, static + SPA fallback
+│   ├── routes.ts                    mounts every module's router under /api
 │   │
 │   ├── config/                      single export: require('./config').<env|app|auth|email|database|engine|context>
-│   │   ├── index.ts                 lazy namespaces over the files below
+│   │   ├── index.ts                 lazy namespaces over the files below (database lives in shared/db)
 │   │   ├── env.ts                   loads .env once, resolves directory roots
 │   │   ├── configError.ts           required/optional readers that fail loudly
-│   │   ├── pgPool.ts                the driver for the query engine, `?` placeholders, type coercions
-│   │   ├── database.ts              the one PostgreSQL pool, the Prisma client on it, withTransaction
 │   │   ├── appConfig.ts             fixed in source: TTLs, throttling, query concurrency
 │   │   ├── auth.ts                  tokens, cookies, password policy
 │   │   ├── email.ts                 the SMTP relay, read from the environment
@@ -32,31 +34,38 @@ backend/
 │   │   ├── context.ts               CREDENTIAL_SECRET, CONTEXT_MCP_* settings
 │   │   └── dashboards/default.json  runtime dashboard metadata (not source)
 │   │
-│   ├── routes/                      definitions only; index.ts mounts every router under /api
-│   ├── middleware/                  auth, csrf, requestTimer, error (404 + terminal handler)
-│   ├── controllers/                 one per router: parse request -> call service -> respond
-│   ├── services/                    business logic
-│   │   ├── auth, token, activation, onboarding, loginThrottle
-│   │   ├── authorization            the one allow/deny layer: can / assert / levels
-│   │   ├── user, company, group, role, access, scope, audit, platform, workspace
-│   │   ├── dashboard                spec resolution, caching, create/edit/delete, editor
-│   │   ├── queryEngine, queryPlanner, queryOptimizer, sqlGenerator,
-│   │   │   resultFormatter, semanticLayer, metadata    the query engine
-│   │   ├── contextLayer             orchestration for the /api/context endpoints
-│   │   ├── connection, context, version, publish, mcp  the context layer
-│   │   ├── email, bootstrap
-│   │   └── providers/               smtpProvider.ts, domoProvider.ts
-│   ├── repositories/                every database call and file read/write (baseRepository.ts: raw-SQL helpers, paging, scoping)
-│   ├── models/                      contextModel.ts (context store table names), cardModel.ts
-│   ├── generated/prisma/            Prisma client, written by `prisma generate` (gitignored)
-│   ├── views/
-│   │   ├── templates/               accountActivationTemplate.ts
-│   │   └── serializers/             row -> response shaping, per resource
-│   ├── validators/                  request validation (ids, strings, lists, users, scopes, dashboards, context)
-│   ├── constants/                   error codes, permissions, audit events, statuses, query vocabulary, ...
-│   ├── tools/                       AppError, apiResponse, jwt, hash, password, cookies, secretBox,
-│   │                                sql quoting, list/pagination helpers, slugify, caches
-│   └── types/                       Actor, and the req.actor/req.account typing for Express
+│   ├── modules/
+│   │   ├── auth/                    sign-in, refresh, sessions, activation, onboarding, login throttle,
+│   │   │                            authorization (can / assert / levels), authMiddleware, activation email
+│   │   ├── users/                   users, per-user extra permissions, row-level data scopes
+│   │   ├── companies/               companies, company features, the platform and workspace overviews
+│   │   ├── groups/                  groups and their members
+│   │   ├── roles/                   system roles and company roles, built-in role defaults
+│   │   ├── access/                  dashboard grants to users and groups
+│   │   ├── catalogue/               permissions, features, access levels, system roles, connectors and
+│   │   │                            audit event types, loaded from the database; role tier names
+│   │   ├── audit/                   the audit trail and its event names
+│   │   ├── dashboards/              dashboard specs, the editor (metadata routes), card model
+│   │   ├── contextLayer/            warehouse connections, context store, review, versions, publish,
+│   │   │                            sharing, MCP, the agent gate, the Domo provider and its throttle
+│   │   ├── queryEngine/             metadata, planner, optimizer, SQL generator, semantic layer,
+│   │   │                            result formatter, query repository and cache
+│   │   └── system/                  startup bootstrap, health, API docs
+│   │
+│   ├── shared/
+│   │   ├── db/                      database.ts (pool + Prisma client + withTransaction), pgPool.ts (the
+│   │   │                            query engine's driver), baseRepository.ts (raw-SQL helpers, paging,
+│   │   │                            scoping), sql quoting, dbError, listQuery, statuses
+│   │   ├── http/                    apiResponse, csrf, requestTimer and error middleware
+│   │   ├── errors/                  AppError, error codes, PostgreSQL error codes
+│   │   ├── security/                jwt, password, hash, secretBox, cookies, session names
+│   │   ├── email/                   emailService and the SMTP provider
+│   │   ├── validation/              common and list validators, page limits, pagination
+│   │   ├── cache/                   ttlCache
+│   │   ├── text/                    slugify
+│   │   └── types/                   Actor, and the req.actor/req.account typing for Express
+│   │
+│   └── generated/prisma/            Prisma client, written by `prisma generate` (gitignored)
 │
 ├── biome.json                       lint and format rules
 ├── vitest.config.mts                unit test runner settings
@@ -70,7 +79,7 @@ backend/
 │
 ├── scripts/setupIndexes.ts          creates indexes for slicer/groupBy columns
 ├── scripts/resetAccess.ts           emails an account a fresh activation link
-├── scripts/checkApiDocs.ts          fails when docs/openapi.json and src/routes disagree
+├── scripts/checkApiDocs.ts          fails when docs/openapi.json and the routers disagree
 ├── scripts/testDb.ts                runs the integration suites, each in a throwaway database
 │
 ├── tests/unit/                      Vitest unit tests, no database (support/ holds shared fixtures)
@@ -85,19 +94,19 @@ backend/
 
 ```
 GET /api/dashboard/<id>
-  routes/dashboardRoutes.ts           requirePermission('dashboard.read')
-  middleware/authMiddleware.ts        verify access token -> resolve the actor
-                                       requireDashboardAccess('view')  <- before any SQL
-  controllers/dashboardController.ts  parse filters
-  services/dashboardService.ts        dashboardId -> dashboard JSON, hydrateView
-  services/queryEngineService.ts      hydrateDashboard
-    services/metadataService          resolve + validate table and columns
-    services/queryPlannerService      one isolated plan per card / slicer
-    services/queryOptimizerService    merge compatible KPI queries
-    services/sqlGeneratorService      parameterised SQL
-    tools/queryCache                   keyed on SQL + bound params
-    repositories/queryRepository      PostgreSQL, bounded concurrency
-    services/resultFormatterService   rows -> cards / slicers
+  dashboards/dashboardRoutes.ts         requirePermission('dashboard.read')
+  auth/authMiddleware.ts                verify access token -> resolve the actor
+                                         requireDashboardAccess('view')  <- before any SQL
+  dashboards/dashboardController.ts     parse filters
+  dashboards/dashboardService.ts        dashboardId -> dashboard JSON, hydrateView
+  queryEngine/queryEngineService.ts     hydrateDashboard
+    queryEngine/metadataService         resolve + validate table and columns
+    queryEngine/queryPlannerService     one isolated plan per card / slicer
+    queryEngine/queryOptimizerService   merge compatible KPI queries
+    queryEngine/sqlGeneratorService     parameterised SQL
+    queryEngine/queryCache              keyed on SQL + bound params
+    queryEngine/queryRepository         PostgreSQL, bounded concurrency
+    queryEngine/resultFormatterService  rows -> cards / slicers
   JSON response
 ```
 
@@ -111,7 +120,7 @@ would misstate every visual.
 
 ## Cards
 
-A dashboard declares one ordered `cards` list. `models/cardModel.ts` reads each card's
+A dashboard declares one ordered `cards` list. `modules/dashboards/cardModel.ts` reads each card's
 `chartType` to decide whether it is planned as a KPI badge (`planKpi` — one aggregated
 value, optionally compared across a date grain) or as a chart (`planCard`). Nothing else
 distinguishes them, so the same JSON keys mean the same thing on every card and the
@@ -159,7 +168,7 @@ dashboard, which cannot mean anything now that dashboards belong to companies.
 
 ## Access control
 
-RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/middleware/authMiddleware.ts`, and stores its data in
+RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/modules/auth/authMiddleware.ts`, and stores its data in
 the **same database as the reporting tables** — one `DB_NAME`, one pool, created
 automatically on first start.
 
@@ -247,7 +256,7 @@ validated: the only correct value is one the client cannot influence.
 
 ### Dashboards are still files
 
-There is no `dashboards` table. `services/dashboardService.ts` remains the only source of
+There is no `dashboards` table. `modules/dashboards/dashboardService.ts` remains the only source of
 truth for which dashboards exist, so assignments and grants store the dashboard id as plain
 text, validated against the registry on write and joined against it on read.
 
@@ -275,7 +284,7 @@ Only the HMAC of a refresh token is stored, keyed with `JWT_REFRESH_SECRET`, so 
 
 Every endpoint is cookie-authenticated, so every state-changing request needs CSRF
 protection: `SameSite=Strict` plus a double-submit header (`X-CSRF-Token` matching the
-readable `da_csrf` cookie), checked in `src/middleware/csrfMiddleware.ts`. `requireAuth` applies it
+readable `da_csrf` cookie), checked in `src/shared/http/csrfMiddleware.ts`. `requireAuth` applies it
 to every non-GET/HEAD/OPTIONS request; refresh and logout, which authenticate from the
 refresh cookie instead, apply it directly. There is no `Authorization: Bearer` path.
 
@@ -284,7 +293,7 @@ refresh cookie instead, apply it directly. There is no `Authorization: Bearer` p
 Every list that grows with the business — `GET /api/users` (and `/api/platform/users`),
 `GET /api/platform/companies`, `GET /api/audit`, and the context layer's review queue,
 glossary and fact list — takes `?page&pageSize&search&sort&dir` plus its own filters and answers
-`{ items, total }` (`src/validators/listValidator.ts`, `src/repositories/baseRepository.ts`). The database filters, orders and limits; `total`
+`{ items, total }` (`src/shared/validation/listValidator.ts`, `src/shared/db/baseRepository.ts`). The database filters, orders and limits; `total`
 comes from `COUNT(*) OVER ()` in the same statement, so paging costs no extra round trip. `sort`
 is a key from the endpoint's own whitelist, never SQL; an unknown key is a 400. Company scoping is
 applied in SQL exactly as before — a company caller's `companyId` parameter is still ignored.
@@ -311,7 +320,7 @@ Every response under `/api` is one of two shapes:
 ```
 
 `code` is the stable part — clients branch on it and never on the message. The codes are
-listed in `src/constants/errorCodes.ts`, a code that is not there cannot be sent, and any 5xx
+listed in `src/shared/errors/errorCodes.ts`, a code that is not there cannot be sent, and any 5xx
 message is replaced with a generic one before it leaves the process.
 
 ### Endpoints
@@ -366,8 +375,8 @@ page first; after that the signed-in routes, writes included, work without pasti
 
 The spec is written by hand, so it has to follow the routes. When you add, remove or
 rename a route, update `docs/openapi.json` in the same change and run
-`npm run docs:check`. The check reads `src/routes/` (following each `router.use` mount)
-and the spec, and fails on a route the spec does not have, a documented operation the
+`npm run docs:check`. The check starts at `src/routes.ts`, follows each `router.use` mount into the module routers,
+reads the spec, and fails on a route the spec does not have, a documented operation the
 server does not serve, a missing or repeated `operationId`, an operation without a tag,
 or a path parameter that is not declared.
 
@@ -402,7 +411,7 @@ Creation and mail are all-or-nothing on both paths. If delivery fails, the accou
 the company path the company with it — is removed again, because what would otherwise be
 left behind holds the username and email address that the retry needs.
 
-Both paths render the invitation through `services/onboardingService.ts`, so the wording, the
+Both paths render the invitation through `modules/auth/onboardingService.ts`, so the wording, the
 expiry and the security notice cannot drift apart between them.
 
 "Reset access" (`POST /api/users/:id/activation`) is the same mechanism — it clears the
@@ -414,9 +423,9 @@ discovered.
 
 ### Email
 
-`src/services/emailService.ts` is the only way the application sends mail. Business code calls
+`src/shared/email/emailService.ts` is the only way the application sends mail. Business code calls
 `sendEmail({ to, subject, text, html }, { consequence })` and knows nothing about transport;
-swapping SMTP for SES, SendGrid or Graph is a new file under `src/services/providers/`.
+swapping SMTP for SES, SendGrid or Graph is a new provider file next to `src/shared/email/smtpProvider.ts`.
 
 `consequence` is what the caller did about a failure, in the caller's own words. Only the
 caller knows: the same undelivered message rolls back a company on one path, a single
@@ -456,7 +465,7 @@ npm run test:context   # against a stand-in Domo, in a throwaway database (see T
 configurable, but nothing filters on it yet** — every endpoint that touches scopes reports
 `enforced: false`. Turning it on means doing *both* halves: injecting the predicates during
 planning, **and** folding the acting user's scope into the cache key in
-`tools/queryCache.ts`. Doing only the first would serve one user's rows to another out of
+`modules/queryEngine/queryCache.ts`. Doing only the first would serve one user's rows to another out of
 the cache.
 
 Which columns a scope may be assigned on is a row in `access_control.scope_dimensions`, read
@@ -497,7 +506,7 @@ Permissions, features, access levels, the three system roles and their default
 permissions, the warehouse connectors and the audit event types are rows, not code:
 `access_control.permissions`, `features`, `access_levels`, `roles`, `role_permissions`, and
 `public.connectors`, `audit_event_types`. The server reads them once at startup
-(`services/catalogueService.ts`) and refuses to start if a system role, an access level or an
+(`modules/catalogue/catalogueService.ts`) and refuses to start if a system role, an access level or an
 audit event the code writes is missing.
 
 Nothing at startup rewrites them any more, so an edit made through the API — narrowing a
@@ -566,7 +575,7 @@ way it goes through Prisma, so it joins the caller's transaction.
 columns), so services and serializers did not change with the move to Prisma.
 
 A database error from Prisma carries the PostgreSQL code under
-`meta.driverAdapterError.cause.originalCode`; `sqlState(err)` in `tools/dbError.ts` reads it from
+`meta.driverAdapterError.cause.originalCode`; `sqlState(err)` in `shared/db/dbError.ts` reads it from
 either a Prisma or a `pg` error, so `UNIQUE_VIOLATION` and friends are checked the same way.
 
 The query engine (`queryRepository.ts`, `sqlGeneratorService.ts`), `scopeRepository.distinctValues`
@@ -591,17 +600,17 @@ The engine targets PostgreSQL only. The differences that shaped the code:
 | | How it is handled |
 |---|---|
 | **Identifiers** | Double-quoted everywhere, always using the name read from the catalogue. Unquoted identifiers fold to lower case, so a real column `"Booking Date"` is unreachable without quotes - and a spec that spells it `booking date` must still emit the catalogue's spelling. `sqlGenerator` therefore *references* the catalogue name and *aliases* to the spec's, because the formatter reads rows back by the latter. |
-| **Placeholders** | Repositories bind values through `Prisma.sql` templates, so a value is never pasted into SQL. The query engine and the context store queries still assemble SQL with `?` placeholders - IN lists, optional fragments - and `tools/sql.ts`'s `splitPlaceholders` finds them outside quotes and comments, for `config/pgPool.ts` (`$1, $2, …`) and for `sqlOf` in `baseRepository.ts`. Hand-numbering is where an off-by-one hides as a wrong *value* bound to the right position. |
+| **Placeholders** | Repositories bind values through `Prisma.sql` templates, so a value is never pasted into SQL. The query engine and the context store queries still assemble SQL with `?` placeholders - IN lists, optional fragments - and `shared/db/sql.ts`'s `splitPlaceholders` finds them outside quotes and comments, for `shared/db/pgPool.ts` (`$1, $2, …`) and for `sqlOf` in `baseRepository.ts`. Hand-numbering is where an off-by-one hides as a wrong *value* bound to the right position. |
 | **Date bucketing** | `to_char(col, 'YYYY-MM')`, and `to_char(to_date(col, <template>), …)` for string date columns. ISO weeks use `IYYY"-W"IW`, which cannot disagree with itself the way `YYYY` + `IW` would at a year boundary. |
 | **Slicer filters** | Values arrive from a URL as strings, so a non-text column is compared as `col::text = $1` - comparing text to an integer is refused outright. `setup:indexes` creates a matching expression index, because a plain index cannot serve a cast. |
-| **int8 and numeric** | node-postgres returns both as strings to protect precision, and Prisma returns them as `BigInt` and `Decimal`, which `res.json` cannot serialize. `config/pgPool.ts` (query engine) and `plainRow` in `baseRepository.ts` (raw SQL through Prisma) turn them into Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
+| **int8 and numeric** | node-postgres returns both as strings to protect precision, and Prisma returns them as `BigInt` and `Decimal`, which `res.json` cannot serialize. `shared/db/pgPool.ts` (query engine) and `plainRow` in `baseRepository.ts` (raw SQL through Prisma) turn them into Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
 | **One database** | The application tables and the reporting tables share `DB_NAME` and one pool: Prisma runs on the same `pg` pool through `@prisma/adapter-pg`. Application tables are reached through Prisma (or unqualified raw SQL resolving through `search_path`); reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
-| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `repositories/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
+| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `modules/auth/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
 
 ## Audit trail
 
 Every audited action is a row in `audit_logs` (created by the migrations with the other tables),
-written by `services/auditService.ts` in the background so a failed write can never fail the
+written by `modules/audit/auditService.ts` in the background so a failed write can never fail the
 action. It is also printed to stdout. There are no foreign keys, so an entry outlives the user
 or company it names.
 
