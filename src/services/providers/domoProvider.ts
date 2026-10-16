@@ -360,13 +360,18 @@ async function storedSizeBytes(host: string, token: string, datasetId: string): 
 
 async function getTableProfile({ host, token, datasetId }: { host: string; token: string; datasetId: string }): Promise<Record<string, any>> {
   const detail = await callDomo(host, token, datasetDetailPath(datasetId));
+  const reportedSize = firstFiniteNumber(
+    detail && detail.sizeInBytes,
+    detail && detail.dataSourceSize,
+    detail && detail.sizeBytes
+  );
 
-  const [sample, versionsSize] = await Promise.all([
+  const [sample, sizeBytes] = await Promise.all([
     callDomo(host, token, queryExecutePath(datasetId), {
       method: 'POST',
       body: { sql: `SELECT * FROM table LIMIT ${PROFILE_SAMPLE_ROWS}` },
     }),
-    storedSizeBytes(host, token, datasetId),
+    reportedSize ?? storedSizeBytes(host, token, datasetId),
   ]);
 
   const names: any[] = Array.isArray(sample && sample.columns) ? sample.columns : [];
@@ -389,12 +394,7 @@ async function getTableProfile({ host, token, datasetId }: { host: string; token
     columnCount: Number.isFinite(Number(detail && detail.columnCount))
       ? Number(detail.columnCount)
       : columns.length || null,
-    sizeBytes: firstFiniteNumber(
-      detail && detail.sizeInBytes,
-      detail && detail.dataSourceSize,
-      detail && detail.sizeBytes,
-      versionsSize
-    ),
+    sizeBytes,
     qualityScore: null,
     lastRefreshedAt: (detail && (detail.lastTouched ?? detail.lastUpdated ?? detail.updatedAt)) || null,
     owner:

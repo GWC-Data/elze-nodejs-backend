@@ -572,9 +572,11 @@ function activationTokenFrom(email: string | null): string | null {
   check('newest first by default', ownerItems.length < 2 || String(ownerItems[0].ts) >= String(ownerItems[1].ts));
 
   r = await owner.call('GET', '/api/audit?event=company_created');
+  const createdCompanyIds = (r.body?.data?.items || []).map((i: any) => i.companyId).sort();
   check('the event filter narrows the trail',
-    r.status === 200 && r.body?.data?.total === 2 && r.body.data.items.every((i: any) => i.event === 'company_created'),
-    JSON.stringify(r.body?.data?.total));
+    r.status === 200 && r.body.data.items.every((i: any) => i.event === 'company_created')
+      && JSON.stringify(createdCompanyIds) === JSON.stringify([companyA, companyB, companyC].sort()),
+    JSON.stringify(createdCompanyIds));
 
   r = await owner.call('GET', '/api/audit?category=company&pageSize=8');
   const companyEvents: any[] = r.body?.data?.items || [];

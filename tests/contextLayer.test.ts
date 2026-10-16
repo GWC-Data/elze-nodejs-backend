@@ -64,6 +64,7 @@ const GOOD_HOST = 'acme.domo.com';
 const KNOWN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000001';
 const MISSING_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000404';
 const FORBIDDEN_DATASET_ID = '6f1c2d3e-0000-4000-8000-000000000403';
+const UNSIZED_DATASET_ID = 'ds-0001';
 const listAll = (options: { limit?: number } = {}) => domo.listDatasets({ host: GOOD_HOST, token: GOOD_TOKEN, ...options });
 
 let datasetCount = 3;
@@ -109,6 +110,14 @@ function installFakeDomo() {
       return json({ id: 42, displayName: 'Ada Lovelace', emailAddress: 'ada@example.com' });
     }
 
+    if (/^\/api\/data\/v3\/datasources\/[^/]+\/dataversions\/details$/.test(target.pathname)) {
+      return json([
+        { status: 'SUCCESS', sizeBytes: 1000 },
+        { status: 'SUCCESS', sizeBytes: 2500 },
+        { status: 'FAILED', sizeBytes: 999 },
+      ]);
+    }
+
     const detail = target.pathname.match(/^\/api\/data\/v3\/datasources\/(.+)$/);
     if (detail && detail[1] === MISSING_DATASET_ID) {
       return json({ status: 404, message: 'Datasource does not exist.' }, 404);
@@ -123,7 +132,7 @@ function installFakeDomo() {
         description: 'A stand-in dataset',
         rowCount: 4200,
         columnCount: 3,
-        sizeInBytes: 2576980377,
+        ...(detail[1] === UNSIZED_DATASET_ID ? {} : { sizeInBytes: 2576980377 }),
         lastTouched: '2026-09-20T10:00:00.000Z',
         owner: { name: 'Ada Lovelace' },
       });
@@ -679,6 +688,12 @@ async function cleanup(): Promise<void> {
   check('it took one detail call and one query',
     seenRequests.length === 2, String(seenRequests.length));
 
+  seenRequests = [];
+  const unsized = await service.tableProfile(adminA, connectionId, UNSIZED_DATASET_ID);
+  check('without a size in the detail, storage adds up the successful data versions',
+    unsized.sizeBytes === 3500, String(unsized.sizeBytes));
+  check('which costs one more call', seenRequests.length === 3, String(seenRequests.length));
+
   const unselected = await codeOf(() => service.tableProfile(adminA, connectionId, 'ds-0099'));
   check('a table outside the selection is a 404', unselected === 'RESOURCE_NOT_FOUND', unselected);
 
@@ -887,7 +902,7 @@ async function cleanup(): Promise<void> {
 
   const { rows: storedRow } = await db.query(
     `SELECT name, version, object_count, snapshot, company_id
-       FROM ${CT.publications} WHERE id = ?::uuid`, [v1.id]);
+       FROM ${CT.versions} WHERE id = ?::uuid`, [v1.id]);
   check('the row is keyed by the name the user gave',
     storedRow[0].name === 'Revenue', storedRow[0].name);
   check('and scoped to their company', storedRow[0].company_id === companyA);
