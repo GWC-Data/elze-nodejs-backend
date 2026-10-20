@@ -1,13 +1,62 @@
 import { REVIEW_STATUS } from '../../shared/db/statuses';
+import type { FactRow } from './contextRepository';
+import { field } from './contextTypes';
+import type { JsonValue } from './contextTypes';
 
-type Row = Record<string, any>;
+interface Fact {
+  id: string;
+  objectType: string;
+  qualifiedName: string;
+  sourceType: string;
+  verified: boolean;
+  confidence: number | null;
+  status: string;
+  edited: boolean;
+  payload: JsonValue;
+}
 
-function reviewStatusOf(row: Row): string {
+interface ReviewItem {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  confidence: number | null;
+  description: string | null;
+  formula: string | null;
+  source: string;
+  downstreamImpact: string | null;
+  fields: JsonValue;
+}
+
+interface ContextObjectItem {
+  id: string;
+  objectType: string;
+  qualifiedName: string;
+  sourceType: string;
+  verified: boolean;
+  payload: JsonValue;
+}
+
+interface SnapshotEntry {
+  id: string;
+  objectType: string;
+  qualifiedName: string;
+  sourceType: string;
+  confidence: number | null;
+  payload: JsonValue;
+  edited: boolean;
+}
+
+function textOrNull(value: JsonValue | undefined): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function reviewStatusOf(row: Pick<FactRow, 'review_status' | 'verified'>): string {
   if (row.review_status) return row.review_status;
   return row.verified ? REVIEW_STATUS.APPROVED : REVIEW_STATUS.PENDING;
 }
 
-function shapeFact(row: Row) {
+function shapeFact(row: FactRow): Fact {
   return {
     id: row.id,
     objectType: row.object_type,
@@ -21,7 +70,7 @@ function shapeFact(row: Row) {
   };
 }
 
-function shapeReviewItem(row: Row) {
+function shapeReviewItem(row: FactRow): ReviewItem {
   const payload = row.payload || {};
   return {
     id: row.id,
@@ -29,15 +78,15 @@ function shapeReviewItem(row: Row) {
     name: row.qualified_name,
     status: reviewStatusOf(row),
     confidence: row.confidence === null ? null : Number(row.confidence),
-    description: typeof payload.description === 'string' ? payload.description : null,
-    formula: typeof payload.formula === 'string' ? payload.formula : null,
+    description: textOrNull(field(payload, 'description')),
+    formula: textOrNull(field(payload, 'formula')),
     source: row.source_type,
-    downstreamImpact: typeof payload.note === 'string' ? payload.note : null,
+    downstreamImpact: textOrNull(field(payload, 'note')),
     fields: payload,
   };
 }
 
-function contextObjectItem(row: Row) {
+function contextObjectItem(row: FactRow): ContextObjectItem {
   return {
     id: row.id,
     objectType: row.object_type,
@@ -48,7 +97,7 @@ function contextObjectItem(row: Row) {
   };
 }
 
-function snapshotEntry(row: Row) {
+function snapshotEntry(row: FactRow): SnapshotEntry {
   return {
     id: row.id,
     objectType: row.object_type,
@@ -61,3 +110,4 @@ function snapshotEntry(row: Row) {
 }
 
 export { reviewStatusOf, shapeFact, shapeReviewItem, contextObjectItem, snapshotEntry };
+export type { Fact, ReviewItem, ContextObjectItem, SnapshotEntry };

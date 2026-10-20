@@ -2,31 +2,63 @@ import { fail } from '../../shared/errors/AppError';
 import { readLimit, extractionRecord } from './contextValidator';
 import { pageOf } from '../../shared/validation/pagination';
 import { listedDataset } from './connectionSerializer';
+import type { ListedDataset } from './connectionSerializer';
 import { connectors, findConnector } from '../catalogue/catalogueService';
 import type { Connector } from '../catalogue/catalogueService';
 import { resolveTargetCompany } from '../auth/authorizationService';
 import { requireActiveCompany } from '../companies/companyService';
 import * as connections from './connectionService';
+import type { ConnectionRef, ConnectionView, ListedConnection, ProfileOverview } from './connectionService';
 import * as contextService from './contextService';
+import type {
+  ContextObjectList,
+  ModelGraph,
+  ReviewQueue,
+  SnapshotTableProfile,
+  TableView,
+  Understanding,
+} from './contextService';
 import * as contextProfiles from './contextProfileService';
+import type { ContextProfileView } from './contextProfileSerializer';
 import * as publish from './publishService';
+import type { Publication, PublishResult, PublishSummary, Blocker } from './publishService';
 import * as versions from './versionService';
+import type { DraftPatch, VersionState } from './versionService';
+import type { DeletedVersion, Extraction, Headline, PublishedVersion, Version } from './versionSerializer';
 import { mcpDetails } from './mcpService';
+import type { McpAccess } from './mcpService';
 import { audit, EVENTS } from '../audit/auditService';
 import type { Actor } from '../../shared/types/actor';
+import type { DatasetPage, TableProfile } from './domoProvider';
+import type { ReviewItem } from './contextSerializer';
+import { datasetFields, entry } from './contextTypes';
+import type { DraftTarget, PublishedDataset, RequestBody, RequestQuery } from './contextTypes';
 
-type Connection = Record<string, any>;
-type Query = Record<string, any>;
+type ConnectionWithStatus = ListedConnection & { context: Headline | null; published: Headline | null };
 
-async function recordDraft(actor: Actor, connection: Connection, patch: Record<string, any>): Promise<void> {
+interface VersionDatasetPage {
+  datasets: ListedDataset[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  cached: boolean;
+  fetchedAt: Date | null;
+}
+
+async function recordDraft(actor: Actor, connection: DraftTarget, patch: DraftPatch): Promise<void> {
   try {
     await versions.touchDraft(actor, connection, patch);
-  } catch (err: any) {
-    console.warn(`[context] could not update the draft for ${connection.id}: ${err.message}`);
+  } catch (err) {
+    console.warn(`[context] could not update the draft for ${connection.id}: ${entry(err, 'message')}`);
   }
 }
 
-function onConnection(connection: Connection): Record<string, unknown> {
+function onConnection(connection: {
+  id: string;
+  name?: string | null;
+  companyId?: number | null;
+}): Record<string, unknown> {
   return {
     connectionId: connection.id,
     connectionName: connection.name ?? null,
@@ -34,7 +66,10 @@ function onConnection(connection: Connection): Record<string, unknown> {
   };
 }
 
-async function versionFor(connection: Connection, versionId: unknown): Promise<any> {
+async function versionFor(
+  connection: { id: string; selectedDatasets?: ConnectionView['selectedDatasets'] },
+  versionId: unknown
+): Promise<PublishedVersion | null> {
   if (versionId === undefined || versionId === '') return null;
   return versions.requirePublishedVersion(connection, String(versionId));
 }
@@ -43,16 +78,16 @@ function listConnectors(): readonly Connector[] {
   return connectors();
 }
 
-async function listConnections(actor: Actor): Promise<Record<string, any>[]> {
+async function listConnections(actor: Actor): Promise<ConnectionWithStatus[]> {
   const list = await connections.listConnections(actor);
-  const status = await versions.statusByConnection(list.map((c: any) => c.id));
-  return list.map((c: any) => {
+  const status = await versions.statusByConnection(list.map((c) => c.id));
+  return list.map((c) => {
     const s = status.get(c.id) || { draft: null, published: null };
     return { ...c, context: s.draft || s.published, published: s.published };
   });
 }
 
-async function mcpAccess(actor: Actor, id: unknown): Promise<Record<string, any>> {
+async function mcpAccess(actor: Actor, id: unknown): Promise<McpAccess> {
   const connection = await connections.requireConnection(actor, id);
   const published = await versions.latestPublished(connection.id);
   if (!published) {
@@ -61,11 +96,14 @@ async function mcpAccess(actor: Actor, id: unknown): Promise<Record<string, any>
   return mcpDetails(connection, {
     name: published.name,
     label: `v${published.version}`,
-    publishedAt: published.published_at || published.publishedAt || null,
+    publishedAt: published.publishedAt || null,
   });
 }
 
-async function createConnection(actor: Actor, body: Record<string, any> = {}): Promise<any> {
+async function createConnection(
+  actor: Actor,
+  body: RequestBody = {}
+): Promise<Awaited<ReturnType<typeof connections.createConnection>>> {
   const { provider, name, host, token } = body;
 
   const connector = findConnector(provider);
@@ -102,26 +140,36 @@ async function createConnection(actor: Actor, body: Record<string, any> = {}): P
   return result;
 }
 
-async function getConnection(actor: Actor, id: unknown, versionId: unknown): Promise<any> {
+async function getConnection(
+  actor: Actor,
+  id: unknown,
+  versionId: unknown
+): Promise<ConnectionView | (Omit<ConnectionView, 'selectedDatasets'> & { selectedDatasets: PublishedDataset[] })> {
   const connection = await connections.requireConnection(actor, id);
   const version = await versionFor(connection, versionId);
   return version ? { ...connection, selectedDatasets: version.datasets } : connection;
 }
 
-async function listDatasets(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+async function listDatasets(
+  actor: Actor,
+  id: unknown,
+  query: RequestQuery = {}
+): Promise<VersionDatasetPage | (DatasetPage & { fetchedAt: string })> {
   if (query.version) {
     const connection = await connections.requireConnection(actor, id);
-    const version = await versionFor(connection, query.version);
+    const version = await versions.requirePublishedVersion(connection, String(query.version));
     const needle = String(query.search || '')
       .trim()
       .toLowerCase();
-    const listed = version.datasets.map(listedDataset).filter(
-      (d: Record<string, any>) =>
-        !needle ||
-        String(d.name || '')
-          .toLowerCase()
-          .includes(needle)
-    );
+    const listed = version.datasets
+      .map((d) => listedDataset(datasetFields(d)))
+      .filter(
+        (d) =>
+          !needle ||
+          String(d.name || '')
+            .toLowerCase()
+            .includes(needle)
+      );
     const { page, pageSize, offset } = pageOf(query, 25, 50);
     return {
       datasets: listed.slice(offset, offset + pageSize),
@@ -142,20 +190,25 @@ async function listDatasets(actor: Actor, id: unknown, query: Query = {}): Promi
   return { ...listing, fetchedAt: new Date().toISOString() };
 }
 
-async function profile(actor: Actor, id: unknown, versionId: unknown): Promise<any> {
+async function profile(actor: Actor, id: unknown, versionId: unknown): Promise<ProfileOverview> {
   if (versionId) {
     const connection = await connections.requireConnection(actor, id);
-    const version = await versionFor(connection, versionId);
-    return connections.profileOverview(actor, id, { datasets: version.datasets });
+    const version = await versions.requirePublishedVersion(connection, String(versionId));
+    return connections.profileOverview(actor, id, { datasets: version.datasets.map(datasetFields) });
   }
   return connections.profileOverview(actor, id);
 }
 
-async function tableProfile(actor: Actor, id: unknown, tableId: unknown, versionId: unknown): Promise<any> {
+async function tableProfile(
+  actor: Actor,
+  id: unknown,
+  tableId: unknown,
+  versionId: unknown
+): Promise<TableProfile | SnapshotTableProfile> {
   if (versionId) {
     const connection = await connections.requireConnection(actor, id);
-    const version = await versionFor(connection, versionId);
-    const dataset = version.datasets.find((d: any) => String(d.id) === String(tableId));
+    const version = await versions.requirePublishedVersion(connection, String(versionId));
+    const dataset = version.datasets.map(datasetFields).find((d) => String(d.id) === String(tableId));
     if (!dataset) {
       throw fail('RESOURCE_NOT_FOUND', 'That table is not part of this published version.');
     }
@@ -164,12 +217,12 @@ async function tableProfile(actor: Actor, id: unknown, tableId: unknown, version
   return connections.tableProfile(actor, id, tableId);
 }
 
-async function versionState(actor: Actor, id: unknown): Promise<Record<string, any>> {
+async function versionState(actor: Actor, id: unknown): Promise<VersionState> {
   const connection = await connections.requireConnection(actor, id);
   return versions.versionState(connection);
 }
 
-async function createVersion(actor: Actor, id: unknown): Promise<Record<string, any>> {
+async function createVersion(actor: Actor, id: unknown): Promise<VersionState> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   await versions.touchDraft(actor, connection, { step: 'discover' });
   const state = await versions.versionState(connection);
@@ -182,7 +235,7 @@ async function createVersion(actor: Actor, id: unknown): Promise<Record<string, 
   return state;
 }
 
-async function deleteVersion(actor: Actor, id: unknown, versionId: unknown): Promise<{ deleted: any }> {
+async function deleteVersion(actor: Actor, id: unknown, versionId: string): Promise<{ deleted: DeletedVersion }> {
   const connection = await connections.requireConnection(actor, id, 'full');
   const deleted = await versions.deletePublishedVersion(connection, versionId);
   audit(EVENTS.CONTEXT_VERSION_DELETED, actor, {
@@ -195,17 +248,17 @@ async function deleteVersion(actor: Actor, id: unknown, versionId: unknown): Pro
   return { deleted };
 }
 
-async function trackDraft(actor: Actor, id: unknown, step: string): Promise<{ draft: any }> {
+async function trackDraft(actor: Actor, id: unknown, step: unknown): Promise<{ draft: Version | null }> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   return { draft: await versions.trackStep(connection, step) };
 }
 
-async function contextProfile(actor: Actor, id: unknown): Promise<any> {
+async function contextProfile(actor: Actor, id: unknown): Promise<ContextProfileView | null> {
   const connection = await connections.requireConnection(actor, id);
   return contextProfiles.contextProfile(connection.id);
 }
 
-async function saveContextProfile(actor: Actor, id: unknown, body: Record<string, any>): Promise<any> {
+async function saveContextProfile(actor: Actor, id: unknown, body: RequestBody): Promise<ContextProfileView> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   const profile = await contextProfiles.saveContextProfile(connection, actor, body);
   audit(EVENTS.CONTEXT_PROFILE_SAVED, actor, {
@@ -215,13 +268,13 @@ async function saveContextProfile(actor: Actor, id: unknown, body: Record<string
   return profile;
 }
 
-async function extraction(actor: Actor, id: unknown, versionId: unknown): Promise<any> {
+async function extraction(actor: Actor, id: unknown, versionId: unknown): Promise<Extraction | null> {
   const connection = await connections.requireConnection(actor, id);
   const version = await versionFor(connection, versionId);
   return versions.extractionFor(connection.id, version);
 }
 
-async function recordExtraction(actor: Actor, id: unknown, body: Record<string, any>): Promise<{ draft: any }> {
+async function recordExtraction(actor: Actor, id: unknown, body: RequestBody): Promise<{ draft: Version | null }> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   const record = extractionRecord(body);
   const draft = await versions.touchDraft(actor, connection, {
@@ -235,33 +288,33 @@ async function recordExtraction(actor: Actor, id: unknown, body: Record<string, 
 async function readFacts<T>(
   actor: Actor,
   id: unknown,
-  query: Query,
-  read: (connection: Connection, version: any) => Promise<T>
+  query: RequestQuery,
+  read: (connection: ConnectionRef, version: PublishedVersion | null) => Promise<T>
 ): Promise<T> {
   const connection = await connections.requireConnectionId(actor, id);
   const version = await versionFor(connection, query.version);
   return read(connection, version);
 }
 
-function understanding(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+function understanding(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<Understanding> {
   return readFacts(actor, id, query, (connection) => contextService.understanding(connection.id, query));
 }
 
-function contextObjects(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+function contextObjects(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<ContextObjectList> {
   return readFacts(actor, id, query, (connection) => contextService.listContextObjects(connection.id, query));
 }
 
-function factsByTable(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+function factsByTable(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<TableView> {
   return readFacts(actor, id, query, (connection) => contextService.tableView(connection.id, query));
 }
 
-function model(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+function model(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<ModelGraph> {
   return readFacts(actor, id, query, (connection, version) =>
     contextService.modelGraph(connection.id, { versionId: version ? version.id : undefined })
   );
 }
 
-function review(actor: Actor, id: unknown, query: Query = {}): Promise<Record<string, any>> {
+function review(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<ReviewQueue> {
   return readFacts(actor, id, query, (connection) => contextService.reviewQueue(connection.id, query));
 }
 
@@ -269,8 +322,8 @@ async function decide(
   actor: Actor,
   id: unknown,
   itemId: string,
-  { decision, update }: { decision?: unknown; update?: Record<string, any> } = {}
-): Promise<any> {
+  { decision, update }: { decision?: unknown; update?: unknown } = {}
+): Promise<ReviewItem | null> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   contextService.requireDecision(decision);
 
@@ -289,7 +342,7 @@ async function decide(
   return item;
 }
 
-async function editItem(actor: Actor, id: unknown, itemId: string, body: Record<string, any>): Promise<any> {
+async function editItem(actor: Actor, id: unknown, itemId: string, body: RequestBody): Promise<ReviewItem | null> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   const item = await contextService.updateReviewItem(actor, connection.id, itemId, body);
   audit(EVENTS.CONTEXT_FACT_UPDATED, actor, {
@@ -301,7 +354,7 @@ async function editItem(actor: Actor, id: unknown, itemId: string, body: Record<
   return item;
 }
 
-async function bulkDecide(actor: Actor, id: unknown, body: Record<string, any> = {}): Promise<{ affected: number }> {
+async function bulkDecide(actor: Actor, id: unknown, body: RequestBody = {}): Promise<{ affected: number }> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   const result = await contextService.bulkDecide(actor, connection.id, body);
 
@@ -315,23 +368,26 @@ async function bulkDecide(actor: Actor, id: unknown, body: Record<string, any> =
   return result;
 }
 
-async function publishSummary(actor: Actor, id: unknown, versionId: unknown): Promise<Record<string, any>> {
+async function publishSummary(actor: Actor, id: unknown, versionId: unknown): Promise<PublishSummary> {
   const connection = await connections.requireConnection(actor, id);
   const version = await versionFor(connection, versionId);
   return publish.publishSummary(actor, connection, { version });
 }
 
-async function validatePublish(actor: Actor, id: unknown): Promise<Record<string, any>> {
+async function validatePublish(
+  actor: Actor,
+  id: unknown
+): Promise<{ valid: boolean; blockers: Blocker[]; warnings: Blocker[] }> {
   const connection = await connections.requireConnection(actor, id);
   return publish.validatePublish(actor, connection);
 }
 
-async function listPublications(actor: Actor, id: unknown): Promise<Record<string, any>[]> {
+async function listPublications(actor: Actor, id: unknown): Promise<Publication[]> {
   const connection = await connections.requireConnection(actor, id);
   return publish.listPublications(connection.id);
 }
 
-async function publishContext(actor: Actor, id: unknown, body: Record<string, any>): Promise<Record<string, any>> {
+async function publishContext(actor: Actor, id: unknown, body: RequestBody): Promise<PublishResult> {
   const connection = await connections.requireConnection(actor, id, 'edit');
   const result = await publish.publishContext(actor, connection, body);
 
@@ -345,9 +401,9 @@ async function publishContext(actor: Actor, id: unknown, body: Record<string, an
   return result;
 }
 
-async function selectDatasets(actor: Actor, id: unknown, datasets: unknown): Promise<any> {
+async function selectDatasets(actor: Actor, id: unknown, datasets: unknown): Promise<ConnectionView> {
   const connection = await connections.replaceSelection(actor, id, datasets);
-  const datasetIds = connection.selectedDatasets.map((d: any) => d.id);
+  const datasetIds = connection.selectedDatasets.map((d) => d.id);
 
   audit(EVENTS.CONTEXT_DATASETS_SELECTED, actor, {
     ...onConnection(connection),

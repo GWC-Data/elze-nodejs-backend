@@ -786,7 +786,7 @@ async function cleanup(): Promise<void> {
 
   seenRequests = [];
   const profile = await service.tableProfile(adminA, connectionId, 'ds-0000');
-  check('the table name comes from the source', profile.name === 'Dataset ds-0000', profile.name);
+  check('the table name comes from the source', profile.name === 'Dataset ds-0000', String(profile.name));
   check('the row count comes from the source', profile.rowCount === 4200, String(profile.rowCount));
   check('storage is the byte count the source reported', profile.sizeBytes === 2576980377, String(profile.sizeBytes));
   check(
@@ -794,7 +794,7 @@ async function cleanup(): Promise<void> {
     profile.columns.map((c: any) => c.name).join() === 'id,region,revenue',
     profile.columns.map((c: any) => c.name).join()
   );
-  check('column types come through', profile.columns[1].dataType === 'STRING', profile.columns[1].dataType);
+  check('column types come through', profile.columns[1].dataType === 'STRING', String(profile.columns[1].dataType));
 
   check(
     'null rates are computed from the sample',
@@ -809,7 +809,7 @@ async function cleanup(): Promise<void> {
   );
   check('a text column gets no min/max', profile.columns[1].min === null && profile.columns[1].max === null);
   check('the stats say what they were computed over', profile.statsSampleSize === 4, String(profile.statsSampleSize));
-  check('sample rows come back', profile.sample.rows.length === 4, String(profile.sample.rows.length));
+  check('sample rows come back', profile.sample!.rows.length === 4, String(profile.sample!.rows.length));
 
   check('semantic types are absent rather than guessed', profile.columns[0].semanticType === null);
   check('quality is absent rather than scored', profile.qualityScore === null);
@@ -975,12 +975,12 @@ async function cleanup(): Promise<void> {
   );
   check(
     'columns hang off their table',
-    graph.nodes.find((n: any) => n.id === 'orders').columns.length === 2,
-    String(graph.nodes.find((n: any) => n.id === 'orders').columns.length)
+    graph.nodes.find((n: any) => n.id === 'orders')!.columns.length === 2,
+    String(graph.nodes.find((n: any) => n.id === 'orders')!.columns.length)
   );
   check(
     'a candidate key is read from the note, not guessed',
-    graph.nodes.find((n: any) => n.id === 'orders').columns.find((c: any) => c.name === 'customer_id').isPrimaryKey
+    graph.nodes.find((n: any) => n.id === 'orders')!.columns.find((c: any) => c.name === 'customer_id')!.isPrimaryKey
   );
   check('an edge per join', graph.edges.length === 2, String(graph.edges.length));
   check(
@@ -1004,20 +1004,20 @@ async function cleanup(): Promise<void> {
   );
   check(
     'the note surfaces as downstream impact',
-    queue.items.find((i: any) => i.id === colId).downstreamImpact === 'candidate primary key'
+    queue.items.find((i: any) => i.id === colId)!.downstreamImpact === 'candidate primary key'
   );
 
   await store.decideReviewItem(adminA, ws, colId, 'approve');
   const afterApprove = await store.reviewQueue(ws);
-  check('approving sets our status', afterApprove.items.find((i: any) => i.id === colId).status === 'approved');
+  check('approving sets our status', afterApprove.items.find((i: any) => i.id === colId)!.status === 'approved');
 
   const pendingView = await store.tableView(ws, { review: 'pending' });
   const pendingOrders = pendingView.tables.find((g: any) => g.table.qualifiedName === 'orders');
   check(
     'the review filter keeps only what is still pending',
     Boolean(pendingOrders) &&
-      !pendingOrders.columns.some((c: any) => c.id === colId) &&
-      pendingOrders.columns.some((c: any) => c.qualifiedName === 'orders.total'),
+      !pendingOrders!.columns.some((c: any) => c.id === colId) &&
+      pendingOrders!.columns.some((c: any) => c.qualifiedName === 'orders.total'),
     JSON.stringify(pendingOrders?.columns?.map((c: any) => c.qualifiedName))
   );
   const allOrders = (await store.tableView(ws, {})).tables.find((g: any) => g.table.qualifiedName === 'orders');
@@ -1053,7 +1053,7 @@ async function cleanup(): Promise<void> {
   );
   check(
     'skip is a status a boolean cannot hold',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'skipped'
+    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId)!.status === 'skipped'
   );
 
   const refusedDecision = await codeOf(() =>
@@ -1086,7 +1086,7 @@ async function cleanup(): Promise<void> {
   check('a bulk decision acts on what matches, not on what is on screen', bulk.affected === 1, String(bulk.affected));
   check(
     'a row with no confidence does not pass a confidence bar',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.type === 'table').status === 'pending'
+    (await store.reviewQueue(ws)).items.find((i: any) => i.type === 'table')!.status === 'pending'
   );
 
   const crossReview = await codeOf(() => service.requireConnection(adminB, connectionId));
@@ -1095,7 +1095,7 @@ async function cleanup(): Promise<void> {
   await store.decideReviewItem(adminA, ws, colId, 'approve');
   check(
     'a skipped item can be approved later',
-    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'approved'
+    (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId)!.status === 'approved'
   );
 
   const connectionRow = await service.requireConnection(adminA, connectionId);
@@ -1103,7 +1103,7 @@ async function cleanup(): Promise<void> {
   const summary = await publish.publishSummary(adminA, connectionRow);
   check(
     'the summary counts approved facts only',
-    summary.stats.find((s: any) => s.id === 'columns').value === 1,
+    summary.stats.find((s: any) => s.id === 'columns')!.value === 1,
     JSON.stringify(summary.stats.find((s: any) => s.id === 'columns'))
   );
   check(

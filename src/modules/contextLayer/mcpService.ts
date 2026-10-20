@@ -14,7 +14,29 @@ function serverKey(connectionName: string | null | undefined): string {
   return `context-${slug || 'layer'}`;
 }
 
-function mcpDetails(connection: Record<string, any>, published: Record<string, any>): Record<string, any> {
+interface McpServerConfig {
+  type: string;
+  url: string;
+  headers?: { Authorization: string };
+}
+
+interface McpAccess {
+  configured: boolean;
+  serverName: string;
+  serverUrl: string | null;
+  transport: string;
+  workspaceId: string;
+  context: { name: string; version: string; publishedAt: Date | null };
+  auth: { type: string; header?: string; format?: string; source?: string };
+  tools: typeof TOOLS;
+  clientConfig: { mcpServers: Record<string, McpServerConfig> } | null;
+  usage: string;
+}
+
+function mcpDetails(
+  connection: { id: string; name: string | null | undefined },
+  published: { name: string; label: string; publishedAt: Date | null }
+): McpAccess {
   const key = serverKey(connection.name);
   const headers = AUTH_REQUIRED ? { Authorization: 'Bearer <MCP access token>' } : undefined;
 
@@ -50,3 +72,4 @@ function mcpDetails(connection: Record<string, any>, published: Record<string, a
 }
 
 export { mcpDetails };
+export type { McpAccess };

@@ -1,17 +1,20 @@
 import crypto from 'node:crypto';
 import config from '../../config';
+import type { ContextProfile } from '../../generated/prisma/client';
 
 const { prisma } = config.database;
 
-function asRow(profile: {
+interface ContextProfileRow {
   id: string;
-  connectionId: string;
+  connection_id: string;
   name: string;
   description: string | null;
-  createdBy: number | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function asRow(profile: ContextProfile): ContextProfileRow {
   return {
     id: profile.id,
     connection_id: profile.connectionId,
@@ -23,7 +26,7 @@ function asRow(profile: {
   };
 }
 
-async function find(connectionId: string) {
+async function find(connectionId: string): Promise<ContextProfileRow | null> {
   const profile = await prisma.contextProfile.findUnique({ where: { connectionId } });
   return profile ? asRow(profile) : null;
 }
@@ -40,7 +43,7 @@ async function upsert({
   name: string;
   description: string | null;
   createdBy: number | null;
-}) {
+}): Promise<ContextProfileRow> {
   const profile = await prisma.contextProfile.upsert({
     where: { connectionId },
     create: { id: crypto.randomUUID(), connectionId, companyId, name, description, createdBy },
@@ -50,3 +53,4 @@ async function upsert({
 }
 
 export { find, upsert };
+export type { ContextProfileRow };

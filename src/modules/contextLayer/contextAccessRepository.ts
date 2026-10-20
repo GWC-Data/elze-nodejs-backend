@@ -3,9 +3,62 @@ import { Prisma } from '../../generated/prisma/client';
 import { rawRows } from '../../shared/db/baseRepository';
 import { accessLevelId } from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
-import type { GeneralAccess } from '../../generated/prisma/enums';
+import type { GeneralAccess, UserStatus } from '../../generated/prisma/enums';
 
 const { prisma } = config.database;
+
+interface AccessColumnsRow {
+  created_by: number | null;
+  general_access: GeneralAccess;
+  owner_name: string | null;
+  granted_level: string | null;
+  group_level: string | null;
+}
+
+interface GrantRow {
+  user_id: number;
+  access_level: string;
+  access_level_id: string;
+  granted_at: Date;
+  username: string;
+  email: string;
+  display_name: string | null;
+  status: UserStatus;
+}
+
+interface PersonRow {
+  id: number;
+  username: string;
+  email: string;
+  display_name: string | null;
+}
+
+interface GroupGrantRow {
+  group_id: number;
+  access_level: string;
+  access_level_id: string;
+  granted_at: Date;
+  name: string;
+  active: boolean;
+  member_count: number;
+}
+
+interface ShareableGroupRow {
+  id: number;
+  name: string;
+  member_count: number;
+}
+
+interface GroupContextRow {
+  connection_id: string;
+  access_level: string;
+  access_level_id: string;
+  granted_at: Date;
+  name: string;
+  provider: string;
+  published_name: string | null;
+  published_version: number | null;
+}
 
 const contextLevel = (level: string) => accessLevelId('context', level);
 
@@ -35,8 +88,8 @@ function visibleClause(actor: Pick<Actor, 'id'>, seeAll: boolean): Prisma.Sql {
                        WHERE ga.connection_id = c.id AND gu.user_id = ${actor.id}))`;
 }
 
-async function listGrants(connectionId: string) {
-  return rawRows(
+async function listGrants(connectionId: string): Promise<GrantRow[]> {
+  return rawRows<GrantRow>(
     prisma,
     Prisma.sql`SELECT a.user_id, l.key AS access_level, a.access_level_id, a.granted_at,
             u.username, u.email, u.display_name, u.status
@@ -48,8 +101,8 @@ async function listGrants(connectionId: string) {
   );
 }
 
-async function shareablePeople(companyId: number, ownerId: number | null) {
-  return rawRows(
+async function shareablePeople(companyId: number, ownerId: number | null): Promise<PersonRow[]> {
+  return rawRows<PersonRow>(
     prisma,
     Prisma.sql`SELECT u.id, u.username, u.email, u.display_name
        FROM users u
@@ -58,7 +111,7 @@ async function shareablePeople(companyId: number, ownerId: number | null) {
   );
 }
 
-async function findActiveCompanyUser(companyId: number, userId: number) {
+async function findActiveCompanyUser(companyId: number, userId: number): Promise<PersonRow | null> {
   const user = await prisma.user.findFirst({
     where: { id: userId, companyId, status: 'active' },
     select: { id: true, username: true, email: true, displayName: true },
@@ -92,7 +145,7 @@ async function setGeneralAccess(connectionId: string, value: GeneralAccess): Pro
   await prisma.connection.updateMany({ where: { id: connectionId }, data: { generalAccess: value } });
 }
 
-async function listGroupGrants(connectionId: string) {
+async function listGroupGrants(connectionId: string): Promise<GroupGrantRow[]> {
   const grants = await prisma.contextGroupAccess.findMany({
     where: { connectionId },
     include: {
@@ -112,7 +165,7 @@ async function listGroupGrants(connectionId: string) {
   }));
 }
 
-async function shareableGroups(companyId: number) {
+async function shareableGroups(companyId: number): Promise<ShareableGroupRow[]> {
   const groups = await prisma.group.findMany({
     where: { companyId, active: true },
     select: { id: true, name: true, _count: { select: { members: true } } },
@@ -121,7 +174,10 @@ async function shareableGroups(companyId: number) {
   return groups.map((g) => ({ id: g.id, name: g.name, member_count: g._count.members }));
 }
 
-async function findActiveCompanyGroup(companyId: number, groupId: number) {
+async function findActiveCompanyGroup(
+  companyId: number,
+  groupId: number
+): Promise<{ id: number; name: string } | null> {
   return prisma.group.findFirst({ where: { id: groupId, companyId, active: true }, select: { id: true, name: true } });
 }
 
@@ -152,22 +208,42 @@ async function deleteGroupGrant(connectionId: string, groupId: number): Promise<
   return result.count > 0;
 }
 
-async function listContextsForGroup(groupId: number) {
-  return rawRows(
-    prisma,
-    Prisma.sql`SELECT ga.connection_id, l.key AS access_level, ga.access_level_id, ga.granted_at, c.name, c.provider,
-            (SELECT v.name FROM context_layer_versions v
-              WHERE v.connection_id = c.id AND v.status = 'published'
-              ORDER BY v.version DESC LIMIT 1) AS published_name,
-            (SELECT v.version FROM context_layer_versions v
-              WHERE v.connection_id = c.id AND v.status = 'published'
-              ORDER BY v.version DESC LIMIT 1) AS published_version
-       FROM access_control.context_group_access ga
-       JOIN access_control.access_levels l ON l.id = ga.access_level_id
-       JOIN connections c ON c.id = ga.connection_id
-      WHERE ga.group_id = ${groupId}
-      ORDER BY c.name`
-  );
+async function listContextsForGroup(groupId: number): Promise<GroupContextRow[]> {
+  const grants = await prisma.contextGroupAccess.findMany({
+    where: { groupId },
+    select: {
+      connectionId: true,
+      accessLevelId: true,
+      grantedAt: true,
+      accessLevel: { select: { key: true } },
+      connection: {
+        select: {
+          name: true,
+          provider: true,
+          versions: {
+            where: { status: 'published' },
+            orderBy: { version: 'desc' },
+            take: 1,
+            select: { name: true, version: true },
+          },
+        },
+      },
+    },
+    orderBy: { connection: { name: 'asc' } },
+  });
+  return grants.map((g) => {
+    const published = g.connection.versions.at(0);
+    return {
+      connection_id: g.connectionId,
+      access_level: g.accessLevel.key,
+      access_level_id: g.accessLevelId,
+      granted_at: g.grantedAt,
+      name: g.connection.name,
+      provider: g.connection.provider,
+      published_name: published ? published.name : null,
+      published_version: published ? published.version : null,
+    };
+  });
 }
 
 export {
@@ -188,3 +264,4 @@ export {
   deleteGroupGrant,
   listContextsForGroup,
 };
+export type { AccessColumnsRow, GrantRow, PersonRow, GroupGrantRow, ShareableGroupRow, GroupContextRow };

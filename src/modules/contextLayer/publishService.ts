@@ -7,21 +7,104 @@ import { reviewStatusOf, snapshotEntry } from './contextSerializer';
 import { loadObjects, columnSplitter } from './contextService';
 import * as versions from './versionService';
 import { accessOf, isContextAdmin } from './contextAccessService';
+import type { ContextAccess } from './contextAccessService';
 import { REVIEW_STATUS, VERSION_STATUS } from '../../shared/db/statuses';
 import { MAX_CONTEXTS_PAGE, MAX_SEARCH_LENGTH } from '../../shared/validation/pageLimits';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
+import type { ObjectRow } from './contextRepository';
+import type { PublishedVersion, Version } from './versionSerializer';
+import type { SelectedDataset } from './connectionSerializer';
+import { datasetFields } from './contextTypes';
+import type { DatasetFields, JsonValue, RequestQuery } from './contextTypes';
+
+interface PublishTarget {
+  id: string;
+  name: string;
+  companyId: number;
+  selectedDatasets?: readonly SelectedDataset[];
+}
+
+interface Blocker {
+  id: string;
+  severity: string;
+  message: string;
+  step: string;
+}
+
+interface PublishSummary {
+  connectionId: string;
+  publishedVersion: {
+    id: string;
+    name: string;
+    label: string;
+    publishedAt: Date | null;
+    publishedBy: number | null;
+    objectCount: number;
+  } | null;
+  suggestedName: string;
+  previousVersion: number | null;
+  draft: Version | null;
+  stats: { id: string; label: string; value: number }[];
+  datasets: { id: unknown; name: unknown; tableCount: null }[];
+  content: { id: string; label: string; included: boolean }[];
+  ready: boolean;
+  blockers: Blocker[];
+}
+
+interface Publication {
+  id: string;
+  name: string;
+  version: number;
+  sessionId: string | null;
+  objectCount: number;
+  stats: JsonValue;
+  publishedBy: number | null;
+  publishedAt: Date | null;
+}
+
+interface PublishedContextVersion {
+  id: string;
+  version: number;
+  label: string;
+  live: boolean;
+  publishedAt: Date | null;
+  publishedBy: string | null;
+  objectCount: number;
+}
+
+interface PublishedContext {
+  connectionId: string;
+  connectionName: string;
+  provider: string;
+  host: string;
+  companyId: number | null;
+  companyName: string | null;
+  name: string;
+  access: ContextAccess | null;
+  versions: PublishedContextVersion[];
+}
+
+interface PublishResult {
+  id: string;
+  name: string;
+  version: string;
+  publishedAt: Date | null;
+  objectCount: number;
+  status: string;
+}
 
 const { withTransaction } = config.database;
 
-type Row = Record<string, any>;
-type Connection = Record<string, any>;
+function timeOf(value: Date | null): number {
+  return new Date(value ?? 0).getTime();
+}
 
-function publishable(rows: Row[]): Row[] {
+function publishable(rows: ObjectRow[]): ObjectRow[] {
   return rows.filter((row) => reviewStatusOf(row) === REVIEW_STATUS.APPROVED);
 }
 
-function countByType(rows: Row[]): Record<string, number> {
+function countByType(rows: ObjectRow[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const row of rows) {
     counts[row.object_type] = (counts[row.object_type] || 0) + 1;
@@ -29,7 +112,7 @@ function countByType(rows: Row[]): Record<string, number> {
   return counts;
 }
 
-function tablesCovered(rows: Row[], allRows: Row[] = rows): string[] {
+function tablesCovered(rows: ObjectRow[], allRows: ObjectRow[] = rows): string[] {
   const split = columnSplitter(allRows);
   const names = new Set<string>();
   for (const row of rows) {
@@ -44,13 +127,15 @@ function tablesCovered(rows: Row[], allRows: Row[] = rows): string[] {
 
 async function publishSummary(
   _actor: Actor,
-  connection: Connection,
-  { version = null }: { version?: Record<string, any> | null } = {}
-): Promise<Record<string, any>> {
+  connection: PublishTarget,
+  { version = null }: { version?: PublishedVersion | null } = {}
+): Promise<PublishSummary> {
   const rows = version
     ? await loadObjects(connection.id, undefined, { versionId: version.id })
     : await loadObjects(connection.id);
-  const selected: any[] = version ? version.datasets : connection.selectedDatasets || [];
+  const selected: readonly DatasetFields[] = version
+    ? version.datasets.map(datasetFields)
+    : connection.selectedDatasets || [];
   const approved = publishable(rows);
   const pending = rows.filter((row) => reviewStatusOf(row) === REVIEW_STATUS.PENDING);
   const counts = countByType(approved);
@@ -69,7 +154,7 @@ async function publishSummary(
     { id: 'examples', label: 'Examples', value: counts.example || 0 },
   ];
 
-  const blockers: Record<string, any>[] = [];
+  const blockers: Blocker[] = [];
   if (!version && approved.length === 0) {
     blockers.push({
       id: 'nothing-approved',
@@ -131,21 +216,24 @@ async function publishSummary(
   };
 }
 
-async function validatePublish(actor: Actor, connection: Connection): Promise<Record<string, any>> {
+async function validatePublish(
+  actor: Actor,
+  connection: PublishTarget
+): Promise<{ valid: boolean; blockers: Blocker[]; warnings: Blocker[] }> {
   const summary = await publishSummary(actor, connection);
   return {
-    valid: summary.blockers.every((blocker: any) => blocker.severity !== 'blocker'),
-    blockers: summary.blockers.filter((b: any) => b.severity === 'blocker'),
-    warnings: summary.blockers.filter((b: any) => b.severity !== 'blocker'),
+    valid: summary.blockers.every((blocker) => blocker.severity !== 'blocker'),
+    blockers: summary.blockers.filter((b) => b.severity === 'blocker'),
+    warnings: summary.blockers.filter((b) => b.severity !== 'blocker'),
   };
 }
 
-async function listPublications(connectionId: string): Promise<Record<string, any>[]> {
+async function listPublications(connectionId: string): Promise<Publication[]> {
   const state = await versions.versionState({ id: connectionId });
   return state.versions
-    .filter((v: any) => v.status === VERSION_STATUS.PUBLISHED)
-    .sort((a: any, b: any) => (new Date(b.publishedAt) as any) - (new Date(a.publishedAt) as any))
-    .map((v: any) => ({
+    .filter((v) => v.status === VERSION_STATUS.PUBLISHED)
+    .sort((a, b) => timeOf(b.publishedAt) - timeOf(a.publishedAt))
+    .map((v) => ({
       id: v.id,
       name: v.name,
       version: v.version,
@@ -157,17 +245,21 @@ async function listPublications(connectionId: string): Promise<Record<string, an
     }));
 }
 
-async function listCompanyPublished(actor: Actor, query: Record<string, any> = {}): Promise<Record<string, any>> {
+async function listCompanyPublished(
+  actor: Actor,
+  query: RequestQuery = {}
+): Promise<{ items: PublishedContext[]; total: number; versionCount: number }> {
   const needle = String(query.search || '')
     .trim()
     .slice(0, MAX_SEARCH_LENGTH);
   const rows = await versionRepository.listCompanyPublished(actor, isContextAdmin(actor), needle);
 
-  const groups = new Map<string, Record<string, any>>();
+  const groups = new Map<string, PublishedContext>();
   for (const row of rows) {
     const key = `${row.connection_id}\u0000${row.name}`;
-    if (!groups.has(key)) {
-      groups.set(key, {
+    let group = groups.get(key);
+    if (!group) {
+      group = {
         connectionId: row.connection_id,
         connectionName: row.connection_name,
         provider: row.provider,
@@ -177,9 +269,9 @@ async function listCompanyPublished(actor: Actor, query: Record<string, any> = {
         name: row.name,
         access: accessOf(actor, row),
         versions: [],
-      });
+      };
+      groups.set(key, group);
     }
-    const group = groups.get(key)!;
     group.versions.push({
       id: row.id,
       version: Number(row.version),
@@ -192,7 +284,7 @@ async function listCompanyPublished(actor: Actor, query: Record<string, any> = {
   }
 
   const contexts = [...groups.values()].sort(
-    (a, b) => (new Date(b.versions[0].publishedAt) as any) - (new Date(a.versions[0].publishedAt) as any)
+    (a, b) => timeOf(b.versions[0].publishedAt) - timeOf(a.versions[0].publishedAt)
   );
 
   const { offset, pageSize } = pageOf(query, 10, MAX_CONTEXTS_PAGE);
@@ -206,9 +298,9 @@ async function listCompanyPublished(actor: Actor, query: Record<string, any> = {
 
 async function publishContext(
   actor: Actor,
-  connection: Connection,
-  { name, notifyTeam = false }: { name?: unknown; notifyTeam?: boolean } = {}
-): Promise<Record<string, any>> {
+  connection: PublishTarget,
+  { name, notifyTeam = false }: { name?: unknown; notifyTeam?: unknown } = {}
+): Promise<PublishResult> {
   const cleanName = requireString(name, 'Context name', { min: 2, max: 120 });
 
   const rows = await loadObjects(connection.id);
@@ -224,7 +316,7 @@ async function publishContext(
     versions.publishDraft(conn, actor, connection, {
       name: cleanName,
       snapshot,
-      datasets: (connection.selectedDatasets || []).map((d: any) => ({
+      datasets: (connection.selectedDatasets || []).map((d) => ({
         id: d.id,
         name: d.name,
         rowCount: d.rowCount,
@@ -248,3 +340,4 @@ async function publishContext(
 }
 
 export { publishSummary, validatePublish, publishContext, listPublications, listCompanyPublished };
+export type { PublishTarget, Blocker, PublishSummary, Publication, PublishedContext, PublishResult };

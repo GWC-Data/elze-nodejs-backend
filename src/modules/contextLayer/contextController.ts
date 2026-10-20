@@ -2,8 +2,9 @@ import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
 import * as contextLayer from './contextLayerService';
 import * as sharing from './contextSharingService';
+import type { RequestBody } from './contextTypes';
 
-const body = (req: Request) => req.body || {};
+const body = (req: Request): RequestBody => req.body || {};
 
 function connectors(_req: Request, res: Response): void {
   ok(res, contextLayer.listConnectors());

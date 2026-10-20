@@ -64,9 +64,11 @@ class Throttle {
         }, wait);
         return;
       }
+      const next = lane.waiting.shift();
+      if (!next) return;
       lane.active += 1;
       lane.lastStart = Date.now();
-      lane.waiting.shift()!();
+      next();
     }
   }
 }

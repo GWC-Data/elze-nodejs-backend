@@ -3,32 +3,171 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
+import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
+import type { ContextStep, VersionStatus } from '../../generated/prisma/enums';
 
 const { prisma } = config.database;
 
 interface DraftChanges {
-  step?: string;
-  datasetIds?: unknown[];
+  step?: ContextStep;
+  datasetIds?: readonly string[];
   sessionId?: string | null;
-  extraction?: { report: string; mode: string | null; datasetIds: unknown[] };
+  extraction?: { report: string; mode: string | null; datasetIds: readonly string[] };
+}
+
+interface VersionRow {
+  id: string;
+  connection_id: string;
+  name: string;
+  version: number;
+  status: VersionStatus;
+  current_step: ContextStep | null;
+  dataset_ids: Prisma.JsonValue;
+  based_on_id: string | null;
+  session_id: string | null;
+  extraction_mode: string | null;
+  extracted_at: Date | null;
+  object_count: number;
+  stats: Prisma.JsonValue;
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+  published_by: number | null;
+  published_at: Date | null;
+}
+
+interface PublishedVersionRow extends VersionRow {
+  datasets: Prisma.JsonValue;
+}
+
+interface DraftRow extends PublishedVersionRow {
+  company_id: number;
+  extraction_report: string | null;
+  extraction_dataset_ids: Prisma.JsonValue;
+  snapshot: Prisma.JsonValue;
+  notify_team: boolean;
+}
+
+interface DeletedVersionRow {
+  id: string;
+  name: string;
+  version: number;
+  object_count: number;
+}
+
+interface ExtractionRow {
+  session_id: string | null;
+  extraction_mode: string | null;
+  extraction_report: string | null;
+  extraction_dataset_ids: Prisma.JsonValue;
+  extracted_at: Date | null;
+}
+
+interface StatusHeadlineRow {
+  connection_id: string;
+  name: string;
+  version: number;
+  status: VersionStatus;
+  published_at: Date | null;
+  updated_at: Date;
+}
+
+interface CompanyPublishedRow extends AccessColumnsRow {
+  id: string;
+  connection_id: string;
+  name: string;
+  version: number;
+  published_at: Date | null;
+  object_count: number;
+  connection_name: string;
+  provider: string;
+  host: string;
+  company_id: number;
+  company_name: string | null;
+  published_by: string | null;
 }
 
 const COLUMNS = Prisma.sql`id, connection_id, name, version, status, current_step, dataset_ids,
   based_on_id, session_id, extraction_mode, extracted_at, object_count, stats,
   created_by, created_at, updated_at, published_by, published_at`;
 
+const VERSION_FIELDS = {
+  id: true,
+  connectionId: true,
+  name: true,
+  version: true,
+  status: true,
+  currentStep: true,
+  datasetIds: true,
+  basedOnId: true,
+  sessionId: true,
+  extractionMode: true,
+  extractedAt: true,
+  objectCount: true,
+  stats: true,
+  createdBy: true,
+  createdAt: true,
+  updatedAt: true,
+  publishedBy: true,
+  publishedAt: true,
+} satisfies Prisma.ContextLayerVersionSelect;
+
+const EXTRACTION_FIELDS = {
+  sessionId: true,
+  extractionMode: true,
+  extractionReport: true,
+  extractionDatasetIds: true,
+  extractedAt: true,
+} satisfies Prisma.ContextLayerVersionSelect;
+
+type VersionFields = Prisma.ContextLayerVersionGetPayload<{ select: typeof VERSION_FIELDS }>;
+type ExtractionFields = Prisma.ContextLayerVersionGetPayload<{ select: typeof EXTRACTION_FIELDS }>;
+
 const VERSION_NOT_FOUND = 'Published version not found';
 
-async function listForConnection(connectionId: string) {
-  return rawRows(
-    prisma,
-    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid
-      ORDER BY created_at DESC, version DESC`
-  );
+function versionRow(v: VersionFields): VersionRow {
+  return {
+    id: v.id,
+    connection_id: v.connectionId,
+    name: v.name,
+    version: v.version,
+    status: v.status,
+    current_step: v.currentStep,
+    dataset_ids: v.datasetIds,
+    based_on_id: v.basedOnId,
+    session_id: v.sessionId,
+    extraction_mode: v.extractionMode,
+    extracted_at: v.extractedAt,
+    object_count: v.objectCount,
+    stats: v.stats,
+    created_by: v.createdBy,
+    created_at: v.createdAt,
+    updated_at: v.updatedAt,
+    published_by: v.publishedBy,
+    published_at: v.publishedAt,
+  };
+}
+
+function extractionRow(v: ExtractionFields): ExtractionRow {
+  return {
+    session_id: v.sessionId,
+    extraction_mode: v.extractionMode,
+    extraction_report: v.extractionReport,
+    extraction_dataset_ids: v.extractionDatasetIds,
+    extracted_at: v.extractedAt,
+  };
+}
+
+async function listForConnection(connectionId: string): Promise<VersionRow[]> {
+  const versions = await prisma.contextLayerVersion.findMany({
+    where: { connectionId },
+    select: VERSION_FIELDS,
+    orderBy: [{ createdAt: 'desc' }, { version: 'desc' }],
+  });
+  return versions.map(versionRow);
 }
 
 async function nextVersion(
@@ -37,18 +176,15 @@ async function nextVersion(
   name: string,
   excludeId: string | null = null
 ): Promise<number> {
-  const [row] = await rawRows(
-    tx,
-    Prisma.sql`SELECT COALESCE(MAX(version), 0) AS v
-       FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid AND name = ${name}
-        AND (${excludeId}::uuid IS NULL OR id <> ${excludeId}::uuid)`
-  );
-  return Number(row.v) + 1;
+  const { _max } = await tx.contextLayerVersion.aggregate({
+    _max: { version: true },
+    where: { connectionId, name, ...(excludeId === null ? {} : { id: { not: excludeId } }) },
+  });
+  return (_max.version ?? 0) + 1;
 }
 
-async function lockDraft(tx: Tx, connectionId: string) {
-  const rows = await rawRows(
+async function lockDraft(tx: Tx, connectionId: string): Promise<DraftRow | null> {
+  const rows = await rawRows<DraftRow>(
     tx,
     Prisma.sql`SELECT * FROM context_layer_versions
       WHERE connection_id = ${connectionId}::uuid AND status = 'draft'
@@ -57,15 +193,12 @@ async function lockDraft(tx: Tx, connectionId: string) {
   return rows[0] || null;
 }
 
-async function latestPublishedName(tx: Tx, connectionId: string) {
-  const rows = await rawRows(
-    tx,
-    Prisma.sql`SELECT id, name FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid AND status = 'published'
-      ORDER BY published_at DESC
-      LIMIT 1`
-  );
-  return rows[0] || null;
+async function latestPublishedName(tx: Tx, connectionId: string): Promise<{ id: string; name: string } | null> {
+  return tx.contextLayerVersion.findFirst({
+    where: { connectionId, status: 'published' },
+    orderBy: { publishedAt: 'desc' },
+    select: { id: true, name: true },
+  });
 }
 
 async function insertDraft(
@@ -84,13 +217,13 @@ async function insertDraft(
     companyId: number | null;
     name: string;
     version: number;
-    step: string;
-    datasetIds: unknown;
+    step: ContextStep | null;
+    datasetIds: readonly string[];
     basedOnId: string | null;
     createdBy: number | null;
   }
-) {
-  const [row] = await rawRows(
+): Promise<DraftRow> {
+  const [row] = await rawRows<DraftRow>(
     tx,
     Prisma.sql`INSERT INTO context_layer_versions
        (id, connection_id, company_id, name, version, status, current_step,
@@ -102,7 +235,7 @@ async function insertDraft(
   return row;
 }
 
-async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges) {
+async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges): Promise<DraftRow | undefined> {
   const sets: Prisma.Sql[] = [Prisma.sql`updated_at = now()`];
   if (changes.step !== undefined) sets.push(Prisma.sql`current_step = ${changes.step}`);
   if (changes.datasetIds !== undefined)
@@ -116,15 +249,19 @@ async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges) {
       Prisma.sql`extracted_at = now()`
     );
   }
-  const [row] = await rawRows(
+  const rows = await rawRows<DraftRow>(
     tx,
     Prisma.sql`UPDATE context_layer_versions SET ${Prisma.join(sets, ', ')} WHERE id = ${draftId}::uuid RETURNING *`
   );
-  return row;
+  return rows[0];
 }
 
-async function advanceDraftStep(connectionId: string, steps: readonly string[], step: string) {
-  const rows = await rawRows(
+async function advanceDraftStep(
+  connectionId: string,
+  steps: readonly string[],
+  step: ContextStep
+): Promise<VersionRow | null> {
+  const rows = await rawRows<VersionRow>(
     prisma,
     Prisma.sql`UPDATE context_layer_versions
         SET current_step = CASE
@@ -160,9 +297,9 @@ async function markPublished(
     datasets: readonly { id: string }[];
     publishedBy: number | null;
   }
-) {
+): Promise<VersionRow | undefined> {
   const datasetIds = datasets.length ? JSON.stringify(datasets.map((d) => d.id)) : null;
-  const [row] = await rawRows(
+  const rows = await rawRows<VersionRow>(
     tx,
     Prisma.sql`UPDATE context_layer_versions
         SET name = ${name}, version = ${version}, status = 'published', current_step = 'publish',
@@ -174,78 +311,72 @@ async function markPublished(
       WHERE id = ${draftId}::uuid
       RETURNING ${COLUMNS}`
   );
-  return row;
+  return rows[0];
 }
 
-async function latestPublished(connectionId: string) {
-  const rows = await rawRows(
-    prisma,
-    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid AND status = 'published'
-      ORDER BY published_at DESC
-      LIMIT 1`
-  );
-  return rows[0] || null;
+async function latestPublished(connectionId: string): Promise<VersionRow | null> {
+  const version = await prisma.contextLayerVersion.findFirst({
+    where: { connectionId, status: 'published' },
+    orderBy: { publishedAt: 'desc' },
+    select: VERSION_FIELDS,
+  });
+  return version ? versionRow(version) : null;
 }
 
-async function findPublished(connectionId: string, versionId: unknown) {
-  const rows = await orNotFound(
-    rawRows(
-      prisma,
-      Prisma.sql`SELECT ${COLUMNS}, datasets FROM context_layer_versions
-        WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND status = 'published'`
-    ),
+async function findPublished(connectionId: string, versionId: string): Promise<PublishedVersionRow | null> {
+  const version = await orNotFound(
+    prisma.contextLayerVersion.findFirst({
+      where: { id: versionId, connectionId, status: 'published' },
+      select: { ...VERSION_FIELDS, datasets: true },
+    }),
     VERSION_NOT_FOUND
   );
-  return rows[0] || null;
+  return version ? { ...versionRow(version), datasets: version.datasets } : null;
 }
 
-async function deletePublished(tx: Tx, connectionId: string, versionId: unknown) {
-  const rows = await orNotFound(
-    rawRows(
-      tx,
-      Prisma.sql`DELETE FROM context_layer_versions
-        WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND status = 'published'
-        RETURNING id, name, version, object_count`
-    ),
-    VERSION_NOT_FOUND
-  );
-  return rows[0] || null;
+async function deletePublished(tx: Tx, connectionId: string, versionId: string): Promise<DeletedVersionRow | null> {
+  try {
+    const deleted = await orNotFound(
+      tx.contextLayerVersion.delete({
+        where: { id: versionId, connectionId, status: 'published' },
+        select: { id: true, name: true, version: true, objectCount: true },
+      }),
+      VERSION_NOT_FOUND
+    );
+    return { id: deleted.id, name: deleted.name, version: deleted.version, object_count: deleted.objectCount };
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') return null;
+    throw err;
+  }
 }
 
-async function currentDraft(connectionId: string) {
-  const rows = await rawRows(
-    prisma,
-    Prisma.sql`SELECT ${COLUMNS} FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid AND status = 'draft'`
-  );
-  return rows[0] || null;
+async function currentDraft(connectionId: string): Promise<VersionRow | null> {
+  const version = await prisma.contextLayerVersion.findFirst({
+    where: { connectionId, status: 'draft' },
+    select: VERSION_FIELDS,
+  });
+  return version ? versionRow(version) : null;
 }
 
-async function latestExtraction(connectionId: string) {
-  const rows = await rawRows(
-    prisma,
-    Prisma.sql`SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
-       FROM context_layer_versions
-      WHERE connection_id = ${connectionId}::uuid AND extraction_report IS NOT NULL
-      ORDER BY extracted_at DESC
-      LIMIT 1`
-  );
-  return rows[0] || null;
+async function latestExtraction(connectionId: string): Promise<ExtractionRow | null> {
+  const version = await prisma.contextLayerVersion.findFirst({
+    where: { connectionId, extractionReport: { not: null } },
+    orderBy: { extractedAt: 'desc' },
+    select: EXTRACTION_FIELDS,
+  });
+  return version ? extractionRow(version) : null;
 }
 
-async function versionExtraction(connectionId: string, versionId: string) {
-  const rows = await rawRows(
-    prisma,
-    Prisma.sql`SELECT session_id, extraction_mode, extraction_report, extraction_dataset_ids, extracted_at
-       FROM context_layer_versions
-      WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid AND extraction_report IS NOT NULL`
-  );
-  return rows[0] || null;
+async function versionExtraction(connectionId: string, versionId: string): Promise<ExtractionRow | null> {
+  const version = await prisma.contextLayerVersion.findFirst({
+    where: { id: versionId, connectionId, extractionReport: { not: null } },
+    select: EXTRACTION_FIELDS,
+  });
+  return version ? extractionRow(version) : null;
 }
 
-async function statusHeadlines(connectionIds: readonly string[]) {
-  return rawRows(
+async function statusHeadlines(connectionIds: readonly string[]): Promise<StatusHeadlineRow[]> {
+  return rawRows<StatusHeadlineRow>(
     prisma,
     Prisma.sql`SELECT DISTINCT ON (connection_id, status)
             connection_id, name, version, status, published_at, updated_at
@@ -255,7 +386,11 @@ async function statusHeadlines(connectionIds: readonly string[]) {
   );
 }
 
-async function listCompanyPublished(actor: Actor, seeAll: boolean, search?: string | null) {
+async function listCompanyPublished(
+  actor: Actor,
+  seeAll: boolean,
+  search?: string | null
+): Promise<CompanyPublishedRow[]> {
   const conditions = [
     Prisma.sql`v.status = 'published'`,
     companyScope(actor, 'c.company_id'),
@@ -266,7 +401,7 @@ async function listCompanyPublished(actor: Actor, seeAll: boolean, search?: stri
     conditions.push(Prisma.sql`(v.name ILIKE ${pattern} OR c.name ILIKE ${pattern})`);
   }
 
-  return rawRows(
+  return rawRows<CompanyPublishedRow>(
     prisma,
     Prisma.sql`SELECT v.id, v.connection_id, v.name, v.version, v.published_at, v.object_count,
             c.name AS connection_name, c.provider, c.host,
@@ -299,4 +434,13 @@ export {
   statusHeadlines,
   listCompanyPublished,
 };
-export type { DraftChanges };
+export type {
+  DraftChanges,
+  VersionRow,
+  PublishedVersionRow,
+  DraftRow,
+  DeletedVersionRow,
+  ExtractionRow,
+  StatusHeadlineRow,
+  CompanyPublishedRow,
+};

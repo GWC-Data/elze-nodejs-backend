@@ -1,6 +1,18 @@
-type Row = Record<string, any>;
+import type { ContextProfileRow } from './contextProfileRepository';
 
-function shapeContextProfile(row: Row | null | undefined) {
+interface ContextProfileView {
+  id: string;
+  connectionId: string;
+  name: string;
+  description: string | null;
+  createdBy: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+function shapeContextProfile(row: ContextProfileRow): ContextProfileView;
+function shapeContextProfile(row: ContextProfileRow | null | undefined): ContextProfileView | null;
+function shapeContextProfile(row: ContextProfileRow | null | undefined): ContextProfileView | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -14,3 +26,4 @@ function shapeContextProfile(row: Row | null | undefined) {
 }
 
 export { shapeContextProfile };
+export type { ContextProfileView };

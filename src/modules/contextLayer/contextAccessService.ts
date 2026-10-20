@@ -2,38 +2,43 @@ import { fail } from '../../shared/errors/AppError';
 import { can } from '../auth/authorizationService';
 import { accessLevelKeys, levelRank } from '../catalogue/catalogueService';
 import type { ContextAccessLevel } from './contextConstants';
+import type { AccessColumnsRow } from './contextAccessRepository';
 import type { Actor } from '../../shared/types/actor';
+import type { GeneralAccess } from '../../generated/prisma/enums';
 
-type Row = Record<string, any>;
+type OwnerRow = Pick<AccessColumnsRow, 'created_by'>;
 
 interface ContextAccess {
   level: ContextAccessLevel;
   owner: { id: number; name: string | null } | null;
   isOwner: boolean;
   canShare: boolean;
-  generalAccess: string;
+  generalAccess: GeneralAccess;
 }
 
 function isContextAdmin(actor: Actor): boolean {
   return actor.isPlatform || can(actor, 'context.manage_all');
 }
 
-function ownerIdOf(row: Row): number | null {
+function ownerIdOf(row: OwnerRow): number | null {
   return row.created_by === null || row.created_by === undefined ? null : Number(row.created_by);
 }
 
-function strongest(...levels: unknown[]): ContextAccessLevel | null {
+function isContextLevel(level: string | null, known: readonly string[]): level is ContextAccessLevel {
+  return level !== null && known.includes(level);
+}
+
+function strongest(...levels: (string | null)[]): ContextAccessLevel | null {
   let best: ContextAccessLevel | null = null;
   const known = accessLevelKeys('context');
   for (const level of levels) {
-    if (!known.includes(level as string)) continue;
-    const candidate = level as ContextAccessLevel;
-    if (!best || levelRank('context', candidate) > levelRank('context', best)) best = candidate;
+    if (!isContextLevel(level, known)) continue;
+    if (!best || levelRank('context', level) > levelRank('context', best)) best = level;
   }
   return best;
 }
 
-function levelOf(actor: Actor, row: Row): ContextAccessLevel | null {
+function levelOf(actor: Actor, row: AccessColumnsRow): ContextAccessLevel | null {
   if (isContextAdmin(actor)) return 'full';
   if (ownerIdOf(row) === actor.id) return 'full';
   return strongest(row.granted_level, row.group_level, row.general_access === 'company' ? 'view' : null);
@@ -43,12 +48,12 @@ function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessL
   return Boolean(level) && levelRank('context', level) >= levelRank('context', required);
 }
 
-function mayShare(actor: Actor, row: Row): boolean {
+function mayShare(actor: Actor, row: OwnerRow): boolean {
   const ownerId = ownerIdOf(row);
   return ownerId === null ? isContextAdmin(actor) : ownerId === actor.id;
 }
 
-function accessOf(actor: Actor, row: Row): ContextAccess | null {
+function accessOf(actor: Actor, row: AccessColumnsRow): ContextAccess | null {
   const level = levelOf(actor, row);
   if (!level) return null;
   const ownerId = ownerIdOf(row);
@@ -67,7 +72,12 @@ const NEEDS: Record<ContextAccessLevel, string> = {
   full: 'delete',
 };
 
-function assertLevel(actor: Actor, row: Row, required: ContextAccessLevel, notFound: string): ContextAccess {
+function assertLevel(
+  actor: Actor,
+  row: AccessColumnsRow,
+  required: ContextAccessLevel,
+  notFound: string
+): ContextAccess {
   const access = accessOf(actor, row);
   if (!access) throw fail('RESOURCE_NOT_FOUND', notFound);
   if (!levelAtLeast(access.level, required)) {
@@ -76,7 +86,7 @@ function assertLevel(actor: Actor, row: Row, required: ContextAccessLevel, notFo
   return access;
 }
 
-function assertMayShare(actor: Actor, row: Row): void {
+function assertMayShare(actor: Actor, row: OwnerRow): void {
   if (!mayShare(actor, row)) {
     throw fail('INSUFFICIENT_PERMISSION', 'Only the person who created this context can share it.');
   }

@@ -6,8 +6,64 @@ import { sqlState } from '../../shared/db/dbError';
 import { rawRows, sqlOf } from '../../shared/db/baseRepository';
 import { INVALID_TEXT_REPRESENTATION, UNDEFINED_TABLE } from '../../shared/errors/pgErrors';
 import type { Actor } from '../../shared/types/actor';
+import { strictEntry, entry } from './contextTypes';
+import type { JsonValue } from './contextTypes';
 
 const { prisma, withTransaction } = config.database;
+
+interface FactRow {
+  id: string;
+  object_type: string;
+  qualified_name: string;
+  source_type: string;
+  verified: boolean;
+  confidence: number | null;
+  payload: JsonValue;
+  review_status: string | null;
+  review_edited: boolean | null;
+}
+
+interface StoredObjectRow extends FactRow {
+  version_id: string;
+  reviewed_by: string | number | null;
+  reviewed_at: Date | null;
+  created_at: Date | null;
+  updated_at: Date | null;
+  review_reviewed_at: Date | null;
+}
+
+interface ObjectRow extends StoredObjectRow {
+  review_note: string | null;
+}
+
+interface PageObjectRow extends FactRow {
+  version_id: string;
+  created_at: Date | null;
+  __matched: number;
+}
+
+interface TypeCountRow {
+  object_type: string;
+  n: number;
+  version_id: string | null;
+}
+
+interface RequiredObjectRow {
+  id: string;
+  object_type: string;
+  qualified_name: string;
+  payload: JsonValue;
+  verified: boolean;
+}
+
+interface ObjectPage {
+  rows: PageObjectRow[];
+  counts: Record<string, number>;
+  all: number;
+  matched: number;
+  highConfidence: number | null;
+  runVersionId: string | null;
+}
 
 interface SqlSource {
   from: string;
@@ -33,7 +89,7 @@ const SNAPSHOT_FACTS = `
    CROSS JOIN LATERAL jsonb_array_elements(v.snapshot) e
    WHERE v.id = ?::uuid AND v.connection_id = ?::uuid AND v.status = 'published'`;
 
-function asMissingStore(err: any): never {
+function asMissingStore(err: unknown): never {
   if (err && sqlState(err) === UNDEFINED_TABLE) {
     throw fail(
       'SERVICE_UNAVAILABLE',
@@ -51,7 +107,7 @@ async function guarded<R>(work: () => Promise<R>): Promise<R> {
   }
 }
 
-function runClause(connectionId: string, runVersionId?: string | null): { sql: string; params: unknown[] } {
+function runClause(connectionId: string, runVersionId?: unknown): { sql: string; params: unknown[] } {
   if (runVersionId) {
     return { sql: 'o.context_id = ?::uuid AND o.version_id = ?::uuid', params: [connectionId, runVersionId] };
   }
@@ -67,7 +123,7 @@ function runClause(connectionId: string, runVersionId?: string | null): { sql: s
 
 function sourceOf(
   connectionId: string,
-  { runVersionId, versionId }: { runVersionId?: string | null; versionId?: string | null } = {}
+  { runVersionId, versionId }: { runVersionId?: unknown; versionId?: unknown } = {}
 ): SqlSource {
   if (versionId) {
     return {
@@ -90,8 +146,8 @@ function sourceOf(
 async function loadObjects(
   connectionId: string,
   runVersionId?: string | null,
-  { types, versionId }: { types?: readonly string[] | null; versionId?: string | null } = {}
-) {
+  { types, versionId }: { types?: readonly string[] | null; versionId?: unknown } = {}
+): Promise<ObjectRow[]> {
   const src = sourceOf(connectionId, { runVersionId, versionId });
   let clause = src.where;
   const params = [...src.params];
@@ -100,7 +156,7 @@ async function loadObjects(
     params.push(types);
   }
 
-  return rawRows(
+  return rawRows<ObjectRow>(
     prisma,
     sqlOf(
       `SELECT o.id, o.version_id, o.object_type, o.qualified_name, o.source_type,
@@ -116,8 +172,8 @@ async function loadObjects(
   );
 }
 
-async function loadObject(connectionId: string, objectId: string) {
-  const rows = await rawRows(
+async function loadObject(connectionId: string, objectId: string): Promise<StoredObjectRow | null> {
+  const rows = await rawRows<StoredObjectRow>(
     prisma,
     sqlOf(
       `SELECT o.id, o.version_id, o.object_type, o.qualified_name, o.source_type,
@@ -151,16 +207,16 @@ async function pageObjects(
     minConfidence,
     highConfidenceAt,
   }: {
-    runVersionId?: string | null;
-    versionId?: string | null;
+    runVersionId?: unknown;
+    versionId?: unknown;
     type?: unknown;
     status?: unknown;
     search?: unknown;
     minConfidence?: unknown;
-    highConfidenceAt?: number;
+    highConfidenceAt?: unknown;
   },
   paging: { pageSize: number; offset: number }
-) {
+): Promise<ObjectPage> {
   const src = sourceOf(connectionId, { runVersionId, versionId });
   const where = [src.where];
   const params = [...src.params];
@@ -189,7 +245,7 @@ async function pageObjects(
   const highConfidenceQuery =
     highConfidenceAt === undefined
       ? Promise.resolve(null)
-      : rawRows(
+      : rawRows<{ n: number }>(
           prisma,
           sqlOf(
             `SELECT COUNT(*)::int AS n
@@ -202,7 +258,7 @@ async function pageObjects(
         );
 
   const [rows, countRows, highConfidenceRows] = await Promise.all([
-    rawRows(
+    rawRows<PageObjectRow>(
       prisma,
       sqlOf(
         `SELECT o.id, o.version_id, o.object_type, o.qualified_name, o.source_type,
@@ -216,7 +272,7 @@ async function pageObjects(
         [...params, paging.pageSize, paging.offset]
       )
     ),
-    rawRows(
+    rawRows<TypeCountRow>(
       prisma,
       sqlOf(
         `SELECT o.object_type, COUNT(*)::int AS n, MIN(o.version_id::text) AS version_id
@@ -238,7 +294,7 @@ async function pageObjects(
   }
   let matched = rows.length ? Number(rows[0].__matched) : 0;
   if (!rows.length && paging.offset > 0) {
-    const recount = await rawRows(
+    const recount = await rawRows<{ n: number }>(
       prisma,
       sqlOf(
         `SELECT COUNT(*)::int AS n FROM ${src.from}
@@ -260,7 +316,7 @@ async function pageObjects(
 
 async function factTotals(connectionIds: readonly string[]): Promise<{ factsGenerated: number; factsPending: number }> {
   if (connectionIds.length === 0) return { factsGenerated: 0, factsPending: 0 };
-  const rows = await rawRows(
+  const rows = await rawRows<{ generated: number; pending: number }>(
     prisma,
     sqlOf(
       `WITH latest AS (
@@ -280,10 +336,10 @@ async function factTotals(connectionIds: readonly string[]): Promise<{ factsGene
   return { factsGenerated: Number(rows[0]?.generated ?? 0), factsPending: Number(rows[0]?.pending ?? 0) };
 }
 
-async function requireObject(connectionId: string, objectId: string) {
-  let rows: Record<string, any>[] = [];
+async function requireObject(connectionId: string, objectId: string): Promise<RequiredObjectRow> {
+  let rows: RequiredObjectRow[] = [];
   try {
-    rows = await rawRows(
+    rows = await rawRows<RequiredObjectRow>(
       prisma,
       sqlOf(
         `SELECT id, object_type, qualified_name, payload, verified
@@ -292,7 +348,7 @@ async function requireObject(connectionId: string, objectId: string) {
         [objectId, connectionId]
       )
     );
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === INVALID_TEXT_REPRESENTATION) throw fail('RESOURCE_NOT_FOUND', 'That item does not exist.');
     asMissingStore(err);
   }
@@ -334,7 +390,7 @@ async function writeDecision(
   });
 }
 
-async function mergePayload(connectionId: string, objectId: string, patch: Record<string, any>): Promise<void> {
+async function mergePayload(connectionId: string, objectId: string, patch: Record<string, unknown>): Promise<void> {
   await prisma.$executeRaw(
     sqlOf(
       `UPDATE ${OBJECTS}
@@ -358,27 +414,27 @@ async function markEdited(actor: Actor, connectionId: string, objectId: string, 
   );
 }
 
-async function matchingObjectIds(
-  connectionId: string,
-  filter: { type?: unknown; status?: unknown; minConfidence?: unknown }
-): Promise<string[]> {
+async function matchingObjectIds(connectionId: string, filter: unknown): Promise<string[]> {
   const run = runClause(connectionId);
   const where = [run.sql];
   const params = [...run.params];
-  if (filter.type) {
+  const type = strictEntry(filter, 'type');
+  const status = entry(filter, 'status');
+  const minConfidence = entry(filter, 'minConfidence');
+  if (type) {
     where.push('o.object_type = ?');
-    params.push(String(filter.type));
+    params.push(String(type));
   }
-  if (filter.status) {
+  if (status) {
     where.push(`${STATUS_SQL} = ?`);
-    params.push(String(filter.status));
+    params.push(String(status));
   }
-  if (filter.minConfidence !== undefined && filter.minConfidence !== null) {
+  if (minConfidence !== undefined && minConfidence !== null) {
     where.push('o.confidence IS NOT NULL AND o.confidence >= ?');
-    params.push(Number(filter.minConfidence));
+    params.push(Number(minConfidence));
   }
 
-  const rows = await rawRows(
+  const rows = await rawRows<{ id: string }>(
     prisma,
     sqlOf(
       `SELECT o.id FROM ${OBJECTS} o LEFT JOIN ${REVIEWS} r ON r.object_id = o.id
@@ -434,3 +490,4 @@ export {
   matchingObjectIds,
   writeBulkDecision,
 };
+export type { FactRow, StoredObjectRow, ObjectRow, PageObjectRow, RequiredObjectRow, ObjectPage };

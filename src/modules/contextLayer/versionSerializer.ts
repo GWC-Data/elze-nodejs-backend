@@ -1,6 +1,61 @@
-type Row = Record<string, any>;
+import type { ContextStep, VersionStatus } from '../../generated/prisma/enums';
+import type { DeletedVersionRow, ExtractionRow, StatusHeadlineRow, VersionRow } from './versionRepository';
+import type { JsonValue, PublishedDataset } from './contextTypes';
 
-function shapeVersion(row: Row | null | undefined) {
+interface Version {
+  id: string;
+  connectionId: string;
+  name: string;
+  version: number;
+  label: string;
+  status: VersionStatus;
+  currentStep: ContextStep | null;
+  datasetIds: JsonValue[];
+  basedOnId: string | null;
+  sessionId: string | null;
+  extractionMode: string | null;
+  extractedAt: Date | null;
+  objectCount: number;
+  stats: JsonValue;
+  createdBy: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  publishedBy: number | null;
+  publishedAt: Date | null;
+}
+
+interface PublishedVersion extends Version {
+  datasets: PublishedDataset[];
+}
+
+interface Extraction {
+  sessionId: string | null;
+  text: string | null;
+  mode: string | null;
+  datasetIds: string[] | null;
+  extractedAt: Date | null;
+}
+
+interface Headline {
+  name: string;
+  version: number;
+  label: string;
+  status: VersionStatus;
+  publishedAt: Date | null;
+  updatedAt: Date;
+}
+
+interface DeletedVersion {
+  id: string;
+  name: string;
+  version: number;
+  label: string;
+  objectCount: number;
+}
+
+function shapeVersion(row: VersionRow): Version;
+function shapeVersion(row: VersionRow | null | undefined): Version | null;
+function shapeVersion(row: VersionRow | null | undefined): Version | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -25,7 +80,7 @@ function shapeVersion(row: Row | null | undefined) {
   };
 }
 
-function shapeExtraction(row: Row | null | undefined) {
+function shapeExtraction(row: ExtractionRow | null | undefined): Extraction | null {
   if (!row) return null;
   return {
     sessionId: row.session_id,
@@ -36,7 +91,7 @@ function shapeExtraction(row: Row | null | undefined) {
   };
 }
 
-function headline(row: Row) {
+function headline(row: StatusHeadlineRow): Headline {
   return {
     name: row.name,
     version: Number(row.version),
@@ -47,7 +102,7 @@ function headline(row: Row) {
   };
 }
 
-function deletedVersion(row: Row) {
+function deletedVersion(row: DeletedVersionRow): DeletedVersion {
   return {
     id: row.id,
     name: row.name,
@@ -58,3 +113,4 @@ function deletedVersion(row: Row) {
 }
 
 export { shapeVersion, shapeExtraction, headline, deletedVersion };
+export type { Version, PublishedVersion, Extraction, Headline, DeletedVersion };

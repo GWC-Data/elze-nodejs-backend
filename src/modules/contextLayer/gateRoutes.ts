@@ -4,6 +4,7 @@ import { authenticated } from '../auth/authMiddleware';
 import { checkAgentRequest } from './agentGateService';
 import { denied } from '../audit/auditService';
 import { ERROR_STATUS } from '../../shared/errors/errorCodes';
+import { entry, strictEntry } from './contextTypes';
 
 const router = express.Router();
 
@@ -16,19 +17,20 @@ router.get('/agents', ...authenticated, async (req: Request, res: Response, next
   }
 });
 
-router.use((err: any, req: Request, res: Response, next: NextFunction) => {
+router.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   void next;
-  const status = ERROR_STATUS[err?.code] === 401 ? 401 : 403;
+  const code = entry(err, 'code');
+  const status = ERROR_STATUS[String(code)] === 401 ? 401 : 403;
   if (req.actor && status === 403) {
     denied(req.actor, {
-      reason: err.code || 'agent_gate',
+      reason: strictEntry(err, 'code') || 'agent_gate',
       method: req.get('x-original-method') || null,
       path: (req.get('x-original-uri') || '').split('?')[0] || null,
     });
   }
   res
     .status(status)
-    .set('X-Gate-Reason', String(err?.code ? err.code : 'ERROR'))
+    .set('X-Gate-Reason', String(code ? code : 'ERROR'))
     .end();
 });
 

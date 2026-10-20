@@ -9,11 +9,58 @@ import * as connections from './connectionService';
 import { assertMayShare } from './contextAccessService';
 import { audit, EVENTS } from '../audit/auditService';
 import type { Actor } from '../../shared/types/actor';
+import type { ConnectionRef } from './connectionService';
+import type { ContextAccess } from './contextAccessService';
+import type { RequestBody } from './contextTypes';
 
-type Row = Record<string, any>;
-type Connection = Awaited<ReturnType<typeof connections.requireConnectionId>>;
+type Connection = ConnectionRef;
 
-function shapePerson(row: Row) {
+interface PersonSource {
+  user_id?: number;
+  id?: number;
+  username: string;
+  email: string;
+  display_name: string | null;
+}
+
+interface GroupSource {
+  group_id?: number;
+  id?: number;
+  name: string;
+  member_count?: number;
+}
+
+interface SharedPerson {
+  userId: number;
+  username: string;
+  email: string;
+  displayName: string | null;
+}
+
+interface SharedGroup {
+  groupId: number;
+  name: string;
+  memberCount: number;
+}
+
+interface ContextLevel {
+  id: string;
+  key: string;
+  rank: number;
+  label: string;
+  description: string | null;
+}
+
+interface ContextSharing {
+  owner: ContextAccess['owner'];
+  generalAccess: ContextAccess['generalAccess'];
+  levels: ContextLevel[];
+  people: (SharedPerson & { level: string; levelId: string; grantedAt: Date; active: boolean })[];
+  groups: (SharedGroup & { level: string; levelId: string; grantedAt: Date; active: boolean })[];
+  you: { level: ContextAccess['level']; levelId: string | null; isOwner: boolean; canShare: boolean };
+}
+
+function shapePerson(row: PersonSource): SharedPerson {
   return {
     userId: Number(row.user_id ?? row.id),
     username: row.username,
@@ -30,7 +77,7 @@ function requireContextLevel(value: unknown): ContextAccessLevel {
   return requireLevelId(value, 'context') as ContextAccessLevel;
 }
 
-function describeContextLevels() {
+function describeContextLevels(): ContextLevel[] {
   return accessLevelsFor('context').map(({ id, key, rank, label, description }) => ({
     id,
     key,
@@ -48,7 +95,7 @@ function requireGeneralAccess(value: unknown): GeneralAccess {
   return general;
 }
 
-function shapeGroup(row: Row) {
+function shapeGroup(row: GroupSource): SharedGroup {
   return {
     groupId: Number(row.group_id ?? row.id),
     name: row.name,
@@ -56,7 +103,7 @@ function shapeGroup(row: Row) {
   };
 }
 
-async function describe(connection: Connection): Promise<Record<string, any>> {
+async function describe(connection: Connection): Promise<ContextSharing> {
   const [grants, groupGrants] = await Promise.all([
     contextAccessRepository.listGrants(connection.id),
     contextAccessRepository.listGroupGrants(connection.id),
@@ -66,14 +113,14 @@ async function describe(connection: Connection): Promise<Record<string, any>> {
     owner,
     generalAccess,
     levels: describeContextLevels(),
-    people: grants.map((row: Row) => ({
+    people: grants.map((row) => ({
       ...shapePerson(row),
       level: row.access_level,
       levelId: row.access_level_id,
       grantedAt: row.granted_at,
       active: row.status === 'active',
     })),
-    groups: groupGrants.map((row: Row) => ({
+    groups: groupGrants.map((row) => ({
       ...shapeGroup(row),
       level: row.access_level,
       levelId: row.access_level_id,
@@ -84,11 +131,11 @@ async function describe(connection: Connection): Promise<Record<string, any>> {
   };
 }
 
-async function contextAccess(actor: Actor, id: unknown): Promise<Record<string, any>> {
+async function contextAccess(actor: Actor, id: unknown): Promise<ContextSharing> {
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-async function shareablePeople(actor: Actor, id: unknown): Promise<Record<string, any>[]> {
+async function shareablePeople(actor: Actor, id: unknown): Promise<SharedPerson[]> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const rows = await contextAccessRepository.shareablePeople(connection.companyId, connection.access.owner?.id ?? null);
@@ -99,8 +146,8 @@ async function shareWithUser(
   actor: Actor,
   id: unknown,
   rawUserId: unknown,
-  body: Record<string, any> = {}
-): Promise<Record<string, any>> {
+  body: RequestBody = {}
+): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const userId = requireId(rawUserId, 'user id');
@@ -124,7 +171,7 @@ async function shareWithUser(
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-async function unshareWithUser(actor: Actor, id: unknown, rawUserId: unknown): Promise<Record<string, any>> {
+async function unshareWithUser(actor: Actor, id: unknown, rawUserId: unknown): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const userId = requireId(rawUserId, 'user id');
@@ -136,7 +183,7 @@ async function unshareWithUser(actor: Actor, id: unknown, rawUserId: unknown): P
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-async function shareableGroups(actor: Actor, id: unknown): Promise<Record<string, any>[]> {
+async function shareableGroups(actor: Actor, id: unknown): Promise<SharedGroup[]> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const rows = await contextAccessRepository.shareableGroups(connection.companyId);
@@ -147,8 +194,8 @@ async function shareWithGroup(
   actor: Actor,
   id: unknown,
   rawGroupId: unknown,
-  body: Record<string, any> = {}
-): Promise<Record<string, any>> {
+  body: RequestBody = {}
+): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const groupId = requireId(rawGroupId, 'group id');
@@ -170,7 +217,7 @@ async function shareWithGroup(
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-async function unshareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown): Promise<Record<string, any>> {
+async function unshareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const groupId = requireId(rawGroupId, 'group id');
@@ -182,11 +229,7 @@ async function unshareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown):
   return describe(await connections.requireConnectionId(actor, id));
 }
 
-async function setGeneralAccess(
-  actor: Actor,
-  id: unknown,
-  body: Record<string, any> = {}
-): Promise<Record<string, any>> {
+async function setGeneralAccess(actor: Actor, id: unknown, body: RequestBody = {}): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
   const general = requireGeneralAccess(body.generalAccess);
@@ -202,6 +245,7 @@ async function setGeneralAccess(
   return describe(await connections.requireConnectionId(actor, id));
 }
 
+export type { ContextSharing, SharedPerson, SharedGroup, ContextLevel };
 export {
   contextAccess,
   shareablePeople,

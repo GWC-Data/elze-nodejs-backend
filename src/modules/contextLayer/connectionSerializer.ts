@@ -1,7 +1,57 @@
-type Row = Record<string, any>;
+import type { ConnectionStatus } from '../../generated/prisma/enums';
+import type { ConnectionRow, PublishedVersionOptionRow, SelectedDatasetRow } from './connectionRepository';
+import type { DatasetFields } from './contextTypes';
 
-function shapeConnection(row: Row | null | undefined, datasets?: unknown, access?: unknown) {
-  if (!row) return null;
+interface ShapedConnection<D, A> {
+  id: string;
+  companyId: number;
+  provider: string;
+  name: string;
+  host: string;
+  secretHint: string;
+  status: ConnectionStatus;
+  lastError: string | null;
+  lastVerifiedAt: Date | null;
+  createdAt: Date | null;
+  selectedDatasetCount: number | undefined;
+  selectedDatasets: D;
+  access: A;
+}
+
+interface SelectedDataset {
+  id: string;
+  name: string | null;
+  rowCount: number | null;
+  columnCount: number | null;
+  selectedAt: Date;
+}
+
+interface PublishedVersionOption {
+  id: string;
+  connectionId: string;
+  connectionName: string;
+  name: string;
+  version: number;
+  label: string;
+  live: boolean;
+  publishedAt: Date | null;
+}
+
+interface ListedDataset {
+  id: string;
+  name: unknown;
+  description: null;
+  rowCount: unknown;
+  columnCount: unknown;
+  owner: null;
+  lastUpdated: null;
+}
+
+function shapeConnection<D, A>(
+  row: ConnectionRow & { selectedDatasetCount?: number },
+  datasets: D,
+  access: A
+): ShapedConnection<D, A> {
   return {
     id: row.id,
     companyId: row.company_id,
@@ -15,11 +65,11 @@ function shapeConnection(row: Row | null | undefined, datasets?: unknown, access
     createdAt: row.created_at || null,
     selectedDatasetCount: row.selectedDatasetCount === undefined ? undefined : Number(row.selectedDatasetCount),
     selectedDatasets: datasets,
-    access: access ?? undefined,
+    access,
   };
 }
 
-function shapeSelected(row: Row) {
+function shapeSelected(row: SelectedDatasetRow): SelectedDataset {
   return {
     id: row.dataset_id,
     name: row.name,
@@ -29,7 +79,7 @@ function shapeSelected(row: Row) {
   };
 }
 
-function publishedVersionOption(row: Row) {
+function publishedVersionOption(row: PublishedVersionOptionRow): PublishedVersionOption {
   return {
     id: row.id,
     connectionId: row.connection_id,
@@ -42,7 +92,7 @@ function publishedVersionOption(row: Row) {
   };
 }
 
-function listedDataset(d: Row) {
+function listedDataset(d: DatasetFields): ListedDataset {
   return {
     id: String(d.id),
     name: d.name || String(d.id),
@@ -55,3 +105,4 @@ function listedDataset(d: Row) {
 }
 
 export { shapeConnection, shapeSelected, publishedVersionOption, listedDataset };
+export type { ShapedConnection, SelectedDataset, PublishedVersionOption, ListedDataset };

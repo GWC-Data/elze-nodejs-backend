@@ -2,18 +2,78 @@ import crypto from 'node:crypto';
 import { fail } from '../../shared/errors/AppError';
 import { Throttle } from './throttle';
 import TtlCache from '../../shared/cache/ttlCache';
+import { entry, field, strictField } from './contextTypes';
+import type { JsonValue } from './contextTypes';
 
-type DomoPayload = any;
-type DomoRow = Record<string, any>;
-type Dataset = {
+type DomoPayload = JsonValue;
+
+interface Dataset {
   id: string;
-  name: any;
-  description: any;
+  name: JsonValue;
+  description: JsonValue;
   rowCount: number | null;
   columnCount: number | null;
-  owner: any;
-  lastUpdated: any;
-};
+  owner: JsonValue;
+  lastUpdated: JsonValue;
+}
+
+interface WarehouseAccount {
+  accountId: JsonValue;
+  accountName: JsonValue;
+  accountEmail: JsonValue;
+}
+
+interface DatasetPageRequest {
+  host: string;
+  token: string;
+  page?: unknown;
+  pageSize?: unknown;
+  search?: unknown;
+  fresh?: boolean;
+}
+
+interface DatasetPageBody {
+  datasets: Dataset[];
+  page: number;
+  pageSize: number;
+  total: number | null;
+  hasMore: boolean;
+}
+
+interface DatasetPage extends DatasetPageBody {
+  cached: boolean;
+}
+
+interface ColumnProfile {
+  name: JsonValue;
+  dataType: JsonValue;
+  nullable: null;
+  nullPercent: number | null;
+  uniqueCount: number | null;
+  semanticType: null;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  min: number | null;
+  max: number | null;
+  distribution: null;
+}
+
+interface TableProfile {
+  id: string;
+  datasetId: string;
+  name: JsonValue;
+  description: JsonValue;
+  rowCount: number | null;
+  columnCount: number | null;
+  sizeBytes: number | null;
+  qualityScore: null;
+  lastRefreshedAt: JsonValue;
+  owner: JsonValue;
+  columns: ColumnProfile[];
+  sample: { columns: JsonValue[]; rows: JsonValue[]; sampledFrom: number | null } | null;
+  statsSampleSize: number;
+  qualityIssues: unknown[];
+}
 
 const WHOAMI_PATH = '/api/content/v2/users/me';
 
@@ -112,7 +172,7 @@ async function callDomo(
   let response: Response;
   let text: string;
   try {
-    [response, text] = await DOMO_THROTTLE.run(host, async () => {
+    [response, text] = await DOMO_THROTTLE.run<[Response, string]>(host, async () => {
       const res = await fetch(url, {
         method,
         headers: {
@@ -123,12 +183,14 @@ async function callDomo(
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      return [res, await res.text()] as [Response, string];
+      return [res, await res.text()];
     });
-  } catch (err: any) {
-    if (err && err.code === 'RATE_LIMITED') throw err;
+  } catch (err) {
+    if (err && entry(err, 'code') === 'RATE_LIMITED') throw err;
     const reason =
-      err.name === 'TimeoutError' ? `it did not respond within ${REQUEST_TIMEOUT_MS / 1000} seconds` : err.message;
+      entry(err, 'name') === 'TimeoutError'
+        ? `it did not respond within ${REQUEST_TIMEOUT_MS / 1000} seconds`
+        : entry(err, 'message');
     throw fail('CONNECTOR_UNREACHABLE', `Could not reach ${host}: ${reason}`);
   }
 
@@ -151,7 +213,8 @@ async function callDomo(
   }
 
   if (!response.ok) {
-    const detail = (payload && (payload.message || payload.error)) || text.slice(0, 200) || 'no detail';
+    const detail =
+      (payload && (field(payload, 'message') || field(payload, 'error'))) || text.slice(0, 200) || 'no detail';
     throw Object.assign(fail('CONNECTOR_UNREACHABLE', `${host} answered ${response.status} for ${path}: ${detail}`), {
       upstreamStatus: response.status,
     });
@@ -160,52 +223,49 @@ async function callDomo(
   return payload;
 }
 
-async function verify({
-  host,
-  token,
-}: {
-  host: string;
-  token: string;
-}): Promise<{ accountId: any; accountName: any; accountEmail: any }> {
+async function verify({ host, token }: { host: string; token: string }): Promise<WarehouseAccount> {
   const me = await callDomo(host, token, WHOAMI_PATH);
   return {
-    accountId: me && (me.id ?? me.userId ?? null),
-    accountName: (me && (me.displayName || me.name || me.emailAddress)) || null,
-    accountEmail: (me && (me.emailAddress || me.email)) || null,
+    accountId: me && (field(me, 'id') ?? field(me, 'userId') ?? null),
+    accountName: (me && (field(me, 'displayName') || field(me, 'name') || field(me, 'emailAddress'))) || null,
+    accountEmail: (me && (field(me, 'emailAddress') || field(me, 'email'))) || null,
   };
 }
 
-function shapeDataset(row: DomoRow | null | undefined): Dataset | null {
+function shapeDataset(row: JsonValue | undefined): Dataset | null {
   if (!row || typeof row !== 'object') return null;
-  const id = row.id ?? row.datasourceId ?? row.dataSourceId;
+  const id = field(row, 'id') ?? field(row, 'datasourceId') ?? field(row, 'dataSourceId');
   if (!id) return null;
 
+  const rowOwner = field(row, 'owner');
   const owner =
-    row.owner && typeof row.owner === 'object'
-      ? row.owner.name || row.owner.displayName || null
-      : row.ownerName || null;
+    rowOwner && typeof rowOwner === 'object'
+      ? field(rowOwner, 'name') || field(rowOwner, 'displayName') || null
+      : field(row, 'ownerName') || null;
 
   return {
     id: String(id),
-    name: row.name || row.displayName || String(id),
-    description: row.description || null,
-    rowCount: Number.isFinite(Number(row.rowCount)) ? Number(row.rowCount) : null,
-    columnCount: Number.isFinite(Number(row.columnCount)) ? Number(row.columnCount) : null,
+    name: field(row, 'name') || field(row, 'displayName') || String(id),
+    description: field(row, 'description') || null,
+    rowCount: Number.isFinite(Number(field(row, 'rowCount'))) ? Number(field(row, 'rowCount')) : null,
+    columnCount: Number.isFinite(Number(field(row, 'columnCount'))) ? Number(field(row, 'columnCount')) : null,
     owner,
-    lastUpdated: row.lastUpdated ?? row.lastTouched ?? null,
+    lastUpdated: field(row, 'lastUpdated') ?? field(row, 'lastTouched') ?? null,
   };
 }
 
-function extractRows(payload: DomoPayload): any[] | null {
+function extractRows(payload: DomoPayload): JsonValue[] | null {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== 'object') return null;
 
   for (const key of ['dataSources', 'datasources', 'searchObjects', 'results', 'items']) {
-    if (Array.isArray(payload[key])) return payload[key];
+    const rows = payload[key];
+    if (Array.isArray(rows)) return rows;
   }
   const byEntity = payload.searchResultsMap;
   if (byEntity && typeof byEntity === 'object') {
-    for (const value of Object.values(byEntity)) {
+    const groups: (JsonValue | undefined)[] = Object.values(byEntity);
+    for (const value of groups) {
       if (Array.isArray(value)) return value;
     }
   }
@@ -230,8 +290,8 @@ function unrecognised(host: string, payload: DomoPayload): Error {
 async function findDatasetById(host: string, token: string, datasetId: string): Promise<Dataset | null> {
   try {
     return shapeDataset(await callDomo(host, token, `${datasetDetailPath(datasetId)}?part=core,rowcolcount`));
-  } catch (err: any) {
-    if (err && (err.upstreamStatus === 404 || err.upstreamStatus === 403)) return null;
+  } catch (err) {
+    if (err && (entry(err, 'upstreamStatus') === 404 || entry(err, 'upstreamStatus') === 403)) return null;
     throw err;
   }
 }
@@ -241,6 +301,10 @@ function resolvePageSize(value: unknown): number {
   return DATASET_PAGE_SIZES.includes(size) ? size : DEFAULT_DATASET_PAGE_SIZE;
 }
 
+function isCachedPage(value: unknown): value is DatasetPageBody {
+  return typeof value === 'object' && value !== null && 'datasets' in value;
+}
+
 async function listDatasetPage({
   host,
   token,
@@ -248,21 +312,7 @@ async function listDatasetPage({
   pageSize,
   search,
   fresh = false,
-}: {
-  host: string;
-  token: string;
-  page?: unknown;
-  pageSize?: unknown;
-  search?: unknown;
-  fresh?: boolean;
-}): Promise<{
-  datasets: Dataset[];
-  page: number;
-  pageSize: number;
-  total: number | null;
-  hasMore: boolean;
-  cached: boolean;
-}> {
+}: DatasetPageRequest): Promise<DatasetPage> {
   const size = resolvePageSize(pageSize);
   const pageNumber = Math.max(1, Math.floor(Number(page)) || 1);
   const offset = (pageNumber - 1) * size;
@@ -273,15 +323,15 @@ async function listDatasetPage({
   const key = `${host}|${account}|${size}|${offset}|${needle.toLowerCase()}`;
 
   if (!fresh) {
-    const hit = DATASET_PAGES.get(key);
-    if (hit) return { ...hit, cached: true };
+    const hit: unknown = DATASET_PAGES.get(key);
+    if (isCachedPage(hit)) return { ...hit, cached: true };
   } else {
     DATASET_PAGES.invalidatePrefix(`${host}|${account}|`);
   }
 
   if (DATASET_ID_PATTERN.test(needle)) {
     const found = pageNumber === 1 ? await findDatasetById(host, token, needle.toLowerCase()) : null;
-    const byId = {
+    const byId: DatasetPageBody = {
       datasets: found ? [found] : [],
       page: pageNumber,
       pageSize: size,
@@ -297,9 +347,9 @@ async function listDatasetPage({
   if (rows === null) throw unrecognised(host, payload);
 
   const datasets = rows.map(shapeDataset).filter((d): d is Dataset => d !== null);
-  const reported = Number(payload?._metaData?.totalCount);
+  const reported = Number(field(field(payload, '_metaData'), 'totalCount'));
   const total = Number.isFinite(reported) ? reported : null;
-  const result = {
+  const result: DatasetPageBody = {
     datasets,
     page: pageNumber,
     pageSize: size,
@@ -315,10 +365,10 @@ async function listDatasets({
   token,
   limit,
 }: {
-  host?: any;
-  token?: any;
+  host: string;
+  token: string;
   limit?: unknown;
-} = {}): Promise<{ datasets: Dataset[]; truncated: boolean; limit: number }> {
+}): Promise<{ datasets: Dataset[]; truncated: boolean; limit: number }> {
   const target = resolveLimit(limit);
   const ceiling = target + 1;
   const datasets: Dataset[] = [];
@@ -362,7 +412,7 @@ function isNumericType(domoType: unknown): boolean {
   return ['LONG', 'DOUBLE', 'DECIMAL', 'INTEGER', 'FLOAT', 'NUMBER'].includes(String(domoType || '').toUpperCase());
 }
 
-function profileColumns(names: any[], types: any[], rows: any[]): Record<string, any>[] {
+function profileColumns(names: JsonValue[], types: JsonValue[], rows: JsonValue[]): ColumnProfile[] {
   const sampleSize = rows.length;
 
   return names.map((name, index) => {
@@ -402,10 +452,10 @@ async function storedSizeBytes(host: string, token: string, datasetId: string): 
     const versions = await callDomo(host, token, dataVersionsPath(datasetId));
     if (!Array.isArray(versions)) return null;
     const sizes = versions
-      .filter((v: any) => v && String(v.status || '').toLowerCase() === 'success')
-      .map((v: any) => Number(v.sizeBytes))
-      .filter((n: number) => Number.isFinite(n) && n >= 0);
-    return sizes.length ? sizes.reduce((total: number, n: number) => total + n, 0) : null;
+      .filter((v) => v && String(field(v, 'status') || '').toLowerCase() === 'success')
+      .map((v) => Number(field(v, 'sizeBytes')))
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    return sizes.length ? sizes.reduce((total, n) => total + n, 0) : null;
   } catch {
     return null;
   }
@@ -419,9 +469,13 @@ async function getTableProfile({
   host: string;
   token: string;
   datasetId: string;
-}): Promise<Record<string, any>> {
+}): Promise<TableProfile> {
   const detail = await callDomo(host, token, datasetDetailPath(datasetId));
-  const reportedSize = firstFiniteNumber(detail?.sizeInBytes, detail?.dataSourceSize, detail?.sizeBytes);
+  const reportedSize = firstFiniteNumber(
+    field(detail, 'sizeInBytes'),
+    field(detail, 'dataSourceSize'),
+    field(detail, 'sizeBytes')
+  );
 
   const [sample, sizeBytes] = await Promise.all([
     callDomo(host, token, queryExecutePath(datasetId), {
@@ -431,29 +485,36 @@ async function getTableProfile({
     reportedSize ?? storedSizeBytes(host, token, datasetId),
   ]);
 
-  const names: any[] = Array.isArray(sample?.columns) ? sample.columns : [];
-  const types = (Array.isArray(sample?.metadata) ? sample.metadata : []).map((m: any) => m?.type || null);
-  const rows: any[] = Array.isArray(sample?.rows) ? sample.rows : [];
+  const sampleColumns = field(sample, 'columns');
+  const sampleMetadata = field(sample, 'metadata');
+  const sampleRows = field(sample, 'rows');
+  const names: JsonValue[] = Array.isArray(sampleColumns) ? sampleColumns : [];
+  const types = (Array.isArray(sampleMetadata) ? sampleMetadata : []).map((m) => field(m, 'type') || null);
+  const rows: JsonValue[] = Array.isArray(sampleRows) ? sampleRows : [];
 
   const columns = profileColumns(names, types, rows);
-  const rowCount = Number.isFinite(Number(detail && (detail.rowCount ?? detail.rows)))
-    ? Number(detail.rowCount ?? detail.rows)
+  const rowCount = Number.isFinite(Number(detail && (field(detail, 'rowCount') ?? field(detail, 'rows'))))
+    ? Number(strictField(detail, 'rowCount') ?? strictField(detail, 'rows'))
     : null;
+  const detailOwner = field(detail, 'owner');
 
   return {
     id: String(datasetId),
     datasetId: String(datasetId),
-    name: (detail && (detail.name || detail.displayName)) || String(datasetId),
-    description: detail?.description || null,
+    name: (detail && (field(detail, 'name') || field(detail, 'displayName'))) || String(datasetId),
+    description: field(detail, 'description') || null,
     rowCount,
-    columnCount: Number.isFinite(Number(detail?.columnCount)) ? Number(detail.columnCount) : columns.length || null,
+    columnCount: Number.isFinite(Number(field(detail, 'columnCount')))
+      ? Number(field(detail, 'columnCount'))
+      : columns.length || null,
     sizeBytes,
     qualityScore: null,
-    lastRefreshedAt: (detail && (detail.lastTouched ?? detail.lastUpdated ?? detail.updatedAt)) || null,
+    lastRefreshedAt:
+      (detail && (field(detail, 'lastTouched') ?? field(detail, 'lastUpdated') ?? field(detail, 'updatedAt'))) || null,
     owner:
-      detail?.owner && typeof detail.owner === 'object'
-        ? detail.owner.name || detail.owner.displayName || null
-        : detail?.ownerName || null,
+      detailOwner && typeof detailOwner === 'object'
+        ? field(detailOwner, 'name') || field(detailOwner, 'displayName') || null
+        : field(detail, 'ownerName') || null,
     columns,
     sample: names.length
       ? {
@@ -477,3 +538,12 @@ function firstFiniteNumber(...candidates: unknown[]): number | null {
 }
 
 export { DATASET_PAGE_SIZES, normaliseHost, verify, listDatasets, listDatasetPage, getTableProfile };
+export type {
+  Dataset,
+  WarehouseAccount,
+  DatasetPageRequest,
+  DatasetPageBody,
+  DatasetPage,
+  ColumnProfile,
+  TableProfile,
+};
