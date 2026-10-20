@@ -18,6 +18,7 @@ import throttleTools = require('../src/modules/contextLayer/throttle');
 const { Throttle } = throttleTools;
 import service = require('../src/modules/contextLayer/connectionService');
 import store = require('../src/modules/contextLayer/contextService');
+import contextLayer = require('../src/modules/contextLayer/contextLayerService');
 import publish = require('../src/modules/contextLayer/publishService');
 import sharing = require('../src/modules/contextLayer/contextSharingService');
 import agentGate = require('../src/modules/contextLayer/agentGateService');
@@ -1053,6 +1054,16 @@ async function cleanup(): Promise<void> {
   check(
     'skip is a status a boolean cannot hold',
     (await store.reviewQueue(ws)).items.find((i: any) => i.id === colId).status === 'skipped'
+  );
+
+  const refusedDecision = await codeOf(() =>
+    contextLayer.decide(adminA, ws, colId, { decision: 'maybe', update: { description: 'Must not be saved' } })
+  );
+  const { rows: untouched } = await db.query('SELECT payload FROM context_objects WHERE id = ?::uuid', [colId]);
+  check(
+    'an unknown decision is refused before the edit that came with it is saved',
+    refusedDecision === 'VALIDATION_ERROR' && untouched[0].payload.description !== 'Must not be saved',
+    `${refusedDecision} ${untouched[0].payload.description}`
   );
 
   await store.updateReviewItem(adminA, ws, colId, { description: 'Edited by a human' });

@@ -683,6 +683,7 @@ export {
   tableView,
   reviewQueue,
   decideReviewItem,
+  requireDecision,
   updateReviewItem,
   bulkDecide,
   understanding,

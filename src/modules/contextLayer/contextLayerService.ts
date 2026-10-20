@@ -272,6 +272,7 @@ async function decide(
   { decision, update }: { decision?: unknown; update?: Record<string, any> } = {}
 ): Promise<any> {
   const connection = await connections.requireConnection(actor, id, 'edit');
+  contextService.requireDecision(decision);
 
   if (update) {
     await contextService.updateReviewItem(actor, connection.id, itemId, update);

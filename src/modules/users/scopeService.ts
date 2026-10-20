@@ -58,7 +58,7 @@ async function replaceUserScopes(
     targetUsername: user.username,
     dimensions: Object.keys(scopes),
   });
-  return { userId: user.id, scopes, enforced: ENFORCED };
+  return describeUserScopes(user);
 }
 
 export { scopeOptions, describeUserScopes, replaceUserScopes };
