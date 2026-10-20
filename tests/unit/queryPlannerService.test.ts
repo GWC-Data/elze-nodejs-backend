@@ -9,6 +9,8 @@ import {
   planSlicer,
   readKpiPeriod,
 } from '../../src/modules/queryEngine/queryPlannerService';
+import type { CardSpec } from '../../src/modules/dashboards/dashboardTypes';
+import type { ColumnMeta } from '../../src/modules/queryEngine/queryTypes';
 
 vi.mock('../../src/modules/queryEngine/metadataService', () => ({
   resolveColumn: vi.fn((table: any, name: string) => {
@@ -66,8 +68,8 @@ function buildMeta(dateParse: Record<string, string> = { 'Booking Date': 'DD-Mon
 
 const meta = buildMeta();
 
-function col(name: string) {
-  return meta.table.columnMap.get(name);
+function col(name: string): ColumnMeta {
+  return meta.table.columnMap.get(name) as ColumnMeta;
 }
 
 const SLICERS = [
@@ -233,7 +235,7 @@ describe('readKpiPeriod', () => {
   it.each([[{ dateTimeElement: 'MONTH' }], [{ column: 'Show Date' }], ['MONTH'], [null]])(
     'returns null for an incomplete date grain %j',
     (dateGrain) => {
-      expect(readKpiPeriod({ comparison: {}, dateGrain })).toBeNull();
+      expect(readKpiPeriod({ comparison: {}, dateGrain } as CardSpec)).toBeNull();
     }
   );
 });
@@ -452,7 +454,7 @@ describe('planCard', () => {
       dateGrain: { column: 'Show Date', dateTimeElement: 'MONTH' },
     };
     const plan = planCard(card, [], meta, 0);
-    expect(plan.dateGroup.column).toBe('Show Date');
+    expect(plan.dateGroup?.column).toBe('Show Date');
     expect(plan.dimensions).toEqual([{ column: 'Genre', columnMeta: col('Genre') }]);
   });
 
@@ -470,7 +472,7 @@ describe('planCard', () => {
       },
     };
     const plan = planCard(card, [], meta, 0);
-    expect(plan.dateGroup.grain).toBe('YEAR');
+    expect(plan.dateGroup?.grain).toBe('YEAR');
     expect(plan.measures[0].columnMeta).toBe(col('Seats Sold'));
     expect(plan.dimensions).toEqual([]);
   });
@@ -498,7 +500,7 @@ describe('planCard', () => {
       columns: [{ column: 'Revenue', mapping: 'VALUE' }],
       dateGrain: { column: 'booking date', dateTimeElement: 'MONTH' },
     };
-    expect(planCard(card, [], meta, 0).dateGroup.parseFormat).toBe('DD-Mon-YY');
+    expect(planCard(card, [], meta, 0).dateGroup?.parseFormat).toBe('DD-Mon-YY');
   });
 
   it('refuses a column that is both a group and a value', () => {
@@ -609,7 +611,7 @@ describe('planCard', () => {
 
     it('keeps several terms in order and skips entries that are not objects or strings', () => {
       const card = { ...grouped, orderBy: [null, 5, 'Revenue', { column: 'Genre', direction: 'ASC' }] };
-      expect(planCard(card, [], meta, 0).orderBy.map((o: any) => [o.column, o.direction])).toEqual([
+      expect(planCard(card as CardSpec, [], meta, 0).orderBy.map((o: any) => [o.column, o.direction])).toEqual([
         ['Revenue', 'ASC'],
         ['Genre', 'ASC'],
       ]);

@@ -1,15 +1,35 @@
 import { resolveColumn } from './metadataService';
 import { validateAggregation, resolveSortDirection, resolveDateGrain } from './semanticLayerService';
+import type {
+  CardColumnSpec,
+  CardSpec,
+  DashboardSpec,
+  OrderByTerm,
+  SeriesSpec,
+  SlicerSelections,
+  SlicerSpec,
+} from '../dashboards/dashboardTypes';
+import type {
+  CardPlan,
+  ColumnMeta,
+  DateGroupNode,
+  DatePeriod,
+  DimensionNode,
+  FilterNode,
+  KpiPlan,
+  MeasureNode,
+  OrderNode,
+  SlicerPlan,
+  SourceMetadata,
+} from './queryTypes';
 
-type Meta = Record<string, any>;
-type Spec = Record<string, any>;
-type Plan = Record<string, any>;
+const GROUPING_MAPPINGS: ReadonlyArray<string | undefined> = ['XTIME', 'SERIES', 'ITEM'];
 
-function getColumn(meta: Meta, name: string): any {
+function getColumn(meta: SourceMetadata, name: string): ColumnMeta {
   return resolveColumn(meta.table, name);
 }
 
-function tableName(meta: Meta | null | undefined): string | undefined {
+function tableName(meta: SourceMetadata | null | undefined): string | undefined {
   return meta?.table ? meta.table.table : undefined;
 }
 
@@ -17,14 +37,14 @@ function sameColumn(a: unknown, b: unknown): boolean {
   return String(a || '').toLowerCase() === String(b || '').toLowerCase();
 }
 
-function parseFormatOf(meta: Meta, column: string, colMeta: any): string | null {
+function parseFormatOf(meta: SourceMetadata, column: string, colMeta: ColumnMeta): string | null {
   const formats: Record<string, string> = meta.dateParse || {};
   if (formats[column]) return formats[column];
   const key = Object.keys(formats).find((k) => sameColumn(k, column) || sameColumn(k, colMeta?.name));
   return key ? formats[key] : null;
 }
 
-function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
+function buildDateGroup(meta: SourceMetadata, column: string, grain: unknown): DateGroupNode {
   const colMeta = getColumn(meta, column);
   const resolved = resolveDateGrain(grain);
   return {
@@ -36,7 +56,7 @@ function buildDateGroup(meta: Meta, column: string, grain: unknown): Plan {
   };
 }
 
-function readDateGrainSpec(node: Spec | null | undefined): { column: string; grain: any } | null {
+function readDateGrainSpec(node: CardSpec | SeriesSpec | null | undefined): DatePeriod | null {
   const dg = node?.dateGrain;
   if (!dg || typeof dg !== 'object') return null;
   const column = dg.column;
@@ -45,7 +65,7 @@ function readDateGrainSpec(node: Spec | null | undefined): { column: string; gra
   return { column, grain };
 }
 
-function buildMeasure(meta: Meta, columnName: string, aggregation: unknown, alias: string): Plan {
+function buildMeasure(meta: SourceMetadata, columnName: string, aggregation: unknown, alias: string): MeasureNode {
   const colMeta = getColumn(meta, columnName);
   const resolved = validateAggregation(aggregation || 'SUM', columnName, colMeta, tableName(meta));
   return {
@@ -56,8 +76,12 @@ function buildMeasure(meta: Meta, columnName: string, aggregation: unknown, alia
   };
 }
 
-function buildFilters(spec: Spec, filters: Record<string, any> | null | undefined, meta: Meta): Plan[] {
-  const list: Plan[] = [];
+function buildFilters(
+  spec: DashboardSpec,
+  filters: SlicerSelections | null | undefined,
+  meta: SourceMetadata
+): FilterNode[] {
+  const list: FilterNode[] = [];
   if (!filters) return list;
   for (const s of spec.slicers || []) {
     const selected = filters[s.id];
@@ -78,15 +102,23 @@ function buildFilters(spec: Spec, filters: Record<string, any> | null | undefine
   return list;
 }
 
-function normalizeOrderBySpec(raw: unknown): any[] {
-  if (raw == null) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list
-    .map((entry: any) => (typeof entry === 'string' ? { column: entry } : entry))
-    .filter((entry) => entry && typeof entry === 'object');
+function isOrderByTerm(entry: unknown): entry is OrderByTerm {
+  return typeof entry === 'object' && entry !== null;
 }
 
-function buildOrderBy(card: Spec, meta: Meta, measures: Plan[], dimensions: Plan[], dateGroup: Plan | null): Plan[] {
+function normalizeOrderBySpec(raw: unknown): OrderByTerm[] {
+  if (raw == null) return [];
+  const list: unknown[] = Array.isArray(raw) ? raw : [raw];
+  return list.map((entry) => (typeof entry === 'string' ? { column: entry } : entry)).filter(isOrderByTerm);
+}
+
+function buildOrderBy(
+  card: CardSpec,
+  meta: SourceMetadata,
+  measures: MeasureNode[],
+  dimensions: DimensionNode[],
+  dateGroup: DateGroupNode | null
+): OrderNode[] {
   const entries = normalizeOrderBySpec(
     card.orderBy != null ? card.orderBy : card.sort != null ? card.sort : card.sortBy
   );
@@ -142,21 +174,21 @@ function readLimit(raw: unknown): number | null {
   return limit || null;
 }
 
-function cardColumns(card: Spec | null | undefined): any[] {
+function cardColumns(card: CardSpec | null | undefined): CardColumnSpec[] {
   return (card && (card.columns || card.series?.main?.columns)) || [];
 }
 
-function kpiValueColumn(kpi: Spec): any {
+function kpiValueColumn(kpi: CardSpec | null | undefined): CardColumnSpec | null {
   const columns = cardColumns(kpi);
   return columns.find((c) => c.mapping === 'VALUE') || columns[0] || null;
 }
 
-function readKpiPeriod(kpi: Spec | null | undefined): { column: string; grain: any } | null {
+function readKpiPeriod(kpi: CardSpec | null | undefined): DatePeriod | null {
   if (!kpi?.comparison) return null;
   return readDateGrainSpec(kpi) || readDateGrainSpec(kpi.series?.main);
 }
 
-function planKpi(kpi: Spec, filtersList: Plan[], meta: Meta, specIndex: number): Plan {
+function planKpi(kpi: CardSpec, filtersList: FilterNode[], meta: SourceMetadata, specIndex: number): KpiPlan {
   const vCol = kpiValueColumn(kpi);
   if (!vCol) {
     throw new Error('KPI card has no value column: add a field with the "Value" role.');
@@ -165,24 +197,39 @@ function planKpi(kpi: Spec, filtersList: Plan[], meta: Meta, specIndex: number):
   const measure = buildMeasure(meta, vCol.column, vCol.aggregation, '_value');
   const period = readKpiPeriod(kpi);
 
+  if (period) {
+    return {
+      kind: 'kpi-period',
+      id: kpi.id,
+      specIndex,
+      kpi,
+      source: meta.source,
+      measures: [measure],
+      dateGroup: buildDateGroup(meta, period.column, period.grain),
+      orderBy: [],
+      filters: filtersList,
+      limit: null,
+    };
+  }
+
   return {
-    kind: period ? 'kpi-period' : 'kpi-simple',
+    kind: 'kpi-simple',
     id: kpi.id,
     specIndex,
     kpi,
     source: meta.source,
     measures: [measure],
-    dateGroup: period ? buildDateGroup(meta, period.column, period.grain) : null,
+    dateGroup: null,
     orderBy: [],
     filters: filtersList,
     limit: null,
   };
 }
 
-function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number): Plan {
+function planCard(card: CardSpec, filtersList: FilterNode[], meta: SourceMetadata, specIndex: number): CardPlan {
   const columns = cardColumns(card);
   const valueCols = columns.filter((c) => c.mapping === 'VALUE');
-  const xCol = columns.find((c) => ['XTIME', 'SERIES', 'ITEM'].includes(c.mapping));
+  const xCol = columns.find((c) => GROUPING_MAPPINGS.includes(c.mapping));
 
   const groupByColumns: string[] = [];
   if (card.groupBy?.length) {
@@ -198,7 +245,7 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
 
   const measures = valueCols.map((c) => buildMeasure(meta, c.column, c.aggregation, c.column));
 
-  const dimensions = groupByColumns
+  const dimensions: DimensionNode[] = groupByColumns
     .filter((c) => !dateGroup || !sameColumn(c, dateGroup.column))
     .map((c) => ({ column: c, columnMeta: getColumn(meta, c) }));
 
@@ -227,7 +274,7 @@ function planCard(card: Spec, filtersList: Plan[], meta: Meta, specIndex: number
   };
 }
 
-function planSlicer(slicer: Spec, meta: Meta, specIndex: number): Plan {
+function planSlicer(slicer: SlicerSpec, meta: SourceMetadata, specIndex: number): SlicerPlan {
   const colMeta = getColumn(meta, slicer.column);
   return {
     kind: 'slicer',

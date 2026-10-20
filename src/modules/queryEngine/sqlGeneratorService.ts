@@ -7,28 +7,37 @@ import {
   buildWhereSql,
   resolveSortDirection,
 } from './semanticLayerService';
+import type { ResolvableNode } from './semanticLayerService';
+import type {
+  CardPlan,
+  DateGroupNode,
+  GeneratedSql,
+  KpiMergedPlan,
+  KpiPeriodPlan,
+  KpiSimplePlan,
+  OrderNode,
+  QueryPlan,
+  SlicerPlan,
+  SourceRef,
+} from './queryTypes';
 
-type Plan = Record<string, any>;
-type PlanNode = Record<string, any>;
-type GeneratedSql = { sql: string; params: any[]; meta: { type: string; plan: Plan } };
-
-function ref(node: PlanNode): string {
+function ref(node: ResolvableNode): string {
   return quoteIdentifier(resolvedName(node));
 }
 
-function alias(node: PlanNode): string {
+function alias(node: { column: string }): string {
   return quoteIdentifier(node.column);
 }
 
-function tableRef(source: PlanNode): string {
+function tableRef(source: SourceRef): string {
   return quoteQualified(source.schema, source.table);
 }
 
-function dateSelect(dateGroup: PlanNode): string {
+function dateSelect(dateGroup: DateGroupNode): string {
   return buildDateGroupExpression(resolvedName(dateGroup), dateGroup.grain, dateGroup);
 }
 
-function orderTerm(term: PlanNode): string {
+function orderTerm(term: OrderNode): string {
   const direction = resolveSortDirection(term.direction);
   if (term.dateGroup) {
     return `${alias(term.dateGroup)} ${direction}`;
@@ -39,7 +48,7 @@ function orderTerm(term: PlanNode): string {
   return `${ref(term)} ${direction}`;
 }
 
-function generateKpiPeriodSql(plan: Plan): GeneratedSql {
+function generateKpiPeriodSql(plan: KpiPeriodPlan | KpiMergedPlan): GeneratedSql {
   const table = tableRef(plan.source);
   const { where, params } = buildWhereSql(plan.filters);
 
@@ -61,7 +70,7 @@ function generateKpiPeriodSql(plan: Plan): GeneratedSql {
   return { sql, params, meta: { type: plan.kind, plan } };
 }
 
-function generateKpiSimpleSql(plan: Plan): GeneratedSql {
+function generateKpiSimpleSql(plan: KpiSimplePlan): GeneratedSql {
   const table = tableRef(plan.source);
   const { where, params } = buildWhereSql(plan.filters);
   const select = buildAggExpression(plan.measures[0].aggregation, resolvedName(plan.measures[0]), '_value');
@@ -69,7 +78,7 @@ function generateKpiSimpleSql(plan: Plan): GeneratedSql {
   return { sql, params, meta: { type: plan.kind, plan } };
 }
 
-function generateCardSql(plan: Plan): GeneratedSql {
+function generateCardSql(plan: CardPlan): GeneratedSql {
   const table = tableRef(plan.source);
   const { where, params } = buildWhereSql(plan.filters);
 
@@ -109,7 +118,7 @@ function generateCardSql(plan: Plan): GeneratedSql {
   return { sql, params, meta: { type: plan.kind, plan } };
 }
 
-function generateSlicerSql(plan: Plan): GeneratedSql {
+function generateSlicerSql(plan: SlicerPlan): GeneratedSql {
   const col = ref(plan);
   const table = tableRef(plan.source);
   const condition = buildNonEmptyCondition(resolvedName(plan), plan.columnMeta);
@@ -119,7 +128,7 @@ function generateSlicerSql(plan: Plan): GeneratedSql {
   return { sql, params: [], meta: { type: plan.kind, plan } };
 }
 
-function generateSql(plan: Plan): GeneratedSql {
+function generateSql(plan: QueryPlan): GeneratedSql {
   switch (plan.kind) {
     case 'kpi-period-merged':
     case 'kpi-period':
@@ -130,8 +139,10 @@ function generateSql(plan: Plan): GeneratedSql {
       return generateCardSql(plan);
     case 'slicer':
       return generateSlicerSql(plan);
-    default:
-      throw new Error(`Unknown plan kind: ${plan.kind}`);
+    default: {
+      const unknownPlan: { kind?: unknown } = plan;
+      throw new Error(`Unknown plan kind: ${unknownPlan.kind}`);
+    }
   }
 }
 

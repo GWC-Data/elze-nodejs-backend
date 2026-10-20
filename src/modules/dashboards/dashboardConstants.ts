@@ -1,8 +1,10 @@
+import type { SeriesField } from './dashboardTypes';
+
 const DASHBOARD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const KPI_CHART_TYPES = ['badge_multi_value', 'badge', 'kpi', 'scorecard'];
 
-const SERIES_FIELDS = ['columns', 'dateGrain', 'groupBy', 'orderBy', 'filters', 'distinct'];
+const SERIES_FIELDS: readonly SeriesField[] = ['columns', 'dateGrain', 'groupBy', 'orderBy', 'filters', 'distinct'];
 
 const NEW_DASHBOARD_VERSION = '15';
 

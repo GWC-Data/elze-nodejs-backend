@@ -11,14 +11,14 @@ async function create(req: Request, res: Response): Promise<void> {
 }
 
 async function view(req: Request, res: Response): Promise<void> {
-  const result = await dashboardService.viewDashboard(req.dashboardId!, parseFilters(req.query), req.dashboardLevel);
+  const result = await dashboardService.viewDashboard(req.dashboardId, parseFilters(req.query), req.dashboardLevel);
   console.log(`[api] GET /api/dashboard/${req.dashboardId} ${elapsed(res)}ms`);
   ok(res, result);
 }
 
 async function updateCard(req: Request, res: Response): Promise<void> {
   const update = requireCardUpdate(req.body);
-  const result = await dashboardService.updateCard(req.actor, req.dashboardId!, update, req.dashboardLevel);
+  const result = await dashboardService.updateCard(req.actor, req.dashboardId, update, req.dashboardLevel);
   console.log(`[api] PATCH /api/dashboard/${req.dashboardId}/config ${elapsed(res)}ms`);
   ok(res, result);
 }

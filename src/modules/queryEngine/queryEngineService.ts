@@ -9,37 +9,118 @@ import { resolveSourceMetadata } from './metadataService';
 import { formatKpi, formatMergedKpi, formatCard, formatSlicer } from './resultFormatterService';
 import { cardKind } from '../dashboards/cardModel';
 import { DEFAULT_CHART_MIN_HEIGHT } from '../dashboards/dashboardConstants';
+import type { CardSpec, DashboardSpec, SlicerSelections, SlicerSpec } from '../dashboards/dashboardTypes';
+import type {
+  CachedQueryResult,
+  CardItem,
+  CardPlan,
+  CardView,
+  ChartErrorView,
+  DashboardError,
+  FilterNode,
+  GeneratedSql,
+  HydratedDashboard,
+  KpiErrorView,
+  KpiPeriodPlan,
+  KpiPlan,
+  KpiQueryPlan,
+  KpiSimplePlan,
+  ResultRow,
+  SlicerErrorView,
+  SlicerItem,
+  SlicerPlan,
+  SlicerView,
+  SourceMetadata,
+  StageError,
+} from './queryTypes';
 
 const { REDIS_URL, REDIS_TTL, CACHE_PREFIX } = config.engine;
 const { QUERY_CONCURRENCY: MAX_CONCURRENT } = config.app;
 
-type Spec = Record<string, any>;
-type Plan = Record<string, any>;
-type Entry = Record<string, any>;
-type Job = Record<string, any>;
-type StageError = { stage: string; message: string };
+interface CardEntryBase {
+  specIndex: number;
+  card: CardSpec;
+  error?: StageError;
+  formatted?: CardView | null;
+}
+
+interface KpiCardEntry extends CardEntryBase {
+  kind: 'kpi';
+  plan?: KpiPlan;
+}
+
+interface ChartCardEntry extends CardEntryBase {
+  kind: 'chart';
+  plan?: CardPlan;
+}
+
+type CardEntry = KpiCardEntry | ChartCardEntry;
+
+interface SlicerEntry {
+  specIndex: number;
+  slicer: SlicerSpec;
+  plan?: SlicerPlan;
+  error?: StageError;
+  formatted?: SlicerView;
+}
+
+interface KpiJob {
+  type: 'kpi';
+  plan: KpiQueryPlan;
+}
+
+interface ChartJob {
+  type: 'chart';
+  entry: ChartCardEntry;
+  plan: CardPlan;
+}
+
+interface SlicerJob {
+  type: 'slicer';
+  entry: SlicerEntry;
+  plan: SlicerPlan;
+}
+
+type Job = KpiJob | ChartJob | SlicerJob;
+
+interface RunnableJob {
+  job: Job;
+  query: GeneratedSql;
+}
+
+type QueryOutcome = ({ ok: true } & CachedQueryResult) | { ok: false; error: StageError };
+
+interface EntryIdentity {
+  kind: string;
+  id: string | undefined;
+}
 
 const cache = new QueryCache(REDIS_URL, { ttl: REDIS_TTL, prefix: CACHE_PREFIX });
 
-function dashboardKey(spec: Spec, meta: Record<string, any> | null | undefined): string {
+function isRowList(value: unknown): value is ResultRow[] {
+  return Array.isArray(value);
+}
+
+function dashboardKey(spec: DashboardSpec, meta: SourceMetadata | null | undefined): string {
   return spec.id || spec.title || (meta?.source ? `${meta.source.database}.${meta.source.table}` : 'default');
 }
 
-function describeError(err: any, stage: string): StageError {
+function errorMessageOf(err: unknown): unknown {
+  return typeof err === 'object' && err !== null && 'message' in err ? err.message : undefined;
+}
+
+function describeError(err: unknown, stage: string): StageError {
+  const message = errorMessageOf(err);
   return {
     stage,
-    message: err?.message ? err.message : String(err),
+    message: typeof message === 'string' && message ? message : String(err),
   };
 }
 
-async function runQueryWithCache(
-  query: Record<string, any>,
-  dashKey: string,
-  ttl?: number
-): Promise<{ rows: any; cached: boolean; elapsed: number }> {
+async function runQueryWithCache(query: GeneratedSql, dashKey: string, ttl?: number): Promise<CachedQueryResult> {
   const key = cache.generateKey(dashKey, query.meta.type, query.sql, query.params);
   const cached = await cache.get(key);
-  if (cached) {
+  if (isRowList(cached)) {
     return { rows: cached, cached: true, elapsed: 0 };
   }
   const { rows, elapsed } = await executeQuery(query.sql, query.params);
@@ -48,9 +129,9 @@ async function runQueryWithCache(
 }
 
 async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
+  const results: T[] = new Array<T>(tasks.length);
   let next = 0;
-  const workers = Array(Math.min(limit, tasks.length))
+  const workers = Array<null>(Math.min(limit, tasks.length))
     .fill(null)
     .map(async () => {
       while (next < tasks.length) {
@@ -63,8 +144,8 @@ async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, limit: numb
   return results;
 }
 
-function kpiErrorPayload(entry: Entry): Record<string, any> {
-  const card = entry.card || {};
+function kpiErrorPayload(entry: CardEntry, error: StageError): KpiErrorView {
+  const card: CardSpec = entry.card || {};
   return {
     id: card.id,
     chartType: card.chartType,
@@ -75,13 +156,13 @@ function kpiErrorPayload(entry: Entry): Record<string, any> {
     format: {},
     color: null,
     comparison: { label: '', delta: 0, deltaText: '', previousText: '', period: '', previousPeriod: '' },
-    error: entry.error,
+    error,
     spec: card,
   };
 }
 
-function chartErrorPayload(entry: Entry, minHeight: number): Record<string, any> {
-  const card = entry.card || {};
+function chartErrorPayload(entry: CardEntry, error: StageError, minHeight: number): ChartErrorView {
+  const card: CardSpec = entry.card || {};
   return {
     id: card.id,
     chartType: card.chartType,
@@ -91,17 +172,17 @@ function chartErrorPayload(entry: Entry, minHeight: number): Record<string, any>
     axes: {},
     series: [],
     options: { ...(card.options || {}), height: minHeight },
-    error: entry.error,
+    error,
     spec: card,
   };
 }
 
-function errorPayloadFor(entry: Entry, minHeight: number): Record<string, any> {
-  return entry.kind === 'kpi' ? kpiErrorPayload(entry) : chartErrorPayload(entry, minHeight);
+function errorPayloadFor(entry: CardEntry, error: StageError, minHeight: number): KpiErrorView | ChartErrorView {
+  return entry.kind === 'kpi' ? kpiErrorPayload(entry, error) : chartErrorPayload(entry, error, minHeight);
 }
 
-function slicerErrorPayload(entry: Entry): Record<string, any> {
-  const slicer = entry.slicer || {};
+function slicerErrorPayload(entry: SlicerEntry, error: StageError): SlicerErrorView {
+  const slicer: Partial<SlicerSpec> = entry.slicer || {};
   return {
     id: slicer.id,
     title: slicer.title,
@@ -110,17 +191,21 @@ function slicerErrorPayload(entry: Entry): Record<string, any> {
     span: slicer.span,
     showCount: slicer.showCount,
     options: [],
-    error: entry.error,
+    error,
   };
 }
 
-function planCardEntries(cards: Spec[] | null | undefined, filtersList: Plan[], meta: Record<string, any>): Entry[] {
-  return (cards || []).map((card: Spec, specIndex: number) => {
+function planCardEntries(
+  cards: CardSpec[] | null | undefined,
+  filtersList: FilterNode[],
+  meta: SourceMetadata
+): CardEntry[] {
+  return (cards || []).map((card, specIndex) => {
     const kind = cardKind(card);
-    const entry: Entry = { specIndex, card, kind };
+    const entry: CardEntry = { specIndex, card, kind };
     try {
-      entry.plan =
-        kind === 'kpi' ? planKpi(card, filtersList, meta, specIndex) : planCard(card, filtersList, meta, specIndex);
+      if (entry.kind === 'kpi') entry.plan = planKpi(card, filtersList, meta, specIndex);
+      else entry.plan = planCard(card, filtersList, meta, specIndex);
     } catch (err) {
       entry.error = describeError(err, 'plan');
     }
@@ -128,9 +213,9 @@ function planCardEntries(cards: Spec[] | null | undefined, filtersList: Plan[], 
   });
 }
 
-function planSlicerEntries(slicers: Spec[] | null | undefined, meta: Record<string, any>): Entry[] {
-  return (slicers || []).map((slicer: Spec, specIndex: number) => {
-    const entry: Entry = { specIndex, slicer };
+function planSlicerEntries(slicers: SlicerSpec[] | null | undefined, meta: SourceMetadata): SlicerEntry[] {
+  return (slicers || []).map((slicer, specIndex) => {
+    const entry: SlicerEntry = { specIndex, slicer };
     try {
       entry.plan = planSlicer(slicer, meta, specIndex);
     } catch (err) {
@@ -140,14 +225,32 @@ function planSlicerEntries(slicers: Spec[] | null | undefined, meta: Record<stri
   });
 }
 
-async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null): Promise<Record<string, any>> {
+function collect<E extends { error?: StageError }, V extends object>(
+  entries: E[],
+  errors: DashboardError[],
+  identify: (entry: E) => EntryIdentity,
+  errorPayload: (entry: E, error: StageError) => V,
+  formattedOf: (entry: E) => V | null | undefined
+): V[] {
+  return entries
+    .map((entry) => {
+      if (entry.error) {
+        errors.push({ ...identify(entry), ...entry.error });
+        return errorPayload(entry, entry.error);
+      }
+      return formattedOf(entry) || null;
+    })
+    .filter((item): item is V => Boolean(item));
+}
+
+async function hydrateDashboard(spec: DashboardSpec, filters?: SlicerSelections | null): Promise<HydratedDashboard> {
   const meta = await resolveSourceMetadata(spec);
 
-  let filtersList: Plan[];
+  let filtersList: FilterNode[];
   try {
     filtersList = buildFilters(spec, filters || {}, meta);
-  } catch (err: any) {
-    throw new FilterResolutionError(err.message);
+  } catch (err) {
+    throw new FilterResolutionError(err instanceof Error ? err.message : String(err));
   }
 
   const cardEntries = planCardEntries(spec.cards, filtersList, meta);
@@ -155,8 +258,8 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
 
   const cardByIndex = new Map(cardEntries.map((e) => [e.specIndex, e]));
 
-  const periodPlans: Plan[] = [];
-  const simplePlans: Plan[] = [];
+  const periodPlans: KpiPeriodPlan[] = [];
+  const simplePlans: KpiSimplePlan[] = [];
   for (const entry of cardEntries) {
     if (!entry.plan || entry.kind !== 'kpi') continue;
     if (entry.plan.kind === 'kpi-period') periodPlans.push(entry.plan);
@@ -164,11 +267,11 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
   }
   const { optimizedKpiPlans } = optimizePlans({ periodPlans, simplePlans });
 
-  const kpiEntriesForPlan = (plan: Plan): Entry[] =>
+  const kpiEntriesForPlan = (plan: KpiQueryPlan): CardEntry[] =>
     (plan.kind === 'kpi-period-merged'
-      ? plan.members.map((m: any) => cardByIndex.get(m.specIndex))
+      ? plan.members.map((m) => cardByIndex.get(m.specIndex))
       : [cardByIndex.get(plan.specIndex)]
-    ).filter(Boolean);
+    ).filter((entry): entry is CardEntry => Boolean(entry));
 
   const jobs: Job[] = [];
   for (const plan of optimizedKpiPlans) jobs.push({ type: 'kpi', plan });
@@ -187,11 +290,10 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
     }
   };
 
-  const runnable: Job[] = [];
+  const runnable: RunnableJob[] = [];
   for (const job of jobs) {
     try {
-      job.query = generateSql(job.plan);
-      runnable.push(job);
+      runnable.push({ job, query: generateSql(job.plan) });
     } catch (err) {
       assignJobError(job, describeError(err, 'sql'));
     }
@@ -200,25 +302,24 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
   const dashKey = dashboardKey(spec, meta);
   const results = await runWithConcurrency(
     runnable.map(
-      (job) => () =>
-        runQueryWithCache(job.query, dashKey)
-          .then((r) => ({ ok: true, ...r }))
-          .catch((err: any) => ({ ok: false, error: describeError(err, 'execute') }))
+      ({ query }) =>
+        (): Promise<QueryOutcome> =>
+          runQueryWithCache(query, dashKey)
+            .then((r): QueryOutcome => ({ ok: true, ...r }))
+            .catch((err: unknown): QueryOutcome => ({ ok: false, error: describeError(err, 'execute') }))
     ),
     MAX_CONCURRENT
   );
-  runnable.forEach((job, i) => {
-    job.result = results[i];
-  });
 
   const minHeight = spec.layout?.chart?.minHeight ?? DEFAULT_CHART_MIN_HEIGHT;
 
-  for (const job of runnable) {
-    if (!job.result?.ok) {
-      assignJobError(job, job.result?.error || describeError(new Error('Query produced no result'), 'execute'));
+  for (const [i, { job }] of runnable.entries()) {
+    const result = results[i];
+    if (!result?.ok) {
+      assignJobError(job, result?.error || describeError(new Error('Query produced no result'), 'execute'));
       continue;
     }
-    const rows = job.result.rows;
+    const rows = result.rows;
 
     if (job.type === 'kpi') {
       if (job.plan.kind === 'kpi-period-merged') {
@@ -257,22 +358,24 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
     }
   }
 
-  const errors: Record<string, any>[] = [];
-  const collect = (entries: Entry[], key: string, errorPayload: (entry: Entry) => Record<string, any>): any[] =>
-    entries
-      .map((entry) => {
-        if (entry.error) {
-          errors.push({ kind: entry.kind || key, id: entry[key]?.id, ...entry.error });
-          return errorPayload(entry);
-        }
-        return entry.formatted || null;
-      })
-      .filter(Boolean);
+  const errors: DashboardError[] = [];
 
-  const cards = collect(cardEntries, 'card', (e) => errorPayloadFor(e, minHeight));
-  const slicers = collect(slicerEntries, 'slicer', slicerErrorPayload);
+  const cards = collect<CardEntry, CardItem>(
+    cardEntries,
+    errors,
+    (entry) => ({ kind: entry.kind || 'card', id: entry.card?.id }),
+    (entry, error) => errorPayloadFor(entry, error, minHeight),
+    (entry) => entry.formatted
+  );
+  const slicers = collect<SlicerEntry, SlicerItem>(
+    slicerEntries,
+    errors,
+    (entry) => ({ kind: 'slicer', id: entry.slicer?.id }),
+    slicerErrorPayload,
+    (entry) => entry.formatted
+  );
 
-  const countJobs = (type: string): number => runnable.filter((j) => j.type === type).length;
+  const countJobs = (type: Job['type']): number => runnable.filter(({ job }) => job.type === type).length;
 
   return {
     cards,
@@ -283,7 +386,7 @@ async function hydrateDashboard(spec: Spec, filters?: Record<string, any> | null
       cardQueries: countJobs('chart'),
       slicerQueries: countJobs('slicer'),
       totalQueries: runnable.length,
-      cacheHits: results.filter((r: any) => r?.cached).length,
+      cacheHits: results.filter((r) => r.ok && r.cached).length,
       errors: errors.length,
     },
   };

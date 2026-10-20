@@ -1,23 +1,29 @@
-type Plan = Record<string, any>;
+import type { KpiMergedPlan, KpiPeriodPlan, KpiQueryPlan, KpiSimplePlan } from './queryTypes';
 
-function planSignature(plan: Plan): string {
+interface KpiPlanGroups {
+  periodPlans?: KpiPeriodPlan[];
+  simplePlans?: KpiSimplePlan[];
+}
+
+function planSignature(plan: KpiPeriodPlan): string {
   const src = plan.source ? [plan.source.database, plan.source.table] : [];
   const date = plan.dateGroup ? [plan.dateGroup.column, plan.dateGroup.grain, plan.dateGroup.parseFormat || ''] : null;
-  const filters = (plan.filters || []).map((f: any) => [f.column, f.operator || 'IN', f.values || []]);
+  const filters = (plan.filters || []).map((f) => [f.column, f.operator || 'IN', f.values || []]);
   return JSON.stringify([src, date, filters]);
 }
 
-function mergePeriodKpis(periodPlans: Plan[]): Plan[] {
+function mergePeriodKpis(periodPlans: KpiPeriodPlan[]): Array<KpiPeriodPlan | KpiMergedPlan> {
   if (!periodPlans?.length) return [];
 
-  const groups = new Map<string, Plan[]>();
+  const groups = new Map<string, KpiPeriodPlan[]>();
   for (const plan of periodPlans) {
     const sig = planSignature(plan);
-    if (!groups.has(sig)) groups.set(sig, []);
-    groups.get(sig)!.push(plan);
+    const group = groups.get(sig);
+    if (group) group.push(plan);
+    else groups.set(sig, [plan]);
   }
 
-  const merged: Plan[] = [];
+  const merged: Array<KpiPeriodPlan | KpiMergedPlan> = [];
   for (const plans of groups.values()) {
     if (plans.length === 1) {
       merged.push(plans[0]);
@@ -46,7 +52,7 @@ function mergePeriodKpis(periodPlans: Plan[]): Plan[] {
   return merged;
 }
 
-function optimizePlans(kpiPlans: Plan): { optimizedKpiPlans: Plan[] } {
+function optimizePlans(kpiPlans: KpiPlanGroups): { optimizedKpiPlans: KpiQueryPlan[] } {
   const mergedKpiPlans = mergePeriodKpis(kpiPlans.periodPlans || []);
   const allKpiPlans = [...mergedKpiPlans, ...(kpiPlans.simplePlans || [])];
   return { optimizedKpiPlans: allKpiPlans };

@@ -3,18 +3,20 @@ import * as queryRepository from './queryRepository';
 import { fail } from '../../shared/errors/AppError';
 import TtlCache from '../../shared/cache/ttlCache';
 import { DATE_TYPES, NUMERIC_TYPES, STRING_TYPES, IDENTIFIER_RE } from './queryConstants';
+import type { DashboardSpec } from '../dashboards/dashboardTypes';
+import type { ColumnMeta, ColumnTypeInfo, SourceMetadata, SourceRef, TableMetadata } from './queryTypes';
 
 const { DB_SCHEMA: DEFAULT_SCHEMA } = config.engine;
 const { DB_NAME } = config.database;
 
-type Spec = Record<string, any>;
-type Source = { database: string; schema: string; table: string };
-type TableMeta = Record<string, any>;
-
 const cache = new TtlCache();
-const inflight = new Map<string, Promise<TableMeta>>();
+const inflight = new Map<string, Promise<TableMetadata>>();
 
-function classifyType(typname: string | null | undefined) {
+function isTableMetadata(value: unknown): value is TableMetadata {
+  return typeof value === 'object' && value !== null;
+}
+
+function classifyType(typname: string | null | undefined): ColumnTypeInfo {
   const t = String(typname || '').toLowerCase();
   return {
     type: t,
@@ -29,7 +31,7 @@ function tableKey(schema: string, table: string): string {
   return `${schema}.${table}`;
 }
 
-function getSource(spec: Spec): Source {
+function getSource(spec: DashboardSpec): SourceRef {
   if (!spec || typeof spec !== 'object') {
     throw new Error('Dashboard spec must be a non-null object');
   }
@@ -77,7 +79,7 @@ function getSource(spec: Spec): Source {
   return { database: DB_NAME, schema, table };
 }
 
-async function fetchTableMetadata(source: Source): Promise<TableMeta> {
+async function fetchTableMetadata(source: SourceRef): Promise<TableMetadata> {
   const rows = await queryRepository.tableColumns(source.schema, source.table);
 
   if (!rows.length) {
@@ -88,15 +90,15 @@ async function fetchTableMetadata(source: Source): Promise<TableMeta> {
     );
   }
 
-  const columns = rows.map((c: any) => ({
+  const columns: ColumnMeta[] = rows.map((c) => ({
     name: c.name,
     ...classifyType(c.typname),
     columnType: c.column_type,
     nullable: c.nullable,
   }));
 
-  const columnMap = new Map<string, any>();
-  const byLower = new Map<string, any>();
+  const columnMap = new Map<string, ColumnMeta>();
+  const byLower = new Map<string, ColumnMeta>();
   for (const c of columns) {
     columnMap.set(c.name, c);
     byLower.set(String(c.name).toLowerCase(), c);
@@ -112,14 +114,15 @@ async function fetchTableMetadata(source: Source): Promise<TableMeta> {
   };
 }
 
-async function getTableMetadata(source: Source): Promise<TableMeta> {
+async function getTableMetadata(source: SourceRef): Promise<TableMetadata> {
   const key = tableKey(source.schema, source.table);
-  const cached = cache.get(key);
-  if (cached) return cached;
-  if (inflight.has(key)) return inflight.get(key)!;
+  const cached: unknown = cache.get(key);
+  if (isTableMetadata(cached)) return cached;
+  const pending = inflight.get(key);
+  if (pending) return pending;
 
   const promise = fetchTableMetadata(source)
-    .then((meta: TableMeta) => {
+    .then((meta) => {
       cache.set(key, meta);
       return meta;
     })
@@ -131,7 +134,7 @@ async function getTableMetadata(source: Source): Promise<TableMeta> {
   return promise;
 }
 
-function resolveColumn(meta: TableMeta, name: string): any {
+function resolveColumn(meta: TableMetadata, name: unknown): ColumnMeta {
   if (!name || typeof name !== 'string' || !name.trim()) {
     throw new Error('Invalid column name: empty or non-string');
   }
@@ -142,9 +145,9 @@ function resolveColumn(meta: TableMeta, name: string): any {
   throw new Error(`Unknown column "${name}" in table "${meta.table}"`);
 }
 
-function resolveSourceMetadata(spec: Spec): Promise<Record<string, any>> {
+function resolveSourceMetadata(spec: DashboardSpec): Promise<SourceMetadata> {
   const source = getSource(spec);
-  return getTableMetadata(source).then((meta: TableMeta) => {
+  return getTableMetadata(source).then((meta) => {
     const dataSource = spec.dataSource || spec.source || {};
     const dateParse = (dataSource && (dataSource.dateParse || dataSource.stringDates)) || spec?.dateParse || {};
     return {

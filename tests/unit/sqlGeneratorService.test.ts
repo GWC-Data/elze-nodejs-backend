@@ -4,6 +4,17 @@ import { optimizePlans } from '../../src/modules/queryEngine/queryOptimizerServi
 import { buildFilters, planCard, planKpi, planSlicer } from '../../src/modules/queryEngine/queryPlannerService';
 import { generateSql } from '../../src/modules/queryEngine/sqlGeneratorService';
 import { splitPlaceholders } from '../../src/shared/db/sql';
+import type {
+  ColumnMeta,
+  DateGroupNode,
+  DimensionNode,
+  FilterNode,
+  KpiMergedPlan,
+  KpiPeriodPlan,
+  MeasureNode,
+  QueryPlan,
+  SlicerPlan,
+} from '../../src/modules/queryEngine/queryTypes';
 
 vi.mock('../../src/modules/queryEngine/metadataService', () => ({
   resolveColumn: vi.fn((table: any, name: string) => {
@@ -48,23 +59,23 @@ const budget = column('Budget', 'numeric', 'numeric(12,2)');
 const rating = column('AVG RATING', 'float8', 'double precision');
 const seats = column('Seats Sold', 'int4', 'integer');
 
-function measure(columnMeta: Node, aggregation: string, alias: string = columnMeta.name): Node {
+function measure(columnMeta: ColumnMeta, aggregation: string, alias: string = columnMeta.name): MeasureNode {
   return { column: columnMeta.name, aggregation, alias, columnMeta };
 }
 
-function dimension(columnMeta: Node): Node {
+function dimension(columnMeta: ColumnMeta): DimensionNode {
   return { column: columnMeta.name, columnMeta };
 }
 
-function inFilter(columnMeta: Node, values: unknown[]): Node {
+function inFilter(columnMeta: ColumnMeta, values: string[]): FilterNode {
   return { column: columnMeta.name, operator: 'IN', values, columnMeta };
 }
 
-function dateGroup(columnMeta: Node, grain: string, parseFormat: string | null = null): Node {
+function dateGroup(columnMeta: ColumnMeta, grain: string, parseFormat: string | null = null): DateGroupNode {
   return { column: columnMeta.name, grain, isString: columnMeta.isString, parseFormat, columnMeta };
 }
 
-function kpiPlan(overrides: Node): Node {
+function kpiPlan(overrides: Node): QueryPlan {
   return {
     kind: 'kpi-simple',
     id: 'kpi',
@@ -80,7 +91,7 @@ function kpiPlan(overrides: Node): Node {
   };
 }
 
-function cardPlan(overrides: Node): Node {
+function cardPlan(overrides: Node): QueryPlan {
   return {
     kind: 'card',
     id: 'card',
@@ -98,12 +109,12 @@ function cardPlan(overrides: Node): Node {
   };
 }
 
-function slicerPlan(columnMeta: Node): Node {
+function slicerPlan(columnMeta: ColumnMeta): SlicerPlan {
   return {
     kind: 'slicer',
     id: 's',
     specIndex: 0,
-    slicer: {},
+    slicer: {} as SlicerPlan['slicer'],
     source: SOURCE,
     column: columnMeta.name,
     columnMeta,
@@ -115,7 +126,7 @@ const BOOKING_MONTH_SQL = `to_char(to_date("Booking Date", 'DD-Mon-YY'), 'YYYY-M
 
 describe('generateSql', () => {
   it('rejects an unknown plan kind', () => {
-    expect(() => generateSql({ kind: 'pivot' })).toThrow('Unknown plan kind: pivot');
+    expect(() => generateSql({ kind: 'pivot' } as unknown as QueryPlan)).toThrow('Unknown plan kind: pivot');
   });
 
   it('reports the plan kind and the plan itself alongside the SQL', () => {
@@ -186,7 +197,7 @@ describe('generateSql for a period KPI', () => {
 
 describe('generateSql for merged period KPIs', () => {
   it('selects every member under its own alias in one grouped query', () => {
-    const plan = {
+    const plan: KpiMergedPlan = {
       kind: 'kpi-period-merged',
       id: 'kpis:totalRevenue+totalBookings',
       specIndex: 0,
@@ -368,7 +379,7 @@ describe('generateSql for a slicer', () => {
   });
 
   it('refuses a slicer whose column was never resolved', () => {
-    expect(() => generateSql({ kind: 'slicer', column: 'Genre', source: SOURCE })).toThrow(
+    expect(() => generateSql({ kind: 'slicer', column: 'Genre', source: SOURCE } as SlicerPlan)).toThrow(
       'Plan node for column "Genre" has no resolved metadata'
     );
   });
@@ -412,7 +423,7 @@ describe('generateSql injection safety', () => {
       members: [{ measure: measure(revenue, 'SUM'), alias: 'rev" FROM x; --__value' }],
       dateGroup: dateGroup(showDate, 'YEAR'),
       filters: [],
-    };
+    } as unknown as KpiMergedPlan;
     expect(generateSql(plan).sql).toBe(
       `SELECT to_char("Show Date", 'YYYY') AS "_period", SUM("Revenue") AS "rev"" FROM x; --__value" ${FROM} ` +
         'GROUP BY "_period" ORDER BY "_period" ASC'
@@ -495,7 +506,7 @@ describe('generateSql from planned dashboard specs', () => {
       comparisonKpi('avgRating', 'AVG RATING', 'AVERAGE'),
     ];
     const filters = buildFilters({ slicers }, { sGenre: ['Drama'], sTheater: ['Regal', 'AMC'] }, meta);
-    const periodPlans = kpis.map((kpi, index) => planKpi(kpi, filters, meta, index));
+    const periodPlans = kpis.map((kpi, index) => planKpi(kpi, filters, meta, index)) as KpiPeriodPlan[];
     const { optimizedKpiPlans } = optimizePlans({ periodPlans, simplePlans: [] });
 
     expect(optimizedKpiPlans).toHaveLength(1);

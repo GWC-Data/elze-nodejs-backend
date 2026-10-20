@@ -2,6 +2,10 @@ import crypto from 'node:crypto';
 import type RedisClient from 'ioredis';
 import TtlCache from '../../shared/cache/ttlCache';
 
+function errorMessage(err: unknown): string | undefined {
+  return err instanceof Error ? err.message : undefined;
+}
+
 interface QueryCacheOptions {
   ttl?: number;
   prefix?: string;
@@ -58,8 +62,8 @@ class QueryCache {
       this.redis.connect().catch(() => {
         console.log('[QueryCache] Redis unavailable, using in-memory cache');
       });
-    } catch (err: any) {
-      console.log('[QueryCache] Redis module not available, using in-memory cache:', err.message);
+    } catch (err) {
+      console.log('[QueryCache] Redis module not available, using in-memory cache:', errorMessage(err));
     }
   }
 
@@ -79,19 +83,19 @@ class QueryCache {
     return `${this.prefix}:${this._namespace(dashboardKey)}:${hash}`;
   }
 
-  async get(key: string): Promise<any> {
-    const memHit = this.memory.get(key);
+  async get(key: string): Promise<unknown> {
+    const memHit: unknown = this.memory.get(key);
     if (memHit !== undefined) return memHit;
 
     if (!this.redisEnabled || !this.redis) return null;
     try {
       const data = await this.redis.get(key);
       if (!data) return null;
-      const parsed = JSON.parse(data);
+      const parsed: unknown = JSON.parse(data);
       this.memory.set(key, parsed);
       return parsed;
-    } catch (err: any) {
-      console.log('[QueryCache] GET error:', err.message);
+    } catch (err) {
+      console.log('[QueryCache] GET error:', errorMessage(err));
       return null;
     }
   }
@@ -101,30 +105,31 @@ class QueryCache {
     if (!this.redisEnabled || !this.redis) return;
     try {
       await this.redis.set(key, JSON.stringify(data), 'EX', ttl || this.ttl);
-    } catch (err: any) {
-      console.log('[QueryCache] SET error:', err.message);
+    } catch (err) {
+      console.log('[QueryCache] SET error:', errorMessage(err));
     }
   }
 
   async invalidate(pattern?: string): Promise<void> {
     this.memory.invalidatePrefix(pattern || this.prefix);
 
-    if (!this.redisEnabled || !this.redis) return;
+    const redis = this.redis;
+    if (!this.redisEnabled || !redis) return;
     const match = pattern ? `${pattern}*` : `${this.prefix}:*`;
     try {
       let cursor = '0';
       let removed = 0;
       do {
-        const [next, keys] = await this.redis.scan(cursor, 'MATCH', match, 'COUNT', 200);
+        const [next, keys] = await redis.scan(cursor, 'MATCH', match, 'COUNT', 200);
         cursor = next;
         if (keys.length) {
-          await this.redis.unlink(...keys).catch(() => this.redis!.del(...keys));
+          await redis.unlink(...keys).catch(() => redis.del(...keys));
           removed += keys.length;
         }
       } while (cursor !== '0');
       if (removed) console.log(`[QueryCache] Invalidated ${removed} keys`);
-    } catch (err: any) {
-      console.log('[QueryCache] INVALIDATE error:', err.message);
+    } catch (err) {
+      console.log('[QueryCache] INVALIDATE error:', errorMessage(err));
     }
   }
 

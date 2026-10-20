@@ -9,9 +9,24 @@ import {
   GRAIN_INFERENCE_ORDER,
 } from './queryConstants';
 import { quoteIdentifier, escapeLiteral } from '../../shared/db/sql';
+import type { ColumnMeta } from './queryTypes';
 
-type ColumnMeta = Record<string, any> | null | undefined;
-type PlanNode = Record<string, any>;
+type MaybeColumn = ColumnMeta | null | undefined;
+
+interface ResolvableNode {
+  column?: string;
+  columnMeta?: MaybeColumn;
+}
+
+interface DateGroupOptions {
+  isString?: boolean;
+  parseFormat?: string | null;
+}
+
+interface FilterInput extends ResolvableNode {
+  operator?: string | null;
+  values?: unknown;
+}
 
 interface DateGrain {
   key: string;
@@ -71,7 +86,7 @@ const DATE_GRAINS: Record<string, DateGrain> = {
   },
 };
 
-function resolvedName(node: PlanNode | null | undefined): string {
+function resolvedName(node: ResolvableNode | null | undefined): string {
   const name = node?.columnMeta?.name;
   if (!name) {
     throw new Error(`Plan node for column "${node?.column}" has no resolved metadata; it cannot be rendered safely.`);
@@ -132,19 +147,19 @@ function grainForPeriod(period: string, grain: unknown): DateGrain | null {
   return inferGrainFromPeriod(period);
 }
 
-function isDateColumn(colMeta: ColumnMeta): boolean {
+function isDateColumn(colMeta: MaybeColumn): boolean {
   return !!(colMeta && (colMeta.isDate || colMeta.isTemporal));
 }
 
-function isNumericColumn(colMeta: ColumnMeta): boolean {
+function isNumericColumn(colMeta: MaybeColumn): boolean {
   return !!colMeta?.isNumeric;
 }
 
-function isStringColumn(colMeta: ColumnMeta): boolean {
+function isStringColumn(colMeta: MaybeColumn): boolean {
   return !!colMeta?.isString;
 }
 
-function describeColumnType(colMeta: ColumnMeta): string {
+function describeColumnType(colMeta: MaybeColumn): string {
   if (!colMeta) return 'of unknown type';
   if (isNumericColumn(colMeta)) return `numeric (${colMeta.type})`;
   if (isDateColumn(colMeta)) return `a date/time column (${colMeta.type})`;
@@ -152,7 +167,7 @@ function describeColumnType(colMeta: ColumnMeta): string {
   return `of unsupported type (${colMeta.type || 'unknown'})`;
 }
 
-function validateAggregation(aggFn: unknown, column: string, colMeta: ColumnMeta, tableName?: string | null): string {
+function validateAggregation(aggFn: unknown, column: string, colMeta: MaybeColumn, tableName?: string | null): string {
   const sqlAgg = resolveAggregation(aggFn);
   const where = tableName ? ` in table "${tableName}"` : '';
 
@@ -177,7 +192,7 @@ function validateAggregation(aggFn: unknown, column: string, colMeta: ColumnMeta
   return sqlAgg;
 }
 
-function buildDateGroupExpression(column: string, grain: unknown, opts?: Record<string, any> | null): string {
+function buildDateGroupExpression(column: string, grain: unknown, opts?: DateGroupOptions | null): string {
   const col = quoteIdentifier(column);
   const fmt = resolveDateGrain(grain).format;
   const options = opts || {};
@@ -214,7 +229,7 @@ function buildAggExpression(aggFn: unknown, column: string, alias?: string | nul
   return alias ? `${expr} AS ${quoteIdentifier(alias)}` : expr;
 }
 
-function buildNonEmptyCondition(column: string, colMeta: ColumnMeta): string {
+function buildNonEmptyCondition(column: string, colMeta: MaybeColumn): string {
   const col = quoteIdentifier(column);
   const parts = [`${col} IS NOT NULL`];
   if (isStringColumn(colMeta)) parts.push(`${col} <> ''`);
@@ -225,13 +240,13 @@ function isNumberLike(value: unknown): boolean {
   return value !== null && value !== undefined && String(value).trim() !== '' && Number.isFinite(Number(value));
 }
 
-function buildWhereSql(filters: PlanNode[] | null | undefined): { where: string; params: string[] } {
+function buildWhereSql(filters: FilterInput[] | null | undefined): { where: string; params: string[] } {
   const conditions: string[] = [];
   const params: string[] = [];
   for (const f of filters || []) {
     const col = quoteIdentifier(resolvedName(f));
     const op = resolveOperator(f.operator || 'IN');
-    const values = Array.isArray(f.values) ? f.values : [];
+    const values: unknown[] = Array.isArray(f.values) ? f.values : [];
 
     if (op === 'IN') {
       if (!values.length) continue;
@@ -296,6 +311,7 @@ function formatPeriodDisplay(period: unknown, grain?: unknown): string {
   }
 }
 
+export type { DateGroupOptions, FilterInput, ResolvableNode };
 export {
   resolvedName,
   resolveSortDirection,

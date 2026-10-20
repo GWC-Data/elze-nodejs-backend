@@ -1,28 +1,29 @@
 import config from '../../config';
 import { quoteQualified } from '../../shared/db/sql';
 import type { Params } from '../../shared/db/pgPool';
+import type { QueryResultSet, ResultRow, TableColumnRow } from './queryTypes';
 
 const { db } = config.database;
 
-function executeQuery(sql: string, params?: Params | null): Promise<{ rows: any[]; elapsed: number }> {
+function executeQuery(sql: string, params?: Params | null): Promise<QueryResultSet> {
   const start = Date.now();
   return db
-    .query(sql, params || [])
+    .query<ResultRow>(sql, params || [])
     .then((result) => {
       const elapsed = Date.now() - start;
       return { rows: result.rows, elapsed };
     })
-    .catch((err: any) => {
+    .catch((err: unknown) => {
       const elapsed = Date.now() - start;
-      console.error(`[QueryExecutor] SQL failed (${elapsed}ms):`, err.message);
+      console.error(`[QueryExecutor] SQL failed (${elapsed}ms):`, err instanceof Error ? err.message : undefined);
       console.error('[QueryExecutor] SQL:', sql);
       console.error('[QueryExecutor] Params:', params);
       throw err;
     });
 }
 
-async function tableColumns(schema: string, table: string) {
-  const { rows } = await db.query(
+async function tableColumns(schema: string, table: string): Promise<TableColumnRow[]> {
+  const { rows } = await db.query<TableColumnRow>(
     `SELECT a.attname                               AS name,
             format_type(a.atttypid, a.atttypmod)    AS column_type,
             t.typname                               AS typname,
@@ -43,7 +44,7 @@ async function tableColumns(schema: string, table: string) {
 }
 
 async function countRows(schema: string, table: string): Promise<number> {
-  const { rows } = await db.query(`SELECT COUNT(*)::bigint AS n FROM ${quoteQualified(schema, table)}`);
+  const { rows } = await db.query<{ n: number }>(`SELECT COUNT(*)::bigint AS n FROM ${quoteQualified(schema, table)}`);
   return Number(rows[0].n);
 }
 

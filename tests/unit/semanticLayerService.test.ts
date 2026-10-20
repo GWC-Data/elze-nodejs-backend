@@ -12,6 +12,7 @@ import {
   resolveSortDirection,
   validateAggregation,
 } from '../../src/modules/queryEngine/semanticLayerService';
+import type { ColumnMeta } from '../../src/modules/queryEngine/queryTypes';
 
 function column(name: string, typname: string, columnType: string = typname) {
   return {
@@ -36,7 +37,7 @@ const showDate = column('Show Date', 'date');
 const showTime = column('Show Time', 'timestamp', 'timestamp without time zone');
 const premiere = column('Is Premiere', 'bool', 'boolean');
 
-function filter(columnMeta: Record<string, any>, values: unknown, operator?: string) {
+function filter(columnMeta: ColumnMeta, values: unknown, operator?: string) {
   return { column: columnMeta.name, operator, values, columnMeta };
 }
 

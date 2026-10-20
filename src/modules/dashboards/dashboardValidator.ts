@@ -1,17 +1,17 @@
 import { fail, InvalidDashboardIdError } from '../../shared/errors/AppError';
 import { DASHBOARD_ID_RE } from './dashboardConstants';
-
-type Card = Record<string, any>;
+import { isRecord } from './cardModel';
+import type { CardSpec, SlicerSelections } from './dashboardTypes';
 
 interface CardUpdate {
   index: number;
-  card: Card;
-  filters: any;
+  card: CardSpec;
+  filters: SlicerSelections | undefined;
 }
 
 interface DraftCard {
-  card: Card;
-  filters: any;
+  card: CardSpec;
+  filters: SlicerSelections | undefined;
 }
 
 function assertValidDashboardId(dashboardId: unknown): string {
@@ -33,18 +33,22 @@ function parseFilters(query: Record<string, unknown> | null | undefined): Record
   return filters;
 }
 
-function requireCardUpdate(body: any): CardUpdate {
-  const { index, card, filters } = body || {};
+function bodyFields(body: unknown): Record<string, unknown> {
+  return isRecord(body) ? body : {};
+}
+
+function requireCardUpdate(body: unknown): CardUpdate {
+  const { index, card, filters } = bodyFields(body);
   if (!card || typeof index !== 'number') {
     throw fail('VALIDATION_ERROR', 'Expected { index, card }');
   }
-  return { index, card, filters };
+  return { index, card, filters: isRecord(filters) ? filters : undefined };
 }
 
-function requireDraftCard(body: any): DraftCard {
-  const { card, filters } = body || {};
+function requireDraftCard(body: unknown): DraftCard {
+  const { card, filters } = bodyFields(body);
   if (!card || typeof card !== 'object') throw fail('VALIDATION_ERROR', 'Expected { card }');
-  return { card, filters };
+  return { card, filters: isRecord(filters) ? filters : undefined };
 }
 
 export { assertValidDashboardId, parseFilters, requireCardUpdate, requireDraftCard };

@@ -2,13 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import config from '../../config';
 import type { Prisma } from '../../generated/prisma/client';
+import type { DashboardListRow, StoredDashboard } from './dashboardTypes';
 
 const { prisma, withTransaction } = config.database;
 const { DASHBOARD_DIR } = config.engine;
 
 const DEFAULT_SPEC_PATH = path.join(DASHBOARD_DIR, 'default.json');
 
-function readJsonFile(filePath: string): any {
+function readJsonFile(filePath: string): unknown {
   const raw = fs.readFileSync(filePath, 'utf8');
   return JSON.parse(raw.replace(/^﻿/, ''));
 }
@@ -29,7 +30,7 @@ function listJsonFiles(dir: string = DASHBOARD_DIR): string[] {
   return fs.readdirSync(dir).filter((file) => file.endsWith('.json'));
 }
 
-async function findById(id: string) {
+async function findById(id: string): Promise<StoredDashboard | null> {
   const row = await prisma.dashboard.findUnique({
     where: { id },
     select: { id: true, title: true, description: true, companyId: true, spec: true },
@@ -40,7 +41,7 @@ async function findById(id: string) {
     title: row.title,
     description: row.description,
     company_id: row.companyId,
-    spec: row.spec as any,
+    spec: row.spec,
   };
 }
 
@@ -48,7 +49,7 @@ async function existsInDb(id: string): Promise<boolean> {
   return (await prisma.dashboard.count({ where: { id } })) > 0;
 }
 
-async function list(companyId?: number | null) {
+async function list(companyId?: number | null): Promise<DashboardListRow[]> {
   const where =
     companyId === undefined
       ? {}

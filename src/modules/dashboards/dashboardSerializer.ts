@@ -1,10 +1,14 @@
-type Spec = Record<string, any>;
+import type { HydratedDashboard, SourceMetadata } from '../queryEngine/queryTypes';
+import type { ColumnCatalogue, DashboardEntry, DashboardSpec, DashboardView } from './dashboardTypes';
 
-function dashboardSummary(d: Record<string, any>, extra?: Record<string, any>) {
+function dashboardSummary<E extends Record<string, unknown>>(
+  d: Pick<DashboardEntry, 'id' | 'title' | 'source'>,
+  extra?: E
+) {
   return { id: d.id, title: d.title || null, source: d.source, ...extra };
 }
 
-function columnCatalogue(spec: Spec, meta: Record<string, any>, rowCount: number) {
+function columnCatalogue(spec: DashboardSpec, meta: SourceMetadata, rowCount: number): ColumnCatalogue {
   return {
     dashboardId: spec.id,
     database: meta.table.database,
@@ -13,7 +17,7 @@ function columnCatalogue(spec: Spec, meta: Record<string, any>, rowCount: number
     rowCount,
     rowCountText: rowCount.toLocaleString('en-US'),
     dateParse: meta.dateParse || {},
-    columns: meta.table.columns.map((c: Record<string, any>) => ({
+    columns: meta.table.columns.map((c) => ({
       name: c.name,
       type: c.type,
       columnType: c.columnType,
@@ -26,7 +30,7 @@ function columnCatalogue(spec: Spec, meta: Record<string, any>, rowCount: number
   };
 }
 
-function hydratedView(spec: Spec, data: Record<string, any>) {
+function hydratedView(spec: DashboardSpec, data: HydratedDashboard): DashboardView {
   return {
     dashboard: {
       id: spec.id,

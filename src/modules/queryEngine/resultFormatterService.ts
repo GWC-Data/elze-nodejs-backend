@@ -1,10 +1,34 @@
 import { formatPeriodDisplay, parsePeriodKey } from './semanticLayerService';
 import { kpiValueColumn, readKpiPeriod } from './queryPlannerService';
 import { PALETTE, ABBREVIATE_ABOVE } from './queryConstants';
+import type { CardColumnSpec, CardSpec, FormatSpec, SlicerSelections, SlicerSpec } from '../dashboards/dashboardTypes';
+import type {
+  AreaSeries,
+  AxisTick,
+  BarLineSeries,
+  ChartAxes,
+  ChartView,
+  KpiView,
+  MergedKpiMember,
+  ResultRow,
+  SeriesPoint,
+  SlicerView,
+} from './queryTypes';
 
-type Spec = Record<string, any>;
-type Row = Record<string, any>;
-type Format = Record<string, any> | null | undefined;
+type Format = FormatSpec | null | undefined;
+
+interface PeriodPoint {
+  _period: unknown;
+  _value: number;
+}
+
+interface ComparisonResult {
+  delta: number;
+  current: number;
+  previous: number | undefined;
+  bucket: { name: string } | undefined;
+  prevBucket: { name: string } | undefined;
+}
 
 const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 
@@ -40,7 +64,7 @@ function niceStep(raw: number): number {
   return factor * mag;
 }
 
-function axisTicks(min: number, max: number, format: Format, count = 5): { value: number; label: string }[] {
+function axisTicks(min: number, max: number, format: Format, count = 5): AxisTick[] {
   const lo = Math.min(0, Number.isFinite(min) ? min : 0);
   const hi = Math.max(0, Number.isFinite(max) ? max : 0);
   if (hi === lo) return [{ value: 0, label: formatValue(0, format) }];
@@ -48,7 +72,7 @@ function axisTicks(min: number, max: number, format: Format, count = 5): { value
   const step = niceStep((hi - lo) / count);
   const start = Math.floor(lo / step) * step;
   const end = Math.ceil(hi / step) * step;
-  const ticks: { value: number; label: string }[] = [];
+  const ticks: AxisTick[] = [];
   for (let v = start; v <= end + step / 2; v += step) {
     const value = Number(Number(v).toPrecision(12));
     ticks.push({ value, label: formatValue(value, format) });
@@ -56,7 +80,7 @@ function axisTicks(min: number, max: number, format: Format, count = 5): { value
   return ticks;
 }
 
-function periodRows(rows: Row[], grain: unknown): { _period: any; _value: number }[] {
+function periodRows(rows: ResultRow[], grain: unknown): PeriodPoint[] {
   return rows
     .map((r) => ({
       _period: r._period,
@@ -65,7 +89,7 @@ function periodRows(rows: Row[], grain: unknown): { _period: any; _value: number
     .sort((a, b) => parsePeriodKey(a._period, grain) - parsePeriodKey(b._period, grain));
 }
 
-function computeComparisonResult(rows: Row[], valueDisplay: string, grain: unknown): Record<string, any> {
+function computeComparisonResult(rows: ResultRow[], valueDisplay: string, grain: unknown): ComparisonResult {
   const sorted = periodRows(rows, grain);
   if (!sorted.length) return { delta: 0, current: 0, previous: undefined, bucket: undefined, prevBucket: undefined };
 
@@ -92,14 +116,14 @@ function computeComparisonResult(rows: Row[], valueDisplay: string, grain: unkno
   };
 }
 
-function formatKpi(kpiSpec: Spec, rows: Row[] | null | undefined): Record<string, any> | null {
+function formatKpi(kpiSpec: CardSpec, rows: ResultRow[] | null | undefined): KpiView | null {
   if (!rows) return null;
   const vCol = kpiValueColumn(kpiSpec);
   if (!vCol) return null;
 
   const period = readKpiPeriod(kpiSpec);
 
-  let comparisonResult: Record<string, any> | undefined;
+  let comparisonResult: ComparisonResult | undefined;
   let value: number;
 
   if (period) {
@@ -148,30 +172,30 @@ function formatKpi(kpiSpec: Spec, rows: Row[] | null | undefined): Record<string
   };
 }
 
-function formatMergedKpi(member: Spec, rows: Row[] | null | undefined): Record<string, any> | null {
+function formatMergedKpi(member: MergedKpiMember, rows: ResultRow[] | null | undefined): KpiView | null {
   if (!rows) return null;
   const colKey = `${member.id}__value`;
-  const mapped = rows.map((r) => ({
+  const mapped: ResultRow[] = rows.map((r) => ({
     _period: r._period,
     _value: r[colKey],
   }));
   return formatKpi(member.kpi, mapped);
 }
 
-function hasExplicitOrder(card: Spec): boolean {
+function hasExplicitOrder(card: CardSpec): boolean {
   const raw = card.orderBy != null ? card.orderBy : card.sort != null ? card.sort : card.sortBy;
   if (raw == null) return false;
   return Array.isArray(raw) ? raw.length > 0 : true;
 }
 
-function colorFor(card: Spec, key: string, i: number): string {
+function colorFor(card: CardSpec, key: string, i: number): string {
   const mapping = card.options?.colorMapping || {};
   if (mapping[key]) return mapping[key];
   if (card.options?.color && i === 0) return card.options.color;
   return PALETTE[i % PALETTE.length];
 }
 
-function formatCard(cardSpec: Spec, rows: Row[] | null | undefined, minHeight: number): Record<string, any> | null {
+function formatCard(cardSpec: CardSpec, rows: ResultRow[] | null | undefined, minHeight: number): ChartView | null {
   if (!rows) return null;
   switch (cardSpec.chartType) {
     case 'line_bar_combo':
@@ -203,18 +227,18 @@ function formatCard(cardSpec: Spec, rows: Row[] | null | undefined, minHeight: n
   }
 }
 
-function formatCombo(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
-  const columns: any[] = card.columns || [];
+function formatCombo(card: CardSpec, rows: ResultRow[], minHeight: number): ChartView {
+  const columns: CardColumnSpec[] = card.columns || [];
   const valueCols = columns.filter((c) => c.mapping === 'VALUE');
   const xCol = columns.find((c) => c.mapping === 'XTIME') || columns.find((c) => c.mapping === 'ITEM');
   const gKey = card.groupBy?.[0]?.column || xCol?.column || 'label';
   const dualAxis = card.options?.dualAxis === true;
   const half = Math.ceil(valueCols.length / 2);
 
-  const formatOf = (c: Record<string, any>): Format => c.format || card.format || null;
+  const formatOf = (c: { format?: Format }): Format => c.format || card.format || null;
 
   const data = rows.map((r) => {
-    const point: Record<string, any> = { [gKey]: r[gKey] ?? r.label ?? '', label: r[gKey] ?? r.label ?? '' };
+    const point: SeriesPoint = { [gKey]: r[gKey] ?? r.label ?? '', label: r[gKey] ?? r.label ?? '' };
     const text: Record<string, string> = {};
     for (const c of valueCols) {
       const n = Number(r[c.column]) || 0;
@@ -225,15 +249,17 @@ function formatCombo(card: Spec, rows: Row[], minHeight: number): Record<string,
     return point;
   });
 
-  const series = valueCols.map((c, i) => ({
-    key: c.column,
-    name: c.alias || c.column,
-    kind: dualAxis && i >= half ? 'line' : 'bar',
-    axis: dualAxis && i >= half ? 'y2' : 'y1',
-    color: colorFor(card, c.column, i),
-  }));
+  const series = valueCols.map(
+    (c, i): BarLineSeries => ({
+      key: c.column,
+      name: c.alias || c.column,
+      kind: dualAxis && i >= half ? 'line' : 'bar',
+      axis: dualAxis && i >= half ? 'y2' : 'y1',
+      color: colorFor(card, c.column, i),
+    })
+  );
 
-  const extent = (cols: Record<string, any>[]): number[] => {
+  const extent = (cols: CardColumnSpec[]): number[] => {
     const values: number[] = [];
     for (const c of cols) for (const r of rows) values.push(Number(r[c.column]) || 0);
     return values.length ? [Math.min(...values), Math.max(...values)] : [0, 0];
@@ -243,7 +269,7 @@ function formatCombo(card: Spec, rows: Row[], minHeight: number): Record<string,
   const [y1Min, y1Max] = extent(y1Cols);
   const [y2Min, y2Max] = extent(y2Cols);
 
-  const axes = {
+  const axes: ChartAxes = {
     x: { key: gKey, type: 'category' },
     y: {
       key: 'y1',
@@ -267,8 +293,8 @@ function formatCombo(card: Spec, rows: Row[], minHeight: number): Record<string,
   };
 }
 
-function formatArea(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
-  const columns: any[] = card.columns || [];
+function formatArea(card: CardSpec, rows: ResultRow[], minHeight: number): ChartView {
+  const columns: CardColumnSpec[] = card.columns || [];
   const xCol = columns.find((c) => c.mapping === 'XTIME') || columns.find((c) => c.mapping === 'ITEM');
   const seriesCol = columns.find((c) => c.mapping === 'SERIES');
   const valueCol = columns.find((c) => c.mapping === 'VALUE');
@@ -279,7 +305,7 @@ function formatArea(card: Spec, rows: Row[], minHeight: number): Record<string, 
 
   const allSeries = Array.from(new Set(rows.map((r) => String(r[seriesName] ?? 'N/A'))));
 
-  const dataMap: Record<string, Record<string, any>> = {};
+  const dataMap: Record<string, SeriesPoint> = {};
   for (const r of rows) {
     const label = String(r[xKey] ?? 'N/A');
     if (!dataMap[label]) {
@@ -300,14 +326,16 @@ function formatArea(card: Spec, rows: Row[], minHeight: number): Record<string, 
     return point;
   });
 
-  const series = allSeries.map((s, i) => ({
-    key: s,
-    name: s,
-    kind: 'area',
-    color: colorFor(card, s, i),
-    stackId: stacked ? s : undefined,
-    fillOpacity: 0.35,
-  }));
+  const series = allSeries.map(
+    (s, i): AreaSeries => ({
+      key: s,
+      name: s,
+      kind: 'area',
+      color: colorFor(card, s, i),
+      stackId: stacked ? s : undefined,
+      fillOpacity: 0.35,
+    })
+  );
 
   let axisMax = 0;
   let axisMin = 0;
@@ -338,8 +366,8 @@ function formatArea(card: Spec, rows: Row[], minHeight: number): Record<string, 
   };
 }
 
-function formatTreemap(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
-  const columns: any[] = card.columns || [];
+function formatTreemap(card: CardSpec, rows: ResultRow[], minHeight: number): ChartView {
+  const columns: CardColumnSpec[] = card.columns || [];
   const nameCol =
     columns.find((c) => c.mapping === 'SERIES') ||
     columns.find((c) => c.mapping === 'XTIME') ||
@@ -374,8 +402,8 @@ function formatTreemap(card: Spec, rows: Row[], minHeight: number): Record<strin
   };
 }
 
-function formatFunnel(card: Spec, rows: Row[], minHeight: number): Record<string, any> {
-  const columns: any[] = card.columns || [];
+function formatFunnel(card: CardSpec, rows: ResultRow[], minHeight: number): ChartView {
+  const columns: CardColumnSpec[] = card.columns || [];
   const nameCol =
     columns.find((c) => c.mapping === 'SERIES') ||
     columns.find((c) => c.mapping === 'ITEM') ||
@@ -411,12 +439,12 @@ function formatFunnel(card: Spec, rows: Row[], minHeight: number): Record<string
 }
 
 function formatSlicer(
-  slicerSpec: Spec,
-  rows: Row[] | null | undefined,
-  filters: Record<string, any> | null | undefined
-): Record<string, any> {
+  slicerSpec: SlicerSpec,
+  rows: ResultRow[] | null | undefined,
+  filters: SlicerSelections | null | undefined
+): SlicerView {
   const values = rows || [];
-  const selSet = new Set(filters?.[slicerSpec.id] || []);
+  const selSet = new Set((filters?.[slicerSpec.id] || []) as Iterable<unknown>);
   return {
     id: slicerSpec.id,
     title: slicerSpec.title,
@@ -424,7 +452,7 @@ function formatSlicer(
     type: slicerSpec.type || 'multi',
     span: slicerSpec.span,
     showCount: slicerSpec.showCount,
-    options: values.map((v: Row) => ({
+    options: values.map((v) => ({
       value: String(v.value),
       count: Number(v.count) || 0,
       selected: selSet.has(String(v.value)),
