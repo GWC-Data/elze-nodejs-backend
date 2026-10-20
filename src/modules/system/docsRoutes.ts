@@ -3,6 +3,7 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import config from '../../config';
 import { CSRF_COOKIE, CSRF_HEADER } from '../../shared/security/session';
+import { messageOf } from '../../shared/errors/AppError';
 
 const { OPENAPI_FILE } = config.env;
 
@@ -18,8 +19,8 @@ const copyCsrfCookie = new Function(
 function loadSpec(): Record<string, unknown> | null {
   try {
     return JSON.parse(fs.readFileSync(OPENAPI_FILE, 'utf8'));
-  } catch (err: any) {
-    console.warn(`[docs] API docs are off: cannot read ${OPENAPI_FILE} (${err.message})`);
+  } catch (err) {
+    console.warn(`[docs] API docs are off: cannot read ${OPENAPI_FILE} (${messageOf(err)})`);
     return null;
   }
 }

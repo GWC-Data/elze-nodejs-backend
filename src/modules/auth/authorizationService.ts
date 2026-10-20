@@ -9,18 +9,36 @@ import {
 } from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
 
-type UserRow = Record<string, any>;
+interface ActorSource {
+  id: number;
+  username: string;
+  email: string;
+  display_name: string | null;
+  role: string | null;
+  company_id: number | null;
+  status: string;
+  must_change_password: boolean;
+  role_id?: string | null;
+  role_name?: string | null;
+}
+
+interface ManagedUser {
+  id: number;
+  role: string | null;
+  company_id: number | null;
+}
 
 function buildActor(
-  userRow: UserRow | null | undefined,
+  userRow: ActorSource | null | undefined,
   permissions: Iterable<string>,
   features: readonly string[] = featureKeys()
 ): Actor {
   if (!userRow?.id) {
     throw new Error('buildActor requires a user row');
   }
-  const roleScope = scopeOfTier(userRow.role);
-  if (!roleScope) {
+  const { role } = userRow;
+  const roleScope = scopeOfTier(role);
+  if (!roleScope || role === null) {
     throw fail('INTERNAL_ERROR', `Account "${userRow.username}" holds unknown role "${userRow.role}".`);
   }
   const isPlatform = roleScope === ROLE_SCOPES.platform;
@@ -37,7 +55,7 @@ function buildActor(
     username: userRow.username,
     email: userRow.email,
     displayName: userRow.display_name || null,
-    role: userRow.role,
+    role,
     roleScope,
     isPlatform,
     companyId: isPlatform ? null : userRow.company_id,
@@ -122,7 +140,7 @@ function assertCanAssignRole(actor: Actor, targetRole: string) {
   return scope;
 }
 
-function assertCanManageUser(actor: Actor, target: UserRow): void {
+function assertCanManageUser(actor: Actor, target: ManagedUser): void {
   if (target.id === actor.id) {
     throw fail('VALIDATION_ERROR', 'Use your profile to change your own account.');
   }
@@ -167,3 +185,4 @@ export {
   assertCanManageUser,
   assertRolePermissionsAllowed,
 };
+export type { ActorSource, ManagedUser };

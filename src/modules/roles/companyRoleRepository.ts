@@ -8,6 +8,21 @@ const { prisma, withTransaction } = config.database;
 
 const COMPANY_DEFAULT_NAME = 'Member';
 
+interface CompanyRoleRow {
+  id: string;
+  companyId: number;
+  kind: string;
+  tier: string;
+  name: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  modifiedAt: Date | null;
+  modifiedBy: string | null;
+  permissionIds: string[];
+  userCount: number;
+}
+
 const ROLE_COLUMNS = Prisma.sql`r.id, r.company_id AS "companyId", r.kind, r.tier, r.name, r.description,
                       r.created_at AS "createdAt", r.updated_at AS "updatedAt",
                       r.modified_at AS "modifiedAt",
@@ -24,8 +39,8 @@ async function writePermissions(tx: Tx, roleId: string, ids: readonly string[], 
   });
 }
 
-async function listForCompany(companyId: number) {
-  return rawRows(
+async function listForCompany(companyId: number): Promise<CompanyRoleRow[]> {
+  return rawRows<CompanyRoleRow>(
     prisma,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
       WHERE r.company_id = ${companyId} AND r.kind = 'custom'
@@ -34,7 +49,7 @@ async function listForCompany(companyId: number) {
 }
 
 async function builtInCounts(companyId: number): Promise<Record<string, number>> {
-  const rows = await rawRows(
+  const rows = await rawRows<{ tier: string; n: number }>(
     prisma,
     Prisma.sql`SELECT r.tier, COUNT(*) AS n
        FROM users u
@@ -46,9 +61,9 @@ async function builtInCounts(companyId: number): Promise<Record<string, number>>
   return Object.fromEntries(rows.map((r) => [r.tier, Number(r.n)]));
 }
 
-async function findInCompany(id: string, companyId: number | null) {
+async function findInCompany(id: string, companyId: number | null): Promise<CompanyRoleRow | null> {
   const company = companyId === null ? Prisma.empty : Prisma.sql`AND r.company_id = ${companyId}`;
-  const rows = await rawRows(
+  const rows = await rawRows<CompanyRoleRow>(
     prisma,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
       WHERE r.id = ${id}::uuid AND r.kind = 'custom' ${company}`
@@ -102,8 +117,8 @@ async function update(
   });
 }
 
-async function findCompanyDefault(companyId: number, tx: Tx = prisma) {
-  const rows = await rawRows(
+async function findCompanyDefault(companyId: number, tx: Tx = prisma): Promise<CompanyRoleRow | null> {
+  const rows = await rawRows<CompanyRoleRow>(
     tx,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
       WHERE r.company_id = ${companyId} AND r.kind = 'company_default' AND r.tier = 'USER'`
@@ -189,3 +204,4 @@ export {
   resetCompanyDefault,
   syncUnmodifiedCompanyDefaults,
 };
+export type { CompanyRoleRow };

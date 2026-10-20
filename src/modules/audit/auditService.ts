@@ -1,6 +1,6 @@
 import * as auditRepository from './auditRepository';
 import { EVENTS, FORBIDDEN_DETAIL_KEYS } from './auditEvents';
-import { fail } from '../../shared/errors/AppError';
+import { fail, messageOf } from '../../shared/errors/AppError';
 import { COMPANY_ADMIN } from '../catalogue/roleTiers';
 import { shapeEntry } from './auditSerializer';
 import {
@@ -13,11 +13,18 @@ import {
   usableFeatures,
 } from '../catalogue/catalogueService';
 import type { AuditScope } from './auditRepository';
+import type { AuditItem } from './auditSerializer';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Actor } from '../../shared/types/actor';
 
-type AuditActor = Actor | Record<string, any> | string | null | undefined;
+interface AuditPrincipal {
+  id?: unknown;
+  username?: unknown;
+  companyId?: unknown;
+}
+
+type AuditActor = AuditPrincipal | string | null | undefined;
 type AuditDetail = Record<string, unknown>;
-type AuditItem = Record<string, any>;
 
 interface AuditListQuery {
   search: string;
@@ -70,9 +77,9 @@ function audit(event: string, actor: AuditActor, detail: AuditDetail = {}): void
         targetUserId: idOrNull(safe.userId),
         detail: safe,
       })
-      .catch((err: any) => console.error('[audit] write failed:', err.message));
-  } catch (err: any) {
-    console.error('[audit] write failed:', err.message);
+      .catch((err: unknown) => console.error('[audit] write failed:', messageOf(err)));
+  } catch (err) {
+    console.error('[audit] write failed:', messageOf(err));
   }
 }
 
@@ -108,6 +115,10 @@ function day(value: string | null | undefined, name: string): string | null {
 
 const FEATURE_DETAIL_KEYS = ['features', 'enabled', 'disabled'];
 const FEATURE_ID_DETAIL_KEYS = ['featureIds', 'enabledIds', 'disabledIds'];
+
+function detailOf(value: Prisma.JsonValue): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
 
 function visibleDetail(detail: Record<string, unknown>, visible: Set<string> | null): Record<string, unknown> {
   if (!visible) return detail;
@@ -169,7 +180,7 @@ async function listEntries(
         {
           ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
           event: row.event,
-          ...visibleDetail(row.detail || {}, visible),
+          ...visibleDetail(detailOf(row.detail), visible),
           actor: row.actor,
           actorId: row.actor_id,
           actorCompanyId: row.actor_company_id,

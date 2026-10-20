@@ -5,12 +5,12 @@ import { rawRows } from '../../shared/db/baseRepository';
 const { prisma, withTransaction } = config.database;
 
 async function appliedMigrations(): Promise<string[]> {
-  const [{ present }] = await rawRows(
+  const [{ present }] = await rawRows<{ present: boolean }>(
     prisma,
     Prisma.sql`SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`
   );
   if (!present) return [];
-  const applied = await rawRows(
+  const applied = await rawRows<{ migration_name: string }>(
     prisma,
     Prisma.sql`SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
   );

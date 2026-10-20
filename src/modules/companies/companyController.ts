@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, requireId } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import * as companyService from './companyService';
 import * as accessService from '../access/accessService';
@@ -18,7 +18,7 @@ async function options(req: Request, res: Response): Promise<void> {
 }
 
 async function create(req: Request, res: Response): Promise<void> {
-  ok(res, await companyService.createCompany(req.actor, req.body || {}), 201);
+  ok(res, await companyService.createCompany(req.actor, bodyOf(req.body)), 201);
 }
 
 async function get(req: Request, res: Response): Promise<void> {
@@ -26,7 +26,7 @@ async function get(req: Request, res: Response): Promise<void> {
 }
 
 async function update(req: Request, res: Response): Promise<void> {
-  ok(res, await companyService.updateCompany(req.actor, companyId(req), req.body || {}));
+  ok(res, await companyService.updateCompany(req.actor, companyId(req), bodyOf(req.body)));
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
@@ -61,7 +61,7 @@ async function features(req: Request, res: Response): Promise<void> {
 async function replaceFeatures(req: Request, res: Response): Promise<void> {
   const id = companyId(req);
   await companyService.requireCompany(req.actor, id);
-  ok(res, await featureService.replaceCompanyFeatures(req.actor, id, req.body?.featureIds));
+  ok(res, await featureService.replaceCompanyFeatures(req.actor, id, bodyOf(req.body).featureIds));
 }
 
 export {

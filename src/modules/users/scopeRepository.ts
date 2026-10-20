@@ -31,7 +31,7 @@ async function distinctValues(dimension: ScopeDimension): Promise<string[]> {
     ? `${quoteIdentifier(dimension.database)}.${quoteIdentifier(dimension.table)}`
     : quoteIdentifier(dimension.table);
   const column = quoteIdentifier(dimension.column);
-  const { rows } = await db.query(
+  const { rows } = await db.query<{ value: unknown }>(
     `SELECT DISTINCT ${column} AS value FROM ${target}
       WHERE ${column} IS NOT NULL AND ${column}::text <> ''
       ORDER BY ${column} LIMIT ${MAX_DISTINCT_VALUES}`
@@ -39,8 +39,13 @@ async function distinctValues(dimension: ScopeDimension): Promise<string[]> {
   return rows.map((r) => String(r.value));
 }
 
-async function userScopeRows(userId: number) {
-  return rawRows(
+interface UserScopeRow {
+  dimension: string;
+  value: string;
+}
+
+async function userScopeRows(userId: number): Promise<UserScopeRow[]> {
+  return rawRows<UserScopeRow>(
     prisma,
     Prisma.sql`SELECT d.key AS dimension, v.value
        FROM access_control.user_data_scopes s
@@ -79,4 +84,4 @@ async function replaceUserScopes(
 }
 
 export { listDimensions, distinctValues, userScopeRows, replaceUserScopes };
-export type { ScopeDimension };
+export type { ScopeDimension, UserScopeRow };

@@ -6,6 +6,20 @@ import type { Actor } from '../../shared/types/actor';
 
 const { prisma, withTransaction } = config.database;
 
+interface DashboardGrantRow {
+  dashboard_id: string;
+  access_level: string;
+}
+
+interface UserGrantRow {
+  dashboardId: string;
+  level: string;
+  levelId: string;
+  origin: string;
+  groupId: number | null;
+  groupName: string | null;
+}
+
 const dashboardLevel = (level: string) => accessLevelId('dashboard', level);
 
 const companyDashboardIdsSql = (companyId: number | null) => Prisma.sql`
@@ -19,7 +33,7 @@ const GROUP_GRANTS = Prisma.sql`access_control.dashboard_group_access gda
        JOIN groups g ON g.id = gda.group_id`;
 
 async function companyDashboardIds(companyId: number | null): Promise<Set<string>> {
-  const rows = await rawRows(prisma, companyDashboardIdsSql(companyId));
+  const rows = await rawRows<{ dashboard_id: string }>(prisma, companyDashboardIdsSql(companyId));
   return new Set(rows.map((r) => r.dashboard_id));
 }
 
@@ -45,7 +59,7 @@ async function unassign(companyId: number, dashboardId: string): Promise<boolean
 }
 
 async function isAvailable(companyId: number | null, dashboardId: string): Promise<boolean> {
-  const [row] = await rawRows(
+  const [row] = await rawRows<{ available: boolean }>(
     prisma,
     Prisma.sql`SELECT EXISTS (
        SELECT 1 FROM access_control.company_dashboards WHERE company_id = ${companyId} AND dashboard_id = ${dashboardId}
@@ -91,8 +105,8 @@ async function directUserLevel(userId: unknown, dashboardId: string): Promise<st
   return grant ? grant.accessLevel.key : null;
 }
 
-async function grantRowsForUser(actor: Actor) {
-  return rawRows(
+async function grantRowsForUser(actor: Actor): Promise<DashboardGrantRow[]> {
+  return rawRows<DashboardGrantRow>(
     prisma,
     Prisma.sql`SELECT a.dashboard_id, l.key AS access_level
        FROM access_control.dashboard_user_access a
@@ -106,7 +120,7 @@ async function grantRowsForUser(actor: Actor) {
 }
 
 async function countCompanyDashboards(companyId: number | null): Promise<number> {
-  const [row] = await rawRows(
+  const [row] = await rawRows<{ n: number }>(
     prisma,
     Prisma.sql`SELECT COUNT(*)::int AS n FROM (${companyDashboardIdsSql(companyId)}) avail`
   );
@@ -114,7 +128,7 @@ async function countCompanyDashboards(companyId: number | null): Promise<number>
 }
 
 async function countGrantedDashboards(actor: Actor): Promise<number> {
-  const [row] = await rawRows(
+  const [row] = await rawRows<{ n: number }>(
     prisma,
     Prisma.sql`SELECT COUNT(*)::int AS n
        FROM (${companyDashboardIdsSql(actor.companyId)}) avail
@@ -131,8 +145,8 @@ async function countGrantedDashboards(actor: Actor): Promise<number> {
   return row.n;
 }
 
-async function userGrantRows(userId: number) {
-  return rawRows(
+async function userGrantRows(userId: number): Promise<UserGrantRow[]> {
+  return rawRows<UserGrantRow>(
     prisma,
     Prisma.sql`SELECT a.dashboard_id AS "dashboardId", l.key AS level, a.access_level_id AS "levelId",
             'direct' AS origin, NULL::int AS "groupId", NULL::text AS "groupName"
@@ -254,3 +268,4 @@ export {
   grantGroup,
   revokeGroup,
 };
+export type { DashboardGrantRow, UserGrantRow };

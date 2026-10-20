@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, requireId } from '../../shared/validation/commonValidator';
 import * as groupService from './groupService';
 
 const groupId = (req: Request) => requireId(req.params.id, 'group id');
@@ -10,7 +10,7 @@ async function list(req: Request, res: Response): Promise<void> {
 }
 
 async function create(req: Request, res: Response): Promise<void> {
-  ok(res, await groupService.createGroup(req.actor, req.body || {}), 201);
+  ok(res, await groupService.createGroup(req.actor, bodyOf(req.body)), 201);
 }
 
 async function get(req: Request, res: Response): Promise<void> {
@@ -18,7 +18,7 @@ async function get(req: Request, res: Response): Promise<void> {
 }
 
 async function update(req: Request, res: Response): Promise<void> {
-  ok(res, await groupService.updateGroup(req.actor, groupId(req), req.body || {}));
+  ok(res, await groupService.updateGroup(req.actor, groupId(req), bodyOf(req.body)));
 }
 
 async function remove(req: Request, res: Response): Promise<void> {

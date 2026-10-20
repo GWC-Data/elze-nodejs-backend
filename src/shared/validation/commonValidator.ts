@@ -27,9 +27,13 @@ function requireUuid(value: unknown, label = 'id'): string {
   return id;
 }
 
-function requireArray(value: unknown, message: string): any[] {
+function requireArray(value: unknown, message: string): unknown[] {
   if (!Array.isArray(value)) throw fail('VALIDATION_ERROR', message);
   return value;
 }
 
-export { requireId, requireUuid, requireString, requireArray };
+function bodyOf(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+export { requireId, requireUuid, requireString, requireArray, bodyOf };

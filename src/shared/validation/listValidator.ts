@@ -33,7 +33,7 @@ function intParam(
 }
 
 function parseListQuery(
-  query: Record<string, any>,
+  query: Record<string, unknown>,
   sortable: Record<string, unknown>,
   defaults: ListDefaults = {}
 ): ListQuery {

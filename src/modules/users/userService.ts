@@ -15,7 +15,7 @@ import { effectiveFeatures, featureKeys, featureKeysOf } from '../catalogue/cata
 import { USER_STATUS, USER_STATUSES } from '../../shared/db/statuses';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
-import type { ListWindow } from '../../shared/db/baseRepository';
+import type { ListQuery } from '../../shared/validation/listValidator';
 
 const { withTransaction } = config.database;
 
@@ -30,7 +30,7 @@ async function findActor(id: number) {
   const features = row.company_id ? effectiveFeatures(featureKeysOf(row.feature_ids)) : featureKeys();
   return {
     user: row,
-    permissions: [...(row.permissions as string[])],
+    permissions: [...row.permissions],
     features,
     scopes,
   };
@@ -50,7 +50,7 @@ async function requireManageable(actor: Actor, id: number) {
 
 async function listUsers(
   actor: Actor,
-  list: ListWindow,
+  list: ListQuery,
   { companyId, role, status }: { companyId?: unknown; role?: unknown; status?: unknown } = {}
 ) {
   const filter: userRepository.UserFilter = {};
@@ -76,11 +76,20 @@ async function listUsers(
   }
   if (list.search) filter.search = list.search;
 
-  return userRepository.listPage(filter, list, (row: Record<string, any>) => userListItem(row, actor.isPlatform));
+  return userRepository.listPage(filter, list, (row) => userListItem(row, actor.isPlatform));
 }
 
 async function currentUser(id: number) {
   return publicUser(await userRepository.findById(id));
+}
+
+interface NewUserFields {
+  username?: unknown;
+  email?: unknown;
+  displayName?: unknown;
+  role?: unknown;
+  customRoleId?: unknown;
+  companyId?: unknown;
 }
 
 async function createUser(
@@ -92,7 +101,7 @@ async function createUser(
     role,
     customRoleId: requestedCustomRole,
     companyId: requestedCompanyId,
-  }: Record<string, any>
+  }: NewUserFields
 ) {
   const targetRole = String(role || '').trim();
   if (!targetRole) throw fail('VALIDATION_ERROR', 'A role is required.');
@@ -137,26 +146,26 @@ async function updateUser(
   const target = await requireManageable(actor, id);
 
   const updates: { displayName?: string | null } = {};
-  let roleChanged = false;
-  let finalRole: string = target.role;
+  let newRole: string | null = null;
 
   if (role !== undefined && role !== target.role) {
-    finalRole = String(role).trim();
-    assertCanAssignRole(actor, finalRole);
-    assertRoleCompanyPairing(finalRole, target.company_id);
-    roleChanged = true;
+    newRole = String(role).trim();
+    assertCanAssignRole(actor, newRole);
+    assertRoleCompanyPairing(newRole, target.company_id);
   }
+  const roleChanged = newRole !== null;
+  const finalRole = newRole ?? target.role;
 
-  let nextRoleId: string = target.role_id;
+  let nextRoleId = target.role_id;
   if (finalRole !== USER) {
-    if (roleChanged) nextRoleId = await builtInRoleId(finalRole, target.company_id);
+    if (newRole !== null) nextRoleId = await builtInRoleId(newRole, target.company_id);
   } else if (customRoleId !== undefined) {
     const custom = await resolveAssignableRole(actor, customRoleId, target.company_id);
     nextRoleId = custom ?? (await builtInRoleId(USER, target.company_id));
   } else if (roleChanged) {
     nextRoleId = await builtInRoleId(USER, target.company_id);
   }
-  const roleIdChanged = nextRoleId !== target.role_id;
+  const roleIdChanged = nextRoleId !== null && nextRoleId !== target.role_id;
   const customRoleChanged = roleIdChanged && !roleChanged;
 
   if (displayName !== undefined) {
@@ -165,7 +174,7 @@ async function updateUser(
 
   if (!Object.keys(updates).length && !roleIdChanged) throw fail('VALIDATION_ERROR', 'Nothing to update');
   await userRepository.updateColumns(id, updates);
-  if (roleIdChanged) await userRepository.setRole(id, nextRoleId, actor.id);
+  if (roleIdChanged && nextRoleId !== null) await userRepository.setRole(id, nextRoleId, actor.id);
 
   if (roleChanged) await revokeAllForUser(id, 'role_changed');
 

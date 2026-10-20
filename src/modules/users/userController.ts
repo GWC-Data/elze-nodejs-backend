@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, requireId } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import { publicUser } from './userSerializer';
 import * as userService from './userService';
@@ -31,7 +31,7 @@ async function list(req: Request, res: Response): Promise<void> {
 }
 
 async function create(req: Request, res: Response): Promise<void> {
-  ok(res, await userService.createUser(req.actor, req.body || {}), 201);
+  ok(res, await userService.createUser(req.actor, bodyOf(req.body)), 201);
 }
 
 async function get(req: Request, res: Response): Promise<void> {
@@ -39,7 +39,7 @@ async function get(req: Request, res: Response): Promise<void> {
 }
 
 async function update(req: Request, res: Response): Promise<void> {
-  ok(res, await userService.updateUser(req.actor, userId(req), req.body || {}));
+  ok(res, await userService.updateUser(req.actor, userId(req), bodyOf(req.body)));
 }
 
 async function deactivate(req: Request, res: Response): Promise<void> {
@@ -69,7 +69,7 @@ async function getPermissions(req: Request, res: Response): Promise<void> {
 }
 
 async function replacePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await userPermissionService.replaceUserPermissions(req.actor, userId(req), req.body?.permissionIds));
+  ok(res, await userPermissionService.replaceUserPermissions(req.actor, userId(req), bodyOf(req.body).permissionIds));
 }
 
 async function getScope(req: Request, res: Response): Promise<void> {
@@ -79,7 +79,7 @@ async function getScope(req: Request, res: Response): Promise<void> {
 
 async function replaceScope(req: Request, res: Response): Promise<void> {
   const user = await userService.requireUserInScope(req.actor, userId(req));
-  ok(res, await scopeService.replaceUserScopes(req.actor, user, req.body?.scopes));
+  ok(res, await scopeService.replaceUserScopes(req.actor, user, bodyOf(req.body).scopes));
 }
 
 export {

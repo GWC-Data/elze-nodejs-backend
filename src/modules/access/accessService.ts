@@ -12,7 +12,6 @@ import { accessLevelsFor, accessLevelId } from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
 
 type GrantAction = 'read' | 'grant' | 'revoke';
-type DashboardRecord = Record<string, any>;
 
 interface GrantAuthority {
   full: boolean;
@@ -38,7 +37,7 @@ async function listCompanyDashboards(companyId: number | null) {
     accessRepository.companyDashboardIds(companyId),
     dashboards.listDashboards(companyId),
   ]);
-  return all.filter((d: DashboardRecord) => assigned.has(d.id)).map((d: DashboardRecord) => dashboardSummary(d));
+  return all.filter((d) => assigned.has(d.id)).map((d) => dashboardSummary(d));
 }
 
 async function listAssignableDashboards(companyId: number | null) {
@@ -46,7 +45,7 @@ async function listAssignableDashboards(companyId: number | null) {
     accessRepository.companyDashboardIds(companyId),
     dashboards.listDashboards(),
   ]);
-  return all.map((d: DashboardRecord) => dashboardSummary(d, { assigned: assigned.has(d.id) }));
+  return all.map((d) => dashboardSummary(d, { assigned: assigned.has(d.id) }));
 }
 
 async function assignDashboard(actor: Actor, companyId: number, rawDashboardId: unknown) {
@@ -98,7 +97,7 @@ async function assertDashboardLevel(actor: Actor, dashboardId: string, required:
 async function listAccessibleDashboards(actor: Actor) {
   if (actor.isPlatform) {
     const all = await dashboards.listDashboards();
-    return all.map((d: DashboardRecord) => dashboardSummary(d, { accessLevel: 'admin' }));
+    return all.map((d) => dashboardSummary(d, { accessLevel: 'admin' }));
   }
 
   const grantsAll = can(actor, 'access.grant');
@@ -108,23 +107,25 @@ async function listAccessibleDashboards(actor: Actor) {
     dashboards.listDashboards(actor.companyId),
     grantsAll ? Promise.resolve([]) : accessRepository.grantRowsForUser(actor),
   ]);
-  const visible = all.filter((d: DashboardRecord) => assigned.has(d.id));
+  const visible = all.filter((d) => assigned.has(d.id));
 
   if (grantsAll) {
-    return visible.map((d: DashboardRecord) => dashboardSummary(d, { accessLevel: 'admin' }));
+    return visible.map((d) => dashboardSummary(d, { accessLevel: 'admin' }));
   }
 
   const byDashboard = new Map<string, string | null>();
   for (const row of rows) {
     byDashboard.set(
       row.dashboard_id,
-      strongestLevel([byDashboard.get(row.dashboard_id), row.access_level].filter(Boolean))
+      strongestLevel(
+        [byDashboard.get(row.dashboard_id), row.access_level].filter((level): level is string => Boolean(level))
+      )
     );
   }
 
   return visible
-    .filter((d: DashboardRecord) => byDashboard.has(d.id))
-    .map((d: DashboardRecord) => dashboardSummary(d, { accessLevel: byDashboard.get(d.id) }));
+    .filter((d) => byDashboard.has(d.id))
+    .map((d) => dashboardSummary(d, { accessLevel: byDashboard.get(d.id) }));
 }
 
 async function countAccessibleDashboards(actor: Actor): Promise<number> {
@@ -135,15 +136,15 @@ async function countAccessibleDashboards(actor: Actor): Promise<number> {
 
 async function listUserGrants(userId: number) {
   const [rows, titles] = await Promise.all([accessRepository.userGrantRows(userId), dashboards.dashboardTitles()]);
-  return rows.map((row: Record<string, any>) => {
-    const grant: Record<string, any> = {
+  return rows.map((row) => {
+    const grant = {
       dashboardId: row.dashboardId,
       dashboardTitle: titles.get(row.dashboardId) || null,
       level: row.level,
       levelId: row.levelId,
       origin: row.origin,
     };
-    if (row.origin === 'group') Object.assign(grant, { groupId: row.groupId, groupName: row.groupName });
+    if (row.origin === 'group') return { ...grant, groupId: row.groupId, groupName: row.groupName };
     return grant;
   });
 }
@@ -156,7 +157,7 @@ async function listDashboardGrants(companyId: number, dashboardId: string) {
   return {
     dashboardId,
     users,
-    groups: groups.map((g: Record<string, any>) => ({ ...g, active: Boolean(g.active) })),
+    groups: groups.map((g) => ({ ...g, active: Boolean(g.active) })),
   };
 }
 
@@ -170,7 +171,7 @@ function describeLevels() {
   }));
 }
 
-const levelIdOf = (level: string | null) => (level ? accessLevelId('dashboard', level) : null);
+const levelIdOf = (level: string | null | undefined) => (level ? accessLevelId('dashboard', level) : null);
 
 async function resolveGrantTarget(actor: Actor, requestedCompanyId: unknown, dashboardId: unknown) {
   const companyId = resolveTargetCompany(actor, requestedCompanyId);
@@ -331,13 +332,13 @@ async function groupDashboards(actor: Actor, groupId: number) {
     listCompanyDashboards(group.companyId),
     accessRepository.groupGrantLevels(group.id),
   ]);
-  const levels = new Map(rows.map((r: Record<string, any>) => [r.dashboard_id, r.access_level]));
+  const levels = new Map(rows.map((r) => [r.dashboard_id, r.access_level]));
 
   return {
-    available: assigned.map((d: DashboardRecord) => ({ id: d.id, title: d.title })),
+    available: assigned.map((d) => ({ id: d.id, title: d.title })),
     held: assigned
-      .filter((d: DashboardRecord) => levels.has(d.id))
-      .map((d: DashboardRecord) => ({
+      .filter((d) => levels.has(d.id))
+      .map((d) => ({
         id: d.id,
         title: d.title,
         level: levels.get(d.id),

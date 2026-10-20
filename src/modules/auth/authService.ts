@@ -1,6 +1,6 @@
 import config from '../../config';
 import * as userRepository from '../users/userRepository';
-import { fail } from '../../shared/errors/AppError';
+import { fail, codeOf, present } from '../../shared/errors/AppError';
 import { hashPassword, verifyPassword } from '../../shared/security/password';
 import { requireString } from '../../shared/validation/commonValidator';
 import { passwordProblem, assertValid } from '../users/userValidator';
@@ -16,22 +16,27 @@ import { AUTH_STATE, USER_STATUS } from '../../shared/db/statuses';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
 import type { IssuedRefreshToken } from './tokenService';
+import type { PublicUser, UserSource } from '../users/userSerializer';
 
 const { withTransaction } = config.database;
 const { ACCESS_TOKEN_TTL_SECONDS } = config.auth;
 
-interface UserRow {
-  id: number;
-  role: string;
-  [key: string]: any;
-}
-type RequestBody = Record<string, any>;
+type RequestBody = Record<string, unknown>;
 
-function stateOf(user: UserRow) {
+function endingSession<E>(err: E): E {
+  if (typeof err === 'object' && err !== null) Object.assign(err, { endsSession: true });
+  return err;
+}
+
+function endsSession(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'endsSession' in err && Boolean(err.endsSession);
+}
+
+function stateOf(user: { must_change_password: boolean }) {
   return user.must_change_password ? AUTH_STATE.PASSWORD_CHANGE_REQUIRED : AUTH_STATE.AUTHENTICATED;
 }
 
-async function sessionPayload(user: UserRow) {
+async function sessionPayload(user: UserSource) {
   const found = await findActor(user.id);
   const permissions: string[] = found ? found.permissions : [];
   return {
@@ -44,7 +49,7 @@ async function sessionPayload(user: UserRow) {
   };
 }
 
-function sessionTokens(user: UserRow, refresh: IssuedRefreshToken) {
+function sessionTokens(user: UserSource, refresh: IssuedRefreshToken) {
   return {
     accessToken: tokens.issueAccessToken(user, refresh.familyId),
     refreshToken: refresh.token,
@@ -52,7 +57,7 @@ function sessionTokens(user: UserRow, refresh: IssuedRefreshToken) {
   };
 }
 
-async function startSession(user: UserRow) {
+async function startSession(user: UserSource) {
   const cookies = sessionTokens(user, await tokens.issueRefreshToken(user.id));
   return { cookies, payload: await sessionPayload(user) };
 }
@@ -103,12 +108,11 @@ async function refresh(presented: unknown) {
   let row: Awaited<ReturnType<typeof tokens.consumeRefreshToken>>;
   try {
     row = await tokens.consumeRefreshToken(presented);
-  } catch (err: any) {
-    if (err.code === 'INVALID_REFRESH_TOKEN') {
+  } catch (err) {
+    if (codeOf(err) === 'INVALID_REFRESH_TOKEN') {
       audit(EVENTS.SESSION_REVOKED, 'anonymous', { reason: 'invalid_refresh_token' });
     }
-    err.endsSession = true;
-    throw err;
+    throw endingSession(err);
   }
 
   const user = await userRepository.findById(row.user_id);
@@ -116,9 +120,7 @@ async function refresh(presented: unknown) {
   if (!user || user.status === USER_STATUS.DISABLED || (user.company_id && !user.companyActive)) {
     await tokens.revokeFamily(row.family_id, 'account_unavailable');
     audit(EVENTS.SESSION_REVOKED, user || 'unknown', { reason: 'account_unavailable' });
-    const err: any = fail('INVALID_REFRESH_TOKEN', tokens.SESSION_ENDED);
-    err.endsSession = true;
-    throw err;
+    throw endingSession(fail('INVALID_REFRESH_TOKEN', tokens.SESSION_ENDED));
   }
 
   const rotated = await tokens.issueRefreshToken(user.id, {
@@ -141,7 +143,7 @@ async function logout(presented: unknown) {
   return { state: AUTH_STATE.UNAUTHENTICATED };
 }
 
-async function me(actor: Actor, account: any) {
+async function me(actor: Actor, account: PublicUser) {
   const dashboards = actor.mustChangePassword ? [] : await listAccessibleDashboards(actor);
   return {
     state: actor.mustChangePassword ? AUTH_STATE.PASSWORD_CHANGE_REQUIRED : AUTH_STATE.AUTHENTICATED,
@@ -152,12 +154,12 @@ async function me(actor: Actor, account: any) {
 
 async function sessions(actor: Actor) {
   const list = await tokens.listSessions(actor.id);
-  return list.map((s: Record<string, any>) => ({ ...s, current: s.familyId === actor.familyId }));
+  return list.map((s) => ({ ...s, current: s.familyId === actor.familyId }));
 }
 
 async function changePassword(
   actor: Actor,
-  { currentPassword, newPassword }: { currentPassword?: any; newPassword?: any } = {}
+  { currentPassword, newPassword }: { currentPassword?: unknown; newPassword?: unknown } = {}
 ) {
   const user = await userRepository.findById(actor.id);
   const credentials = await userRepository.findCredentialsById(actor.id);
@@ -170,12 +172,13 @@ async function changePassword(
     throw fail('VALIDATION_ERROR', 'Your new password must differ from the current one.');
   }
 
+  const userId = present(user, 'The signed-in account').id;
   await withTransaction(async (conn: Tx) => {
-    await userRepository.setActivePassword(conn, user.id, hashPassword(newPassword));
-    await tokens.revokeAllForUser(user.id, 'password_changed', conn);
+    await userRepository.setActivePassword(conn, userId, hashPassword(newPassword));
+    await tokens.revokeAllForUser(userId, 'password_changed', conn);
   });
 
-  const session = await startSession(await userRepository.findById(user.id));
+  const session = await startSession(present(await userRepository.findById(userId), 'The signed-in account'));
   audit(EVENTS.PASSWORD_CHANGED, actor, { selfService: true });
   return { cookies: session.cookies, body: { ...session.payload, state: AUTH_STATE.AUTHENTICATED } };
 }
@@ -204,7 +207,7 @@ async function activate(body: RequestBody = {}) {
     await tokens.revokeAllForUser(row.user_id, 'account_activated', conn);
   });
 
-  const user = await userRepository.findById(row.user_id);
+  const user = present(await userRepository.findById(row.user_id), 'The activated account');
   await userRepository.recordLogin(user.id);
 
   const session = await startSession(user);
@@ -212,4 +215,4 @@ async function activate(body: RequestBody = {}) {
   return { cookies: session.cookies, body: { ...session.payload, state: AUTH_STATE.AUTHENTICATED } };
 }
 
-export { login, refresh, logout, me, sessions, changePassword, describeActivation, activate };
+export { login, refresh, logout, me, sessions, changePassword, describeActivation, activate, endsSession };

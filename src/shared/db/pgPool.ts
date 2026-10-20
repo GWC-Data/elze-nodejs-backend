@@ -11,8 +11,8 @@ types.setTypeParser(PG_NUMERIC, (value: string | null) => (value === null ? null
 type Params = readonly unknown[];
 
 interface Queryable {
-  query<R extends QueryResultRow = any>(sql: string, params?: Params): Promise<QueryResult<R>>;
-  raw<R extends QueryResultRow = any>(sql: string, params?: Params): Promise<QueryResult<R>>;
+  query<R extends QueryResultRow = QueryResultRow>(sql: string, params?: Params): Promise<QueryResult<R>>;
+  raw<R extends QueryResultRow = QueryResultRow>(sql: string, params?: Params): Promise<QueryResult<R>>;
 }
 
 interface Db extends Queryable {

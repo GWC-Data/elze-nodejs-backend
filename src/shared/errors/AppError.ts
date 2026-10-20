@@ -52,5 +52,20 @@ class DashboardNotFoundError extends CodedError {
   }
 }
 
-export { fail, FilterResolutionError, InvalidDashboardIdError, DashboardNotFoundError };
+function messageOf(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null && 'message' in err) return String(err.message);
+  return String(err);
+}
+
+function codeOf(err: unknown): unknown {
+  return typeof err === 'object' && err !== null && 'code' in err ? err.code : undefined;
+}
+
+function present<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`${what} is missing.`);
+  return value;
+}
+
+export { fail, messageOf, codeOf, present, FilterResolutionError, InvalidDashboardIdError, DashboardNotFoundError };
 export type { ApiError };

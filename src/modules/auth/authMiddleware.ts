@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { Actor } from '../../shared/types/actor';
-import { fail } from '../../shared/errors/AppError';
+import { fail, codeOf } from '../../shared/errors/AppError';
 import { readAccessCookie } from '../../shared/security/cookies';
 import { verifyAccessToken } from '../../shared/security/jwt';
 import { publicUser } from '../users/userSerializer';
@@ -13,6 +13,8 @@ import { requireCsrf } from '../../shared/http/csrfMiddleware';
 import { SAFE_METHODS } from '../../shared/security/session';
 import { USER_STATUS } from '../../shared/db/statuses';
 import { permissionByKey } from '../catalogue/catalogueService';
+import { bodyOf } from '../../shared/validation/commonValidator';
+import type { PublicUser } from '../users/userSerializer';
 
 function requestPath(req: Request): string {
   return req.originalUrl.split('?')[0];
@@ -26,7 +28,7 @@ function requireRbac(_req: Request, _res: Response, next: NextFunction): void {
   next();
 }
 
-async function actorFromToken(token: string): Promise<{ actor: Actor; account: ReturnType<typeof publicUser> }> {
+async function actorFromToken(token: string): Promise<{ actor: Actor; account: PublicUser }> {
   const payload = verifyAccessToken(token);
   const found = await findActor(Number(payload.sub));
   const user = found?.user;
@@ -45,7 +47,7 @@ async function actorFromToken(token: string): Promise<{ actor: Actor; account: R
 
   const actor: Actor = buildActor(user, found.permissions, found.features);
   actor.scopes = found.scopes;
-  actor.familyId = payload.fam;
+  actor.familyId = typeof payload.fam === 'string' ? payload.fam : undefined;
   return { actor, account: publicUser(user) };
 }
 
@@ -100,12 +102,13 @@ function requirePermission(permission: string): RequestHandler {
     try {
       assertPermission(req.actor, permission);
       next();
-    } catch (err: any) {
-      if (req.actor && (err.code === 'INSUFFICIENT_PERMISSION' || err.code === 'FEATURE_NOT_ENABLED')) {
+    } catch (err) {
+      const code = codeOf(err);
+      if (req.actor && (code === 'INSUFFICIENT_PERMISSION' || code === 'FEATURE_NOT_ENABLED')) {
         denied(req.actor, {
           permission,
           permissionId: permissionByKey(permission)?.id,
-          reason: err.code,
+          reason: code,
           method: req.method,
           path: requestPath(req),
         });
@@ -118,16 +121,17 @@ function requirePermission(permission: string): RequestHandler {
 function requireDashboardAccess(level: string, param = 'dashboardId'): RequestHandler {
   return async function dashboardGuard(req: Request, _res: Response, next: NextFunction): Promise<void> {
     try {
-      const dashboardId = req.params[param] || req.body?.dashboardId || req.query?.dashboardId;
+      const dashboardId = req.params[param] || bodyOf(req.body).dashboardId || req.query?.dashboardId;
       if (!dashboardId) {
         return next(fail('VALIDATION_ERROR', 'A dashboard id is required.'));
       }
       req.dashboardId = String(dashboardId);
       req.dashboardLevel = await assertDashboardLevel(req.actor, req.dashboardId, level);
       next();
-    } catch (err: any) {
-      if (req.actor && (err.code === 'DASHBOARD_NOT_FOUND' || err.code === 'INSUFFICIENT_PERMISSION')) {
-        denied(req.actor, { dashboardId: req.params[param] || null, requiredLevel: level, reason: err.code });
+    } catch (err) {
+      const code = codeOf(err);
+      if (req.actor && (code === 'DASHBOARD_NOT_FOUND' || code === 'INSUFFICIENT_PERMISSION')) {
+        denied(req.actor, { dashboardId: req.params[param] || null, requiredLevel: level, reason: code });
       }
       next(err);
     }

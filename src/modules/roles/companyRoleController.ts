@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
+import { bodyOf } from '../../shared/validation/commonValidator';
 import * as companyRoleService from './companyRoleService';
 
 async function permissions(req: Request, res: Response): Promise<void> {
@@ -15,11 +16,11 @@ async function get(req: Request, res: Response): Promise<void> {
 }
 
 async function create(req: Request, res: Response): Promise<void> {
-  ok(res, await companyRoleService.createRole(req.actor, req.body || {}), 201);
+  ok(res, await companyRoleService.createRole(req.actor, bodyOf(req.body)), 201);
 }
 
 async function update(req: Request, res: Response): Promise<void> {
-  ok(res, await companyRoleService.updateRole(req.actor, req.params.id, req.body || {}));
+  ok(res, await companyRoleService.updateRole(req.actor, req.params.id, bodyOf(req.body)));
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
@@ -28,7 +29,7 @@ async function remove(req: Request, res: Response): Promise<void> {
 }
 
 async function saveBuiltIn(req: Request, res: Response): Promise<void> {
-  ok(res, await companyRoleService.saveBuiltInRole(req.actor, req.params.id, req.body || {}));
+  ok(res, await companyRoleService.saveBuiltInRole(req.actor, req.params.id, bodyOf(req.body)));
 }
 
 async function resetBuiltIn(req: Request, res: Response): Promise<void> {

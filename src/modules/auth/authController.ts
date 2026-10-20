@@ -1,22 +1,24 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
 import { setSessionCookies, clearSessionCookies, readRefreshCookie } from '../../shared/security/cookies';
+import { bodyOf } from '../../shared/validation/commonValidator';
 import * as authService from './authService';
+import type { SessionTokens } from '../../shared/security/cookies';
 
-function respondWithSession(res: Response, { cookies, body }: { cookies: any; body: unknown }): void {
+function respondWithSession(res: Response, { cookies, body }: { cookies: SessionTokens; body: unknown }): void {
   setSessionCookies(res, cookies);
   ok(res, body);
 }
 
 async function login(req: Request, res: Response): Promise<void> {
-  respondWithSession(res, await authService.login(req.body || {}));
+  respondWithSession(res, await authService.login(bodyOf(req.body)));
 }
 
 async function refresh(req: Request, res: Response): Promise<void> {
   try {
     respondWithSession(res, await authService.refresh(readRefreshCookie(req)));
-  } catch (err: any) {
-    if (err.endsSession) clearSessionCookies(res);
+  } catch (err) {
+    if (authService.endsSession(err)) clearSessionCookies(res);
     throw err;
   }
 }
@@ -36,7 +38,7 @@ async function sessions(req: Request, res: Response): Promise<void> {
 }
 
 async function changePassword(req: Request, res: Response): Promise<void> {
-  respondWithSession(res, await authService.changePassword(req.actor, req.body || {}));
+  respondWithSession(res, await authService.changePassword(req.actor, bodyOf(req.body)));
 }
 
 async function describeActivation(req: Request, res: Response): Promise<void> {
@@ -44,7 +46,7 @@ async function describeActivation(req: Request, res: Response): Promise<void> {
 }
 
 async function activate(req: Request, res: Response): Promise<void> {
-  respondWithSession(res, await authService.activate(req.body || {}));
+  respondWithSession(res, await authService.activate(bodyOf(req.body)));
 }
 
 export { login, refresh, logout, me, sessions, changePassword, describeActivation, activate };

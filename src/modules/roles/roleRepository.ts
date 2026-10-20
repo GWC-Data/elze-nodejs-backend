@@ -5,6 +5,14 @@ import type { Tx } from '../../shared/db/database';
 
 const { prisma } = config.database;
 
+interface SystemRoleRow {
+  id: string;
+  tier: string;
+  name: string;
+  description: string | null;
+  userCount: number;
+}
+
 async function findSystemRole(id: string) {
   const role = await prisma.role.findFirst({
     where: { id, kind: 'system' },
@@ -26,8 +34,8 @@ async function permissionIds(roleId: string, tx: Tx = prisma): Promise<string[]>
   return row ? row.permissionIds : [];
 }
 
-async function listSystemWithCounts() {
-  return rawRows(
+async function listSystemWithCounts(): Promise<SystemRoleRow[]> {
+  return rawRows<SystemRoleRow>(
     prisma,
     Prisma.sql`SELECT r.id, r.tier, r.name, r.description,
             (SELECT COUNT(*)::int FROM access_control.user_roles ur
@@ -48,3 +56,4 @@ async function replacePermissions(roleId: string, ids: readonly string[], actorI
 }
 
 export { findSystemRole, permissionIds, listSystemWithCounts, replacePermissions };
+export type { SystemRoleRow };

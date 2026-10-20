@@ -1,5 +1,5 @@
 import config from '../../config';
-import { fail } from '../errors/AppError';
+import { fail, messageOf } from '../errors/AppError';
 import * as provider from './smtpProvider';
 
 const { EMAIL_FROM } = config.email;
@@ -16,13 +16,14 @@ async function sendEmail(message: EmailMessage, { consequence }: { consequence?:
   if (!to || !subject || !text) {
     throw new Error('sendEmail requires at least { to, subject, text }');
   }
+  if (!EMAIL_FROM) throw new Error('sendEmail requires EMAIL_FROM to be configured');
 
   try {
-    const result = await provider.send({ from: EMAIL_FROM!, to, subject, text, html });
+    const result = await provider.send({ from: EMAIL_FROM, to, subject, text, html });
     console.log(`[email] sent "${subject}" to ${to}${result?.detail ? ` (${result.detail})` : ''}`);
     return result;
-  } catch (err: any) {
-    console.error(`[email] delivery to ${to} failed: ${err.message}`);
+  } catch (err) {
+    console.error(`[email] delivery to ${to} failed: ${messageOf(err)}`);
     throw fail(
       'EMAIL_DELIVERY_FAILED',
       [`The email to ${to} could not be sent.`, consequence, 'Check the mail configuration and try again.']

@@ -5,11 +5,12 @@ import { sendEmail } from '../../shared/email/emailService';
 import { assertRoleCompanyPairing } from '../roles/roleService';
 import { accountActivation } from './accountActivationTemplate';
 import { usernameProblem, emailProblem, assertValid } from '../users/userValidator';
-import { fail } from '../../shared/errors/AppError';
+import { fail, present } from '../../shared/errors/AppError';
 import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
 import { sqlState } from '../../shared/db/dbError';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
+import type { UserInScopeRow } from '../users/userRepository';
 
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
@@ -38,8 +39,8 @@ async function createAccount({ companyId, username, email, displayName, role, ro
       },
       conn
     );
-    return await userRepository.findById(id, conn);
-  } catch (err: any) {
+    return present(await userRepository.findById(id, conn), 'The new account');
+  } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) {
       throw fail('CONFLICT', 'An account with that username or email already exists.');
     }
@@ -49,7 +50,7 @@ async function createAccount({ companyId, username, email, displayName, role, ro
 
 async function prepareInvitation(
   actor: Actor,
-  user: Record<string, any>,
+  user: UserInScopeRow,
   { companyName = null, conn }: { companyName?: string | null; conn?: Tx } = {}
 ) {
   const { token } = await issueActivationToken(user.id, actor.id, conn);

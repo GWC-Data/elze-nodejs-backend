@@ -22,14 +22,13 @@ function secondsUntil(expiresAt: Date | undefined): number {
   return Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
 }
 
-function setSessionCookies(
-  res: Response,
-  {
-    accessToken,
-    refreshToken,
-    refreshExpiresAt,
-  }: { accessToken: string; refreshToken: string; refreshExpiresAt?: Date }
-) {
+interface SessionTokens {
+  accessToken: string;
+  refreshToken: string;
+  refreshExpiresAt?: Date;
+}
+
+function setSessionCookies(res: Response, { accessToken, refreshToken, refreshExpiresAt }: SessionTokens) {
   const csrfToken = crypto.randomBytes(32).toString('base64url');
   const refreshSeconds = secondsUntil(refreshExpiresAt);
 
@@ -66,3 +65,4 @@ const readRefreshCookie = (req: Request) => readCookie(req, REFRESH_COOKIE);
 const readCsrfCookie = (req: Request): string | undefined => req.cookies?.[CSRF_COOKIE];
 
 export { setSessionCookies, clearSessionCookies, readAccessCookie, readRefreshCookie, readCsrfCookie };
+export type { SessionTokens };

@@ -1,4 +1,5 @@
 import config from '../../config';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 
@@ -9,7 +10,17 @@ const GROUP_INCLUDE = {
   _count: { select: { members: true } },
 } as const;
 
-function shape(row: any) {
+interface GroupView {
+  id: number;
+  companyId: number;
+  companyName: string;
+  name: string;
+  active: boolean;
+  createdAt: Date;
+  memberCount: number;
+}
+
+function shape(row: Prisma.GroupGetPayload<{ include: typeof GROUP_INCLUDE }>): GroupView {
   return {
     id: row.id,
     companyId: row.companyId,
@@ -25,7 +36,7 @@ function scopeWhere(actor: Actor) {
   return actor.isPlatform ? {} : { companyId: actor.companyId as number };
 }
 
-async function list(actor: Actor) {
+async function list(actor: Actor): Promise<GroupView[]> {
   const rows = await prisma.group.findMany({
     where: scopeWhere(actor),
     include: GROUP_INCLUDE,
@@ -34,7 +45,7 @@ async function list(actor: Actor) {
   return rows.map(shape);
 }
 
-async function findInScope(actor: Actor, id: unknown) {
+async function findInScope(actor: Actor, id: unknown): Promise<GroupView | null> {
   const groupId = Number(id);
   if (!Number.isSafeInteger(groupId)) return null;
   const row = await prisma.group.findFirst({ where: { id: groupId, ...scopeWhere(actor) }, include: GROUP_INCLUDE });
@@ -103,3 +114,4 @@ export {
   updateColumns,
   remove,
 };
+export type { GroupView };

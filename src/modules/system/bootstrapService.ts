@@ -10,6 +10,7 @@ import { normalizeSpec } from '../dashboards/cardModel';
 import { pruneExpiredTokens } from '../auth/tokenService';
 import { pruneAttempts } from '../auth/loginThrottleService';
 import { verifyTransport } from '../../shared/email/emailService';
+import { codeOf, messageOf } from '../../shared/errors/AppError';
 
 const { bootstrapSuperAdmin } = config.auth;
 const { DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR } = config.env;
@@ -62,8 +63,8 @@ async function seedDefaultDashboards(): Promise<void> {
         description: spec.description || null,
         spec,
       });
-    } catch (err: any) {
-      console.warn(`[rbac] failed to seed dashboard from ${file}:`, err.message);
+    } catch (err) {
+      console.warn(`[rbac] failed to seed dashboard from ${file}:`, messageOf(err));
     }
   }
 }
@@ -100,9 +101,9 @@ async function bootstrapAppMeta(): Promise<boolean> {
     ready = true;
     readyError = null;
     return true;
-  } catch (err: any) {
+  } catch (err) {
     ready = false;
-    readyError = err.message;
+    readyError = messageOf(err);
     throw err;
   }
 }
@@ -113,14 +114,14 @@ async function bootstrapWithRetry(attempts: number = 5, delayMs: number = 3000):
       await bootstrapAppMeta();
       console.log('[rbac] metadata database ready');
       return;
-    } catch (err: any) {
+    } catch (err) {
       const last = attempt === attempts;
       console.warn(
-        `[rbac] bootstrap failed (${err.code || err.message})${last ? '' : `, retrying in ${delayMs / 1000}s...`}`
+        `[rbac] bootstrap failed (${codeOf(err) || messageOf(err)})${last ? '' : `, retrying in ${delayMs / 1000}s...`}`
       );
       if (last) {
         console.error('[rbac] giving up. The metadata database must be reachable to serve any request.');
-        console.error(`[rbac] last error: ${err.message}`);
+        console.error(`[rbac] last error: ${messageOf(err)}`);
         throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -132,8 +133,8 @@ async function verifyEmailTransport(): Promise<void> {
   try {
     await verifyTransport();
     console.log('[email] SMTP relay reachable and credentials accepted');
-  } catch (err: any) {
-    console.warn(`[email] SMTP is not usable: ${err.message}. Creating a user will fail until this is fixed.`);
+  } catch (err) {
+    console.warn(`[email] SMTP is not usable: ${messageOf(err)}. Creating a user will fail until this is fixed.`);
   }
 }
 
@@ -145,8 +146,8 @@ function startHousekeeping(): NodeJS.Timeout {
       if (tokens || attempts) {
         console.log(`[housekeeping] pruned ${tokens} token row(s), ${attempts} login-attempt row(s)`);
       }
-    } catch (err: any) {
-      console.warn('[housekeeping] prune failed:', err.message);
+    } catch (err) {
+      console.warn('[housekeeping] prune failed:', messageOf(err));
     }
   };
   void runOnce();

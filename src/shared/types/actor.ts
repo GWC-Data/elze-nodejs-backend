@@ -13,7 +13,7 @@ interface Actor {
   features: readonly string[];
   roleId: string | null;
   roleName: string | null;
-  scopes?: any;
+  scopes?: Record<string, unknown[]>;
   familyId?: string;
 }
 

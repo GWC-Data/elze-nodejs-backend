@@ -25,8 +25,9 @@ import { UNIQUE_VIOLATION, FOREIGN_KEY_VIOLATION } from '../../shared/errors/pgE
 import { sqlState } from '../../shared/db/dbError';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
+import type { CompanyRoleRow } from './companyRoleRepository';
 
-type Row = Record<string, any>;
+type RequestBody = Record<string, unknown>;
 
 function reservedNames(): Set<string> {
   return new Set([
@@ -36,11 +37,11 @@ function reservedNames(): Set<string> {
   ]);
 }
 
-function keysOf(row: Row): string[] {
+function keysOf(row: Pick<CompanyRoleRow, 'permissionIds'>): string[] {
   return permissionKeysOf(row.permissionIds || []);
 }
 
-function shapeRole(row: Row, features: readonly string[]) {
+function shapeRole(row: CompanyRoleRow, features: readonly string[]) {
   return {
     id: row.id,
     name: row.name,
@@ -168,7 +169,7 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
     userCount: counts[r.name] || 0,
   }));
 
-  return { companyId, features, builtIn, custom: rows.map((row: Row) => shapeRole(row, features)) };
+  return { companyId, features, builtIn, custom: rows.map((row) => shapeRole(row, features)) };
 }
 
 async function requireEditableBuiltIn(id: unknown, companyId: number) {
@@ -186,7 +187,7 @@ async function requireEditableBuiltIn(id: unknown, companyId: number) {
   return current;
 }
 
-async function saveBuiltInRole(actor: Actor, id: unknown, body: Row) {
+async function saveBuiltInRole(actor: Actor, id: unknown, body: RequestBody) {
   const companyId = await companyFor(actor, body.companyId);
   const current = await requireEditableBuiltIn(id, companyId);
   const features = await enabledFor(companyId);
@@ -228,7 +229,7 @@ async function getRole(actor: Actor, id: unknown) {
   return shapeRole(row, await enabledFor(row.companyId));
 }
 
-async function createRole(actor: Actor, body: Row) {
+async function createRole(actor: Actor, body: RequestBody) {
   const companyId = await companyFor(actor, body.companyId);
   const features = await enabledFor(companyId);
   const name = parseName(body.name);
@@ -244,7 +245,7 @@ async function createRole(actor: Actor, body: Row) {
       permissionIds: permissionIdsOf(keys),
       createdBy: actor.id,
     });
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
     throw err;
   }
@@ -253,7 +254,7 @@ async function createRole(actor: Actor, body: Row) {
   return getRole(actor, id);
 }
 
-async function updateRole(actor: Actor, id: unknown, body: Row) {
+async function updateRole(actor: Actor, id: unknown, body: RequestBody) {
   const before = await requireRoleInScope(actor, id);
   const features = await enabledFor(before.companyId);
 
@@ -269,7 +270,7 @@ async function updateRole(actor: Actor, id: unknown, body: Row) {
 
   try {
     await companyRoleRepository.update(before.id, changes, actor.id);
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'Your company already has a role with that name.');
     throw err;
   }
@@ -295,7 +296,7 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
   }
   try {
     await companyRoleRepository.remove(role.id);
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === FOREIGN_KEY_VIOLATION)
       throw fail('CONFLICT', 'A member was just given this role. Try again.');
     throw err;

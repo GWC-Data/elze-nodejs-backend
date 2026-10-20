@@ -11,7 +11,7 @@ const ACCESS_TOKEN_TYPE = 'access';
 interface AccessTokenUser {
   id: number | string;
   company_id?: number | null;
-  role: string;
+  role: string | null;
 }
 
 function signAccessToken(user: AccessTokenUser, familyId: string): string {
@@ -33,8 +33,8 @@ function verifyAccessToken(token: string): JwtPayload {
   let payload: JwtPayload;
   try {
     payload = jwt.verify(token, JWT_ACCESS_SECRET) as JwtPayload;
-  } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
+  } catch (err) {
+    if (err instanceof Error && err.name === 'TokenExpiredError') {
       throw fail('TOKEN_EXPIRED', 'Your session has expired.');
     }
     throw fail('UNAUTHENTICATED', 'Your session is not valid.');

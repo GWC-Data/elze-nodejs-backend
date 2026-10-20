@@ -1,5 +1,5 @@
 import * as roleRepository from './roleRepository';
-import { fail } from '../../shared/errors/AppError';
+import { fail, present } from '../../shared/errors/AppError';
 import { requireUuid } from '../../shared/validation/commonValidator';
 import { assertRolePermissionsAllowed } from '../auth/authorizationService';
 import { followDefaults } from './builtInRolesService';
@@ -22,7 +22,7 @@ function parsePermissionIds(value: unknown): string[] {
 }
 
 function describePermission(key: string) {
-  const permission = permissionByKey(key)!;
+  const permission = present(permissionByKey(key), `Permission ${key}`);
   return {
     id: permission.id,
     key: permission.key,
@@ -54,7 +54,7 @@ function permissionCatalogue() {
 
 async function listRoles() {
   const rows = await roleRepository.listSystemWithCounts();
-  return rows.map((r: Record<string, any>) => ({
+  return rows.map((r) => ({
     id: r.id,
     name: r.tier,
     label: r.name,
@@ -70,7 +70,7 @@ async function requireSystemRole(id: unknown) {
   return role;
 }
 
-function shapeRolePermissions(role: Record<string, any>, permissionIds: readonly string[]) {
+function shapeRolePermissions(role: { id: string; tier: string; name: string }, permissionIds: readonly string[]) {
   return {
     id: role.id,
     role: role.tier,
@@ -102,7 +102,7 @@ async function replaceRolePermissions(actor: Actor, id: unknown, permissionIds: 
   }
 
   const keys = parsePermissionIds(permissionIds);
-  assertRolePermissionsAllowed(scopeOfTier(role.tier)!, keys);
+  assertRolePermissionsAllowed(present(scopeOfTier(role.tier), `The scope of ${role.tier}`), keys);
 
   const ids = permissionIdsOf(keys);
   await roleRepository.replacePermissions(role.id, ids, actor.id);

@@ -1,5 +1,5 @@
 import * as scopeRepository from './scopeRepository';
-import { fail } from '../../shared/errors/AppError';
+import { fail, messageOf } from '../../shared/errors/AppError';
 import { scopeProblem } from './scopeValidator';
 import { audit, EVENTS } from '../audit/auditService';
 import type { Actor } from '../../shared/types/actor';
@@ -15,9 +15,9 @@ async function scopeOptions() {
     const label = dimension.label || dimension.dimension;
     try {
       out.push({ dimension: dimension.dimension, label, values: await scopeRepository.distinctValues(dimension) });
-    } catch (err: any) {
-      console.warn(`[rbac] scope dimension "${dimension.dimension}" is unreadable: ${err.message}`);
-      out.push({ dimension: dimension.dimension, label, values: [], error: err.message });
+    } catch (err) {
+      console.warn(`[rbac] scope dimension "${dimension.dimension}" is unreadable: ${messageOf(err)}`);
+      out.push({ dimension: dimension.dimension, label, values: [], error: messageOf(err) });
     }
   }
   return { enforced: ENFORCED, dimensions: out };
@@ -37,16 +37,13 @@ async function describeUserScopes(user: { id: number }) {
   return { userId: user.id, scopes: await getUserScopes(user.id), enforced: ENFORCED };
 }
 
-async function replaceUserScopes(
-  actor: Actor,
-  user: { id: number; username: string },
-  scopes: Record<string, unknown[]>
-) {
+async function replaceUserScopes(actor: Actor, user: { id: number; username: string }, requested: unknown) {
   const dimensions = new Map<string, ScopeDimension>(
     (await scopeRepository.listDimensions()).map((d) => [d.dimension, d])
   );
-  const problem = scopeProblem(scopes, (key) => dimensions.get(key) || null);
+  const problem = scopeProblem(requested, (key) => dimensions.get(key) || null);
   if (problem) throw fail('VALIDATION_ERROR', problem);
+  const scopes = requested as Record<string, unknown[]>;
 
   const unique = Object.fromEntries(
     Object.entries(scopes).map(([dimension, values]) => [dimension, [...new Set(values.map((v) => String(v)))]])

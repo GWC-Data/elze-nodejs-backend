@@ -17,6 +17,19 @@ interface AuditRecord {
   detail: Record<string, unknown>;
 }
 
+interface AuditLogRow {
+  id: number;
+  ts: Date;
+  event: string;
+  actor_id: number | null;
+  actor: string | null;
+  actor_company_id: number | null;
+  company_id: number | null;
+  target_user_id: number | null;
+  detail: Prisma.JsonValue;
+  company_name: string | null;
+}
+
 type AuditScope = { kind: 'all' } | { kind: 'company'; companyId: number } | { kind: 'self'; userId: number };
 
 interface AuditFilter {
@@ -68,7 +81,7 @@ function whereFor(filter: AuditFilter): Prisma.Sql {
   return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 }
 
-async function listPage<R>(filter: AuditFilter, list: ListWindow, shape: (row: any) => R) {
+async function listPage<R>(filter: AuditFilter, list: ListWindow, shape: (row: AuditLogRow) => R) {
   const where = whereFor(filter);
   const from = Prisma.sql`FROM audit_logs a LEFT JOIN companies c ON c.id = a.company_id`;
   return pagedRows(
@@ -84,4 +97,4 @@ async function listPage<R>(filter: AuditFilter, list: ListWindow, shape: (row: a
 }
 
 export { append, listPage };
-export type { AuditRecord, AuditScope, AuditFilter };
+export type { AuditRecord, AuditLogRow, AuditScope, AuditFilter };

@@ -1,9 +1,9 @@
 import config from '../../config';
 import * as companyRepository from './companyRepository';
 import * as userRepository from '../users/userRepository';
-import { fail } from '../../shared/errors/AppError';
+import { fail, present } from '../../shared/errors/AppError';
 import { slugify } from '../../shared/text/slugify';
-import { requireString } from '../../shared/validation/commonValidator';
+import { bodyOf, requireString } from '../../shared/validation/commonValidator';
 import { shapeCompany, companyOption } from './companySerializer';
 import { publicUser } from '../users/userSerializer';
 import { assertCanAssignRole } from '../auth/authorizationService';
@@ -19,13 +19,13 @@ import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
 import { sqlState } from '../../shared/db/dbError';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
-import type { ListWindow } from '../../shared/db/baseRepository';
+import type { ListQuery } from '../../shared/validation/listValidator';
 
 const { withTransaction } = config.database;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
 
-async function listCompanies(actor: Actor, list: ListWindow, { active }: { active?: unknown } = {}) {
+async function listCompanies(actor: Actor, list: ListQuery, { active }: { active?: unknown } = {}) {
   const filter: companyRepository.CompanyFilter = {};
   if (!actor.isPlatform) filter.companyId = actor.companyId as number;
   if (active === 'true' || active === 'false') {
@@ -71,7 +71,7 @@ async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug
 
   try {
     return await companyRepository.insert({ name: cleanName, slug: cleanSlug, createdBy: actor.id }, conn);
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) {
       throw fail('CONFLICT', 'A company with that name or slug already exists.');
     }
@@ -81,7 +81,7 @@ async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug
 
 async function createCompany(
   actor: Actor,
-  { name, slug, admin, featureIds }: { name: unknown; slug?: unknown; admin?: any; featureIds?: unknown }
+  { name, slug, admin, featureIds }: { name?: unknown; slug?: unknown; admin?: unknown; featureIds?: unknown }
 ) {
   if (!admin || typeof admin !== 'object') {
     throw fail(
@@ -91,6 +91,7 @@ async function createCompany(
   }
 
   assertCanAssignRole(actor, COMPANY_ADMIN);
+  const adminFields = bodyOf(admin);
 
   const featureKeys = featureIds === undefined ? toggleableFeatureKeys() : parseFeatureIds(featureIds);
 
@@ -101,9 +102,9 @@ async function createCompany(
     const userRow = await createAccount(
       {
         companyId: companyRow.id,
-        username: admin.username,
-        email: admin.email,
-        displayName: admin.displayName,
+        username: adminFields.username,
+        email: adminFields.email,
+        displayName: adminFields.displayName,
         role: COMPANY_ADMIN,
         roleId: systemRoleId(COMPANY_ADMIN),
       },
@@ -153,11 +154,11 @@ async function updateCompany(actor: Actor, id: number, { name, active }: { name?
 
   try {
     await companyRepository.updateColumns(id, changes);
-  } catch (err: any) {
+  } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'A company with that name already exists.');
     throw err;
   }
-  const company = shapeCompany(await companyRepository.findWithCounts(id))!;
+  const company = present(shapeCompany(await companyRepository.findWithCounts(id)), 'The updated company');
 
   if (before.active && company.active === false) {
     await revokeAllForCompany(id, 'company_disabled');

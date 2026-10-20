@@ -1,23 +1,28 @@
-type Row = Record<string, any>;
+import type { PublicUser } from '../../shared/types/account';
+import type { UserListRow, UserRow } from './userRepository';
+
+type UserSource = UserRow & { companyName?: string | null };
 
 interface UserListItem {
-  id: any;
-  username: any;
-  email: any;
-  role: any;
-  roleId: any;
-  roleName: any;
-  status: any;
-  customRoleId?: any;
-  customRoleName?: any;
-  displayName?: any;
-  lastLoginAt?: any;
-  companyName?: any;
+  id: number;
+  username: string;
+  email: string;
+  role: string | null;
+  roleId: string | null;
+  roleName: string | null;
+  status: string;
+  customRoleId?: string | null;
+  customRoleName?: string | null;
+  displayName?: string;
+  lastLoginAt?: Date;
+  companyName?: string;
 }
 
-const isCustom = (row: Row) => row.role_kind === 'custom';
+const isCustom = (row: { role_kind: string | null }) => row.role_kind === 'custom';
 
-function publicUser(row: Row | null | undefined) {
+function publicUser(row: UserSource): PublicUser;
+function publicUser(row: UserSource | null | undefined): PublicUser | null;
+function publicUser(row: UserSource | null | undefined): PublicUser | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -39,7 +44,7 @@ function publicUser(row: Row | null | undefined) {
   };
 }
 
-function userListItem(row: Row, withCompany?: boolean): UserListItem {
+function userListItem(row: UserListRow, withCompany?: boolean): UserListItem {
   const item: UserListItem = {
     id: row.id,
     username: row.username,
@@ -60,4 +65,4 @@ function userListItem(row: Row, withCompany?: boolean): UserListItem {
 }
 
 export { publicUser, userListItem };
-export type { UserListItem };
+export type { PublicUser, UserListItem, UserSource };

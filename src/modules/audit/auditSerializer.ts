@@ -1,7 +1,7 @@
 import { ENVELOPE_KEYS, SUMMARY_MAX } from './auditEvents';
 import { auditEventLabel } from '../catalogue/catalogueService';
 
-type AuditEntry = Record<string, any>;
+type AuditEntry = Record<string, unknown>;
 
 interface AuditRowMeta {
   id?: number | string | null;
@@ -11,15 +11,15 @@ interface AuditRowMeta {
 
 interface AuditItem {
   id?: string;
-  ts: any;
-  event: any;
+  ts: unknown;
+  event: unknown;
   label: string;
   tone: string;
   summary: string;
   detail: Record<string, unknown>;
-  actor?: any;
-  actorId?: any;
-  actorCompanyId?: any;
+  actor?: unknown;
+  actorId?: unknown;
+  actorCompanyId?: unknown;
   companyId?: number;
   companyName?: string;
 }

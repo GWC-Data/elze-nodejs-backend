@@ -13,6 +13,30 @@ interface CompanyFilter {
   search?: string;
 }
 
+interface CompanyRow {
+  id: number;
+  name: string;
+  slug: string;
+  active: boolean;
+  created_at: Date;
+}
+
+interface CompanyListRow extends CompanyRow {
+  userCount: number;
+  dashboardCount: number;
+  feature_ids: string[];
+}
+
+interface CompanyCountsRow extends CompanyListRow {
+  pendingCount: number;
+}
+
+interface CompanyOptionRow {
+  id: number;
+  name: string;
+  active: boolean;
+}
+
 const COUNTED_FROM = Prisma.sql`
     FROM companies c
     LEFT JOIN (SELECT company_id, COUNT(*)::int AS n,
@@ -44,7 +68,7 @@ function whereOf(filter: CompanyFilter): Prisma.Sql {
   return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 }
 
-async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row: any) => R) {
+async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row: CompanyListRow) => R) {
   const where = whereOf(filter);
   return pagedRows(
     prisma,
@@ -58,13 +82,16 @@ async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row:
   );
 }
 
-async function listOptions(companyId: number | null) {
+async function listOptions(companyId: number | null): Promise<CompanyOptionRow[]> {
   const where = companyId === null ? Prisma.empty : Prisma.sql`WHERE id = ${companyId}`;
-  return rawRows(prisma, Prisma.sql`SELECT id, name, active FROM companies ${where} ORDER BY lower(name), id`);
+  return rawRows<CompanyOptionRow>(
+    prisma,
+    Prisma.sql`SELECT id, name, active FROM companies ${where} ORDER BY lower(name), id`
+  );
 }
 
-async function findWithCounts(id: number) {
-  const rows = await rawRows(
+async function findWithCounts(id: number): Promise<CompanyCountsRow | null> {
+  const rows = await rawRows<CompanyCountsRow>(
     prisma,
     Prisma.sql`SELECT ${COUNTED_COLUMNS}, COALESCE(uc.pending, 0) AS "pendingCount"
        ${COUNTED_FROM}
@@ -73,7 +100,7 @@ async function findWithCounts(id: number) {
   return rows[0] || null;
 }
 
-function asRow(company: { id: number; name: string; slug: string; active: boolean; createdAt: Date }) {
+function asRow(company: { id: number; name: string; slug: string; active: boolean; createdAt: Date }): CompanyRow {
   return {
     id: company.id,
     name: company.name,
@@ -83,7 +110,7 @@ function asRow(company: { id: number; name: string; slug: string; active: boolea
   };
 }
 
-async function findRow(id: number) {
+async function findRow(id: number): Promise<CompanyRow | null> {
   const company = await prisma.company.findUnique({ where: { id } });
   return company ? asRow(company) : null;
 }
@@ -146,4 +173,4 @@ export {
   platformOverview,
   workspaceOverview,
 };
-export type { CompanyFilter };
+export type { CompanyFilter, CompanyRow, CompanyListRow, CompanyCountsRow, CompanyOptionRow };

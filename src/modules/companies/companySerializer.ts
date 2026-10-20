@@ -1,8 +1,14 @@
 import { effectiveFeatures, featureKeysOf } from '../catalogue/catalogueService';
+import type { CompanyOptionRow, CompanyRow } from './companyRepository';
 
-type Row = Record<string, any>;
+type CompanySource = CompanyRow & {
+  userCount?: number;
+  dashboardCount?: number;
+  pendingCount?: number;
+  feature_ids?: string[];
+};
 
-function shapeCompany(row: Row | null | undefined) {
+function shapeCompany(row: CompanySource | null | undefined) {
   if (!row) return null;
   return {
     id: row.id,
@@ -17,8 +23,9 @@ function shapeCompany(row: Row | null | undefined) {
   };
 }
 
-function companyOption(row: Row) {
+function companyOption(row: CompanyOptionRow) {
   return { id: row.id, name: row.name, active: Boolean(row.active) };
 }
 
 export { shapeCompany, companyOption };
+export type { CompanySource };

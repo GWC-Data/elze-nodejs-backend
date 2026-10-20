@@ -8,8 +8,9 @@ import { audit, EVENTS } from '../audit/auditService';
 import { USER } from '../catalogue/roleTiers';
 import { isPermissionEnabled, maskPermissions, permissionIdsOf, permissionKeysOf } from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
+import type { UserInScopeRow } from './userRepository';
 
-type Row = Record<string, any>;
+type Row = UserInScopeRow;
 
 function mayEdit(actor: Actor, target: Row): boolean {
   if (!target.company_id || target.role !== USER || target.id === actor.id) return false;

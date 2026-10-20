@@ -16,6 +16,55 @@ interface UserFilter {
   search?: string;
 }
 
+interface UserRow {
+  id: number;
+  company_id: number | null;
+  username: string;
+  email: string;
+  display_name: string | null;
+  has_password: boolean;
+  role: string | null;
+  role_id: string | null;
+  role_name: string | null;
+  role_kind: string | null;
+  status: UserStatus;
+  must_change_password: boolean;
+  last_login_at: Date | null;
+  created_at: Date;
+}
+
+interface UserInScopeRow extends UserRow {
+  companyName: string | null;
+}
+
+interface UserWithCompanyRow extends UserInScopeRow {
+  companyActive: boolean | null;
+}
+
+interface LoginUserRow extends UserWithCompanyRow {
+  password_hash: string | null;
+}
+
+interface ActorRow extends UserWithCompanyRow {
+  permissions: string[];
+  feature_ids: string[];
+  scopes: [string, string][];
+}
+
+interface UserListRow {
+  id: number;
+  username: string;
+  email: string;
+  display_name: string | null;
+  role: string | null;
+  role_id: string | null;
+  role_name: string | null;
+  role_kind: string | null;
+  status: UserStatus;
+  last_login_at: Date | null;
+  companyName: string | null;
+}
+
 const ROLE_JOIN = Prisma.sql`LEFT JOIN access_control.user_roles ur ON ur.user_id = u.id
        LEFT JOIN access_control.roles r ON r.id = ur.role_id`;
 
@@ -34,8 +83,8 @@ const USER_SORTS: Record<string, string> = {
   lastLogin: 'u.last_login_at',
 };
 
-async function findByIdentifier(value: string) {
-  const rows = await rawRows(
+async function findByIdentifier(value: string): Promise<LoginUserRow | null> {
+  const rows = await rawRows<LoginUserRow>(
     prisma,
     Prisma.sql`SELECT ${USER_COLUMNS}, u.password_hash,
             c.active AS "companyActive", c.name AS "companyName"
@@ -52,8 +101,8 @@ async function findCredentialsById(id: number) {
   return user ? { password_hash: user.passwordHash } : null;
 }
 
-async function findActorRow(id: number) {
-  const rows = await rawRows(
+async function findActorRow(id: number): Promise<ActorRow | null> {
+  const rows = await rawRows<ActorRow>(
     prisma,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.active AS "companyActive", c.name AS "companyName",
             COALESCE((SELECT array_agg(e.permission_key ORDER BY e.permission_key)
@@ -74,8 +123,8 @@ async function findActorRow(id: number) {
   return rows[0] || null;
 }
 
-async function findById(id: number, tx: Tx = prisma) {
-  const rows = await rawRows(
+async function findById(id: number, tx: Tx = prisma): Promise<UserWithCompanyRow | null> {
+  const rows = await rawRows<UserWithCompanyRow>(
     tx,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.active AS "companyActive", c.name AS "companyName"
        FROM users u
@@ -86,8 +135,8 @@ async function findById(id: number, tx: Tx = prisma) {
   return rows[0] || null;
 }
 
-async function findInScope(actor: Actor, id: unknown) {
-  const rows = await rawRows(
+async function findInScope(actor: Actor, id: number): Promise<UserInScopeRow | null> {
+  const rows = await rawRows<UserInScopeRow>(
     prisma,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.name AS "companyName"
        FROM users u
@@ -112,7 +161,7 @@ function whereOf(filter: UserFilter): Prisma.Sql {
   return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 }
 
-async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: any) => R) {
+async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: UserListRow) => R) {
   const from = Prisma.sql`FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
@@ -233,4 +282,4 @@ export {
   remove,
   countByCompany,
 };
-export type { UserFilter };
+export type { UserFilter, UserRow, UserInScopeRow, UserWithCompanyRow, LoginUserRow, ActorRow, UserListRow };

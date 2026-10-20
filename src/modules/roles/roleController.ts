@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
+import { bodyOf } from '../../shared/validation/commonValidator';
 import * as roleService from './roleService';
 
 function permissions(_req: Request, res: Response): void {
@@ -15,7 +16,7 @@ async function rolePermissions(req: Request, res: Response): Promise<void> {
 }
 
 async function replacePermissions(req: Request, res: Response): Promise<void> {
-  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, req.body?.permissionIds));
+  ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, bodyOf(req.body).permissionIds));
 }
 
 export { permissions, list, rolePermissions, replacePermissions };
