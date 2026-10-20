@@ -168,7 +168,6 @@ async function deletePublishedVersion(connection: Connection, versionId: unknown
   return withTransaction(async (conn: Tx) => {
     const row = await versionRepository.deletePublished(conn, connection.id, versionId);
     if (!row) throw fail('RESOURCE_NOT_FOUND', VERSION_NOT_FOUND);
-    await versionRepository.deleteLegacyPublication(conn, connection.id, versionId);
     return deletedVersion(row);
   });
 }

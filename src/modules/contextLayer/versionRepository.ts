@@ -213,10 +213,6 @@ async function deletePublished(tx: Tx, connectionId: string, versionId: unknown)
   return rows[0] || null;
 }
 
-async function deleteLegacyPublication(tx: Tx, connectionId: string, versionId: unknown): Promise<void> {
-  await tx.$executeRaw`DELETE FROM context_publications WHERE id = ${versionId}::uuid AND connection_id = ${connectionId}::uuid`;
-}
-
 async function currentDraft(connectionId: string) {
   const rows = await rawRows(
     prisma,
@@ -297,7 +293,6 @@ export {
   latestPublished,
   findPublished,
   deletePublished,
-  deleteLegacyPublication,
   currentDraft,
   latestExtraction,
   versionExtraction,
