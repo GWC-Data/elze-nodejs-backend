@@ -550,6 +550,13 @@ function activationTokenFrom(email: string | null): string | null {
   r = await owner.call('PUT', `/api/platform/roles/${systemRoleId('SUPER_ADMIN')}/permissions`, { permissionIds: [] });
   check('SUPER_ADMIN permissions cannot be edited', r.status === 400, JSON.stringify(r.body));
 
+  r = await owner.call('GET', `/api/platform/roles/${systemRoleId('USER')}/permissions`);
+  check(
+    'the Member role that reads contexts can also edit and delete them, as before',
+    ['context.read', 'context.update', 'context.delete'].every((p) => keysIn(r.body?.data?.permissionIds).includes(p)),
+    JSON.stringify(keysIn(r.body?.data?.permissionIds))
+  );
+
   r = await owner.call('PUT', `/api/platform/roles/${systemRoleId('USER')}/permissions`, {
     permissionIds: pids('dashboard.read', 'data.read'),
   });
@@ -764,6 +771,29 @@ function activationTokenFrom(email: string | null): string | null {
   );
   r = await alphaAdmin.call('DELETE', `/api/roles/${analystRoleId}`);
   check('an unused role is deleted', r.status === 200, JSON.stringify(r.body));
+
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Context reader', permissionIds: pids('context.read') });
+  const readerRoleId = r.body?.data?.id;
+  check('a role can hold context.read alone', r.status === 201, JSON.stringify(r.body));
+  r = await alphaAdmin.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: readerRoleId });
+  const noSuchConnection = '00000000-0000-4000-8000-000000000404';
+  r = await alphaUser.call('PUT', `/api/context/connections/${noSuchConnection}/datasets`, { datasets: [] });
+  check(
+    'reading contexts does not let a role change them',
+    r.status === 403 && r.body?.error?.code === 'INSUFFICIENT_PERMISSION',
+    `${r.status} ${JSON.stringify(r.body?.error)}`
+  );
+  r = await alphaUser.call('DELETE', `/api/context/connections/${noSuchConnection}`);
+  check('or delete them', r.status === 403, `${r.status} ${JSON.stringify(r.body?.error)}`);
+  r = await alphaUser.call('GET', `/api/context/connections/${noSuchConnection}`);
+  check(
+    'while reading still passes the permission check',
+    r.status === 404,
+    `${r.status} ${JSON.stringify(r.body?.error)}`
+  );
+  await alphaAdmin.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: null });
+  r = await alphaAdmin.call('DELETE', `/api/roles/${readerRoleId}`);
+  check('the reader role is removed again', r.status === 200, JSON.stringify(r.body));
 
   r = await alphaAdmin.call('GET', '/api/roles');
   const alphaMemberRoleId = r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.id;

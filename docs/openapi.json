@@ -6211,7 +6211,7 @@
         "summary": "Delete a connection (context)",
         "description": "Deletes the connection together with everything stored under it (datasets, versions, grants). Requires full access to the context: its owner, a platform account, a context.manage_all holder, or a full grant. A caller with only view/edit access gets 403; one who cannot see it gets 404. Returns 200 with a body, not 204.",
         "x-permissions": [
-          "context.read"
+          "context.delete"
         ],
         "x-context-access": "full",
         "parameters": [
@@ -6353,7 +6353,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -6435,7 +6435,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -6620,7 +6620,7 @@
         "summary": "Replace the dataset selection",
         "description": "Replaces the connection's selected datasets with the given list (an empty list clears it). Entries may be dataset id strings or objects; blank ids are skipped, duplicates dropped, names cut to 255 characters, non-numeric counts stored as null. The draft version moves to the profile step with the new dataset ids. Requires edit access to the context (owner, context.manage_all/platform, or an edit/full grant); a caller who can see the context with a lower level gets 403 INSUFFICIENT_PERMISSION, one who cannot see it gets 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -6943,7 +6943,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -7012,7 +7012,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.delete"
         ],
         "x-context-access": "full",
         "parameters": [
@@ -7099,7 +7099,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -7264,7 +7264,7 @@
           }
         ],
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -7884,7 +7884,7 @@
         "summary": "Approve, reject or skip one fact",
         "description": "Records a review decision on one fact: approve (status approved, fact marked verified), reject (status rejected, fact marked not verified) or skip (status skipped, verified flag left as is). If \"update\" is sent, the edit is saved first with the same rules as PATCH /review/{itemId} - so an update that changes nothing fails with 400, and an update is saved even when the decision value then turns out to be invalid. Moves the draft version to the review step. Requires edit access to the context (owner, context.manage_all/platform, or an edit/full grant); a caller who can see the context with a lower level gets 403 INSUFFICIENT_PERMISSION, one who cannot see it gets 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -7983,7 +7983,7 @@
         "summary": "Edit the AI-written text of a fact",
         "description": "Edits the prose of one fact. Only the AI-written text keys description, note, logic_summary, definition and basis may change, each as a string or null; they can be sent at top level (description) or inside \"fields\". A changed name (qualified name), formula or any other payload key returns 400; keys resent unchanged are ignored; if nothing actually changes the request fails with 400 \"Nothing to update.\". The fact is flagged as edited (a new review record starts as approved if the fact was verified, otherwise pending; an existing review status is kept). Moves the draft version to the review step. Requires edit access to the context (owner, context.manage_all/platform, or an edit/full grant); a caller who can see the context with a lower level gets 403 INSUFFICIENT_PERMISSION, one who cannot see it gets 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -8082,7 +8082,7 @@
         "summary": "Apply one decision to many facts",
         "description": "Applies approve, reject or skip to every fact of the latest extraction run that matches the optional filter (type, status, minConfidence). Published versions are never touched. An empty match returns affected 0 and changes nothing; otherwise the draft version moves to the review step. Requires edit access to the context (owner, context.manage_all/platform, or an edit/full grant); a caller who can see the context with a lower level gets 403 INSUFFICIENT_PERMISSION, one who cannot see it gets 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "edit",
         "parameters": [
@@ -8601,7 +8601,7 @@
         "summary": "Set general access",
         "description": "Sets who can see the context without a grant: \"restricted\" (only the owner, admins and grantees) or \"company\" (everyone in the company gets view). Setting the current value is a no-op. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "view",
         "parameters": [
@@ -8683,7 +8683,7 @@
         "summary": "Grant or change a user's access",
         "description": "Creates or replaces the user's grant on this context with the given access level. The user must be active and belong to the connection's company (otherwise 404 \"User not found\"); granting to the owner returns 400. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "view",
         "parameters": [
@@ -8773,7 +8773,7 @@
         "summary": "Remove a user's grant",
         "description": "Removes the user's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "view",
         "parameters": [
@@ -8926,7 +8926,7 @@
         "summary": "Grant or change a group's access",
         "description": "Creates or replaces the group's grant on this context with the given access level. Members get the strongest of their user grant, group grants and general access. The group must be active and belong to the connection's company (otherwise 404 \"Group not found\"). Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "view",
         "parameters": [
@@ -9016,7 +9016,7 @@
         "summary": "Remove a group's grant",
         "description": "Removes the group's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
-          "context.read"
+          "context.update"
         ],
         "x-context-access": "view",
         "parameters": [
