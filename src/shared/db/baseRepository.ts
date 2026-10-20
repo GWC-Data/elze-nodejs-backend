@@ -4,10 +4,11 @@ import { sqlState } from './dbError';
 import { splitPlaceholders } from './sql';
 import { INVALID_TEXT_REPRESENTATION } from '../errors/pgErrors';
 import type { Tx } from './database';
+import type { ListParams } from './listQuery';
 import type { Actor } from '../types/actor';
 
-type ListWindow = { pageSize: number; offset: number } & Record<string, any>;
-type Row = Record<string, any>;
+type ListWindow = ListParams;
+type Row = Record<string, unknown>;
 
 function plain(value: unknown): unknown {
   if (typeof value === 'bigint') return Number(value);
@@ -15,7 +16,7 @@ function plain(value: unknown): unknown {
   return value;
 }
 
-function plainRow<T = any>(row: Row): T {
+function plainRow<T>(row: Row): T {
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, plain(value)])) as T;
 }
 
@@ -27,23 +28,23 @@ function sqlOf(text: string, params: readonly unknown[] = []): Prisma.Sql {
   return new Prisma.Sql(pieces, params as Prisma.Sql[]);
 }
 
-async function rawRows<T = any>(tx: Tx, query: Prisma.Sql): Promise<T[]> {
+async function rawRows<T>(tx: Tx, query: Prisma.Sql): Promise<T[]> {
   const rows = await tx.$queryRaw<Row[]>(query);
   return rows.map((row) => plainRow<T>(row));
 }
 
-async function pagedRows<T>(
+async function pagedRows<R, T>(
   tx: Tx,
   query: Prisma.Sql,
   countQuery: Prisma.Sql,
-  shape: (row: any) => T
+  shape: (row: R) => T
 ): Promise<{ items: T[]; total: number }> {
-  const rows = await rawRows(tx, query);
+  const rows = await rawRows<R & { __total: unknown }>(tx, query);
   let total: number;
   if (rows.length) {
     total = Number(rows[0].__total);
   } else {
-    const counted = await rawRows(tx, countQuery);
+    const counted = await rawRows<{ n: unknown }>(tx, countQuery);
     total = Number(counted[0].n);
   }
   return { items: rows.map(shape), total };

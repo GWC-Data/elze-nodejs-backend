@@ -3,9 +3,9 @@ const { db, prisma } = config.database;
 import * as dashboards from '../src/modules/dashboards/dashboardService';
 import { resolveSourceMetadata } from '../src/modules/queryEngine/metadataService';
 import { quoteIdentifier, quoteQualified } from '../src/shared/db/sql';
-
-type ColMeta = Record<string, any>;
-type Spec = Record<string, any>;
+import { messageOf } from '../src/shared/errors/AppError';
+import type { DashboardSpec, DateGrainSpec, GroupBySpec, OrderByEntry } from '../src/modules/dashboards/dashboardTypes';
+import type { ColumnMeta, SourceMetadata } from '../src/modules/queryEngine/queryTypes';
 
 interface IndexTarget {
   expr: string;
@@ -41,7 +41,7 @@ function indexName(table: string, column: string, suffix: string = ''): string {
   return base.length <= MAX_IDENTIFIER_LENGTH ? base : base.slice(0, MAX_IDENTIFIER_LENGTH).replace(/_+$/, '');
 }
 
-function indexTargets(colMeta: ColMeta): { skip?: string; targets?: IndexTarget[] } {
+function indexTargets(colMeta: ColumnMeta): { skip?: string; targets?: IndexTarget[] } {
   const type = String(colMeta.type || '').toLowerCase();
   if (UNINDEXABLE_TYPES.has(type)) {
     return { skip: `type ${type} cannot be indexed with a default btree` };
@@ -60,15 +60,15 @@ function indexTargets(colMeta: ColMeta): { skip?: string; targets?: IndexTarget[
   return { targets };
 }
 
-function candidateColumns(spec: Spec): string[] {
+function candidateColumns(spec: DashboardSpec): string[] {
   const columns = new Set<string>();
   const add = (name: unknown) => {
     if (typeof name === 'string' && name.trim()) columns.add(name.trim());
   };
-  const addGroupBy = (list: any[] | undefined) => {
+  const addGroupBy = (list: GroupBySpec[] | undefined) => {
     for (const g of list || []) add(g?.column);
   };
-  const addDateGrain = (node: any) => {
+  const addDateGrain = (node: { dateGrain?: DateGrainSpec | null }) => {
     if (node?.dateGrain && typeof node.dateGrain === 'object') add(node.dateGrain.column);
   };
 
@@ -79,10 +79,10 @@ function candidateColumns(spec: Spec): string[] {
     addGroupBy(card.groupBy);
     if (!card.groupBy?.length) {
       for (const col of card.columns || []) {
-        if (['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
+        if (col.mapping && ['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
       }
     }
-    for (const term of ([] as any[]).concat(card.orderBy || [], card.sort || [])) {
+    for (const term of ([] as OrderByEntry[]).concat(card.orderBy || [], card.sort || [])) {
       if (typeof term === 'string') add(term);
       else if (term) add(term.column || term.field || term.name);
     }
@@ -92,7 +92,7 @@ function candidateColumns(spec: Spec): string[] {
 }
 
 async function existingIndexes(schema: string, table: string): Promise<{ leading: Set<string>; names: Set<string> }> {
-  const { rows } = await db.query(
+  const { rows } = await db.query<{ index_name: string; column_name: string | null; position: string }>(
     `SELECT i.relname AS index_name,
             a.attname AS column_name,
             k.ordinality AS position
@@ -134,29 +134,32 @@ async function closeDatabase(): Promise<void> {
 
   console.log(`Dashboards: ${dashboardIds.join(', ')}${dryRun ? '  (dry run)' : ''}`);
 
-  const wanted = new Map<string, { schema: string; table: string; columns: Map<string, ColMeta> }>();
+  const wanted = new Map<string, { schema: string; table: string; columns: Map<string, ColumnMeta> }>();
 
   for (const id of dashboardIds) {
-    let spec: Spec;
+    let spec: DashboardSpec;
     try {
       spec = await dashboards.getSpec(id);
-    } catch (err: any) {
-      console.log(`! ${id}: ${err.message}`);
+    } catch (err) {
+      console.log(`! ${id}: ${messageOf(err)}`);
       continue;
     }
 
-    let meta: Record<string, any>;
+    let meta: SourceMetadata;
     try {
       meta = await resolveSourceMetadata(spec);
-    } catch (err: any) {
-      console.log(`! ${id}: ${err.message}`);
+    } catch (err) {
+      console.log(`! ${id}: ${messageOf(err)}`);
       continue;
     }
 
     const { schema, table } = meta.table;
     const key = `${schema}.${table}`;
-    if (!wanted.has(key)) wanted.set(key, { schema, table, columns: new Map() });
-    const entry = wanted.get(key)!;
+    let entry = wanted.get(key);
+    if (!entry) {
+      entry = { schema, table, columns: new Map() };
+      wanted.set(key, entry);
+    }
 
     const resolved: string[] = [];
     for (const name of candidateColumns(spec)) {
@@ -180,14 +183,14 @@ async function closeDatabase(): Promise<void> {
     const { leading, names } = await existingIndexes(schema, table);
 
     for (const colMeta of columns.values()) {
-      const { skip, targets } = indexTargets(colMeta);
+      const { skip, targets = [] } = indexTargets(colMeta);
       if (skip) {
         console.log(`  - ${colMeta.name}: ${skip}`);
         skipped += 1;
         continue;
       }
 
-      for (const target of targets!) {
+      for (const target of targets) {
         const name = indexName(table, colMeta.name, target.suffix);
 
         if (!target.suffix && leading.has(colMeta.name.toLowerCase())) {
@@ -215,7 +218,7 @@ async function closeDatabase(): Promise<void> {
 
   console.log(`\n${dryRun ? 'Would create' : 'Created'}: ${created}, skipped: ${skipped}`);
   await closeDatabase();
-})().catch((e: any) => {
-  console.error('ERROR', e.message);
+})().catch((e: unknown) => {
+  console.error('ERROR', messageOf(e));
   process.exit(1);
 });

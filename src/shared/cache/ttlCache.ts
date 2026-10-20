@@ -1,11 +1,11 @@
-interface TtlEntry {
-  value: any;
+interface TtlEntry<V> {
+  value: V;
   expires: number;
 }
 
-class TtlCache {
+class TtlCache<V = unknown> {
   declare ttl: number;
-  declare store: Map<string, TtlEntry>;
+  declare store: Map<string, TtlEntry<V>>;
   declare timer: NodeJS.Timeout;
 
   constructor(ttlMs?: number) {
@@ -15,7 +15,7 @@ class TtlCache {
     if (this.timer.unref) this.timer.unref();
   }
 
-  get(key: string): any {
+  get(key: string): V | undefined {
     const entry = this.store.get(key);
     if (!entry) return undefined;
     if (entry.expires <= Date.now()) {
@@ -25,7 +25,7 @@ class TtlCache {
     return entry.value;
   }
 
-  set(key: string, value: any, ttlMs?: number): void {
+  set(key: string, value: V, ttlMs?: number): void {
     this.store.set(key, {
       value,
       expires: Date.now() + (ttlMs || this.ttl),

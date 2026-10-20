@@ -5,7 +5,27 @@ import { BACKEND_ROOT, OPENAPI_FILE } from '../src/config/env';
 const ENTRY_FILE = path.join(BACKEND_ROOT, 'src', 'routes.ts');
 const API_PREFIX = '/api';
 const UNDOCUMENTED_MOUNTS = new Set([`${API_PREFIX}/docs`]);
-const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
+const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
+
+interface OpenApiParameter {
+  in?: string;
+  name?: string;
+  $ref?: string;
+}
+
+interface OpenApiOperation {
+  operationId?: string;
+  tags?: string[];
+  parameters?: OpenApiParameter[];
+}
+
+type OpenApiPathItem = Partial<Record<(typeof HTTP_METHODS)[number], OpenApiOperation>> & {
+  parameters?: OpenApiParameter[];
+};
+
+interface OpenApiSpec {
+  paths?: Record<string, OpenApiPathItem>;
+}
 
 const ROUTE_CALL = /router\.(get|post|put|patch|delete|use)\(\s*(['"`])([^'"`]*)\2(?:\s*,\s*([A-Za-z_$][\w$]*))?/g;
 const ROUTE_IMPORT = /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"](\.{1,2}\/[^'"]+Routes)['"]/g;
@@ -41,11 +61,11 @@ function routesOf(file: string, prefix: string, seen: Set<string>, out: Set<stri
   }
 }
 
-function documentedOperations(spec: any): { operations: Set<string>; problems: string[] } {
+function documentedOperations(spec: OpenApiSpec): { operations: Set<string>; problems: string[] } {
   const operations = new Set<string>();
   const problems: string[] = [];
   const operationIds = new Map<string, string>();
-  for (const [route, item] of Object.entries<any>(spec.paths ?? {})) {
+  for (const [route, item] of Object.entries(spec.paths ?? {})) {
     for (const method of HTTP_METHODS) {
       const operation = item[method];
       if (!operation) continue;
@@ -61,8 +81,8 @@ function documentedOperations(spec: any): { operations: Set<string>; problems: s
       for (const [, name] of route.matchAll(/\{(\w+)\}/g)) {
         const params = [...(item.parameters ?? []), ...(operation.parameters ?? [])];
         const declared =
-          params.some((p: any) => p.in === 'path' && p.name === name) ||
-          params.some((p: any) => typeof p.$ref === 'string' && p.$ref.endsWith(`/${name}`));
+          params.some((p) => p.in === 'path' && p.name === name) ||
+          params.some((p) => typeof p.$ref === 'string' && p.$ref.endsWith(`/${name}`));
         if (!declared) problems.push(`${key} does not declare path parameter ${name}`);
       }
     }

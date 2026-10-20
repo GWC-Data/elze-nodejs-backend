@@ -7,12 +7,22 @@ import { issueActivationToken, activationUrl } from '../src/modules/auth/activat
 import { revokeAllForUser } from '../src/modules/auth/tokenService';
 import { sendEmail } from '../src/shared/email/emailService';
 import { accountActivation } from '../src/modules/auth/accountActivationTemplate';
+import { messageOf } from '../src/shared/errors/AppError';
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
 interface Args {
   action: 'list' | 'reset' | 'help';
   username: string | null;
   email: string | null;
+}
+
+interface AccountRow {
+  id: number;
+  username: string;
+  email: string;
+  role: string | null;
+  status: string;
+  company: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -47,7 +57,7 @@ prints the token - it is emailed through the configured SMTP relay.
 `;
 
 async function list(): Promise<void> {
-  const rows = await rawRows(
+  const rows = await rawRows<AccountRow>(
     prisma,
     Prisma.sql`SELECT u.id, u.username, u.email, r.name AS role, u.status, c.name AS company
        FROM users u
@@ -129,7 +139,7 @@ async function reset({ username, email }: Args): Promise<void> {
   else await list();
 })()
   .then(() => process.exit(0))
-  .catch((e: any) => {
-    console.error(`ERROR  ${e.message}`);
+  .catch((e: unknown) => {
+    console.error(`ERROR  ${messageOf(e)}`);
     process.exit(1);
   });

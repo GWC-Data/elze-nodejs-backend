@@ -84,14 +84,14 @@ describe('rawRows and pagedRows', () => {
       { id: 1n, __total: 41n },
       { id: 2n, __total: 41n },
     ]);
-    const page = await pagedRows(tx, sqlOf('page'), sqlOf('count'), (row) => row.id);
+    const page = await pagedRows(tx, sqlOf('page'), sqlOf('count'), (row: { id: number }) => row.id);
     expect(page).toEqual({ items: [1, 2], total: 41 });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('runs the count query when the page is empty', async () => {
     const tx = fakeTx([], [{ n: 41n }]);
-    const page = await pagedRows(tx, sqlOf('page'), sqlOf('count'), (row) => row.id);
+    const page = await pagedRows(tx, sqlOf('page'), sqlOf('count'), (row: { id: number }) => row.id);
     expect(page).toEqual({ items: [], total: 41 });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
   });
