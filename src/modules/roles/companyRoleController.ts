@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag } from '../../shared/validation/commonValidator';
 import * as companyRoleService from './companyRoleService';
 
 async function permissions(req: Request, res: Response): Promise<void> {
@@ -24,8 +24,9 @@ async function update(req: Request, res: Response): Promise<void> {
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
-  await companyRoleService.deleteRole(req.actor, req.params.id);
-  ok(res, { deleted: true });
+  const permanent = optionalFlag(req.query.permanent, 'permanent');
+  await companyRoleService.deleteRole(req.actor, req.params.id, { permanent });
+  ok(res, { deleted: true, permanent });
 }
 
 async function saveBuiltIn(req: Request, res: Response): Promise<void> {

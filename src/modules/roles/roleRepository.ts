@@ -40,10 +40,11 @@ async function listSystemWithCounts(): Promise<SystemRoleRow[]> {
     Prisma.sql`SELECT r.id, r.tier, r.name, r.description,
             (SELECT COUNT(*)::int FROM access_control.user_roles ur
                JOIN access_control.roles held ON held.id = ur.role_id
+               JOIN users hu ON hu.id = ur.user_id AND hu.deleted_at IS NULL
               WHERE held.tier = r.tier) AS "userCount"
        FROM access_control.roles r
       WHERE r.kind = 'system'
-      ORDER BY CASE r.tier WHEN 'SUPER_ADMIN' THEN 0 WHEN 'COMPANY_ADMIN' THEN 1 ELSE 2 END`
+      ORDER BY CASE r.tier WHEN 'SUPER_ADMIN' THEN 0 WHEN 'PLATFORM_ADMIN' THEN 1 WHEN 'COMPANY_ADMIN' THEN 2 ELSE 3 END`
   );
 }
 

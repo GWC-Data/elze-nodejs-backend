@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import config from '../../config';
+import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
 import type { Prisma } from '../../generated/prisma/client';
 import type { DashboardListRow, StoredDashboard } from './dashboardTypes';
 
@@ -33,7 +34,7 @@ function listJsonFiles(dir: string = DASHBOARD_DIR): string[] {
 async function findById(id: string): Promise<StoredDashboard | null> {
   const row = await prisma.dashboard.findUnique({
     where: { id },
-    select: { id: true, title: true, description: true, companyId: true, spec: true },
+    select: { id: true, title: true, description: true, companyId: true, spec: true, deletedAt: true },
   });
   if (!row) return null;
   return {
@@ -42,6 +43,7 @@ async function findById(id: string): Promise<StoredDashboard | null> {
     description: row.description,
     company_id: row.companyId,
     spec: row.spec,
+    deleted: row.deletedAt !== null,
   };
 }
 
@@ -49,13 +51,19 @@ async function existsInDb(id: string): Promise<boolean> {
   return (await prisma.dashboard.count({ where: { id } })) > 0;
 }
 
+async function rowState(id: string): Promise<'live' | 'deleted' | null> {
+  const row = await prisma.dashboard.findUnique({ where: { id }, select: { deletedAt: true } });
+  if (!row) return null;
+  return row.deletedAt ? 'deleted' : 'live';
+}
+
 async function list(companyId?: number | null): Promise<DashboardListRow[]> {
   const where =
     companyId === undefined
-      ? {}
+      ? NOT_DELETED
       : companyId === null
-        ? { companyId: null }
-        : { OR: [{ companyId }, { companyId: null }] };
+        ? { companyId: null, ...NOT_DELETED }
+        : { OR: [{ companyId }, { companyId: null }], ...NOT_DELETED };
   return prisma.dashboard.findMany({
     where,
     select: { id: true, title: true, description: true, companyId: true, createdBy: true },
@@ -94,12 +102,38 @@ async function upsert({
   });
 }
 
-async function removeWithGrants(id: string): Promise<void> {
+async function purge(id: string): Promise<void> {
   await withTransaction(async (tx) => {
     await tx.dashboardUserAccess.deleteMany({ where: { dashboardId: id } });
     await tx.dashboardGroupAccess.deleteMany({ where: { dashboardId: id } });
     await tx.companyDashboard.deleteMany({ where: { dashboardId: id } });
     await tx.dashboard.deleteMany({ where: { id } });
+  });
+}
+
+async function deletedIds(): Promise<Set<string>> {
+  const rows = await prisma.dashboard.findMany({ where: { deletedAt: { not: null } }, select: { id: true } });
+  return new Set(rows.map((r) => r.id));
+}
+
+async function softDelete({
+  id,
+  title,
+  companyId,
+  spec,
+  deletedBy,
+}: {
+  id: string;
+  title: string;
+  companyId: number | null;
+  spec: unknown;
+  deletedBy: number | null;
+}): Promise<void> {
+  const deletion = softDeletion(deletedBy);
+  await prisma.dashboard.upsert({
+    where: { id },
+    create: { id, title, companyId, spec: spec as Prisma.InputJsonValue, ...deletion },
+    update: deletion,
   });
 }
 
@@ -113,7 +147,10 @@ export {
   listJsonFiles,
   findById,
   existsInDb,
+  rowState,
   list,
   upsert,
-  removeWithGrants,
+  deletedIds,
+  softDelete,
+  purge,
 };

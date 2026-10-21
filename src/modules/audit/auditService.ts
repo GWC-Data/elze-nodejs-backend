@@ -2,6 +2,7 @@ import * as auditRepository from './auditRepository';
 import { EVENTS, FORBIDDEN_DETAIL_KEYS } from './auditEvents';
 import { fail, messageOf } from '../../shared/errors/AppError';
 import { COMPANY_ADMIN } from '../catalogue/roleTiers';
+import { seesPlatformAccounts } from '../auth/authorizationService';
 import { shapeEntry } from './auditSerializer';
 import {
   auditActions,
@@ -9,8 +10,14 @@ import {
   auditEventsInCategory,
   auditEventsWithAction,
   featureById,
+  featureKeys,
   featureOfPermission,
+  hiddenAuditEvents,
+  isHiddenAuditCategory,
+  isHiddenFeature,
+  isHiddenPermission,
   usableFeatures,
+  visibleFeatureKeys,
 } from '../catalogue/catalogueService';
 import type { AuditScope } from './auditRepository';
 import type { AuditItem } from './auditSerializer';
@@ -84,7 +91,9 @@ function audit(event: string, actor: AuditActor, detail: AuditDetail = {}): void
 }
 
 function scopeFor(actor: Actor): AuditScope {
-  if (actor.isPlatform) return { kind: 'all' };
+  if (actor.isPlatform) {
+    return seesPlatformAccounts(actor) ? { kind: 'all' } : { kind: 'all', hidePlatformTargetsExcept: actor.id };
+  }
   if (actor.role === COMPANY_ADMIN && actor.companyId) {
     return { kind: 'company', companyId: actor.companyId };
   }
@@ -115,14 +124,24 @@ function day(value: string | null | undefined, name: string): string | null {
 
 const FEATURE_DETAIL_KEYS = ['features', 'enabled', 'disabled'];
 const FEATURE_ID_DETAIL_KEYS = ['featureIds', 'enabledIds', 'disabledIds'];
+const PERMISSION_DETAIL_KEYS = ['added', 'removed'];
 
 function detailOf(value: Prisma.JsonValue): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-function visibleDetail(detail: Record<string, unknown>, visible: Set<string> | null): Record<string, unknown> {
-  if (!visible) return detail;
+function visibleDetail(detail: Record<string, unknown>, visible: Set<string>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...detail };
+  for (const key of PERMISSION_DETAIL_KEYS) {
+    const value = out[key];
+    if (!Array.isArray(value)) continue;
+    const kept = value.filter((p) => {
+      const owner = featureOfPermission(String(p));
+      return !isHiddenPermission(String(p)) && (!owner || visible.has(owner));
+    });
+    if (kept.length) out[key] = kept;
+    else delete out[key];
+  }
   for (const key of FEATURE_DETAIL_KEYS) {
     const value = out[key];
     if (!Array.isArray(value)) continue;
@@ -157,8 +176,10 @@ async function listEntries(
   if (category) {
     categoryEvents = auditEventsInCategory(category);
     if (!categoryEvents) {
-      throw fail('VALIDATION_ERROR', `Unknown category "${category}". Use one of: ${auditCategories().join(', ')}.`);
+      const shown = auditCategories().filter((c) => !isHiddenAuditCategory(c));
+      throw fail('VALIDATION_ERROR', `Unknown category "${category}". Use one of: ${shown.join(', ')}.`);
     }
+    if (isHiddenAuditCategory(category)) categoryEvents = [];
   }
   let actionEvents: string[] | null = null;
   if (action) {
@@ -171,9 +192,22 @@ async function listEntries(
   const to = day(filters.to, 'to');
   if (from && to && from > to) throw fail('VALIDATION_ERROR', '"from" must not be after "to".');
 
-  const visible = actor.isPlatform ? null : new Set(usableFeatures(actor.features, actor.permissions));
+  const visible = new Set(
+    visibleFeatureKeys(actor.isPlatform ? featureKeys() : usableFeatures(actor.features, actor.permissions))
+  );
+  const hiddenEvents = hiddenAuditEvents().filter((e) => e !== EVENTS.ACCESS_DENIED);
   const page = await auditRepository.listPage(
-    { scope, event, categoryEvents, actionEvents, from, to, search: list.search },
+    {
+      scope,
+      event,
+      categoryEvents,
+      actionEvents,
+      hiddenEvents,
+      hideDashboardDenials: isHiddenFeature('dashboards'),
+      from,
+      to,
+      search: list.search,
+    },
     list,
     (row) =>
       shapeEntry(

@@ -35,8 +35,9 @@ backend/
 │   │   └── dashboards/default.json  runtime dashboard metadata (not source)
 │   │
 │   ├── modules/
-│   │   ├── auth/                    sign-in, refresh, sessions, activation, onboarding, login throttle,
-│   │   │                            authorization (can / assert / levels), authMiddleware, activation email
+│   │   ├── auth/                    sign-in, refresh, sessions, activation, password reset, onboarding,
+│   │   │                            login throttle, authorization (can / assert / levels), authMiddleware,
+│   │   │                            activation and password reset emails
 │   │   ├── users/                   users, per-user extra permissions, row-level data scopes
 │   │   ├── companies/               companies, company features, the platform and workspace overviews
 │   │   ├── groups/                  groups and their members
@@ -180,20 +181,34 @@ activation tokens are stored as HMACs keyed with a secret that lives outside the
 so a dump of these tables still cannot be replayed on its own. Give the reporting data its
 own `DB_SCHEMA` if either set of tables might want a name like `users`.
 
-### Three roles, two of them inside a company
+### Four built-in roles, two of them inside a company
 
 ```
-SUPER_ADMIN            platform owner: every company, user, role and assignment
+SUPER_ADMIN              the one platform owner: every company, user, role and assignment
    |
-   +-- COMPANY_ADMIN   one company: its users, groups and access
+   +-- PLATFORM_ADMIN    created by the owner: companies and their accounts, nothing about
+   |                     platform accounts and no editing of the built-in role defaults
+   |
+   +-- COMPANY_ADMIN     one company: its users, groups and access
           |
-          +-- USER     one company: only what has been granted to them
+          +-- USER       one company: only what has been granted to them
 ```
+
+There is exactly one `SUPER_ADMIN`: nobody can be created as or promoted to it, and the
+unique index `uq_user_roles_one_platform_owner` guarantees a single holder. Only the owner
+creates, edits, deletes, lists or opens platform admins (`authorizationService`
+`isPlatformOwner` / `seesPlatformAccounts`); a platform admin's `/api/platform/users`,
+pickers and audit trail leave platform accounts out, and one by id is a `404`. A company
+account can never hold a platform role (`trg_user_roles_check`).
+`GET /api/platform/roles/assignable[?companyId=]` is the list to offer in a role picker:
+Company admin and Member for a company account, Platform admin for a platform account (to the
+owner only).
 
 A role's **scope** — `platform` or `company` — is a column on the role row, and it is what
-authorization reads. Nothing in the codebase compares a role *name* to decide what somebody
-may do, so adding a capability is a permission id plus a guard, not an audit of thirty
-`if (role === ...)` branches.
+authorization reads. Outside `modules/auth/authorizationService.ts` (`can()`, which lets the
+platform owner through, and `isPlatformOwner()`), nothing in the codebase compares a role
+*name* to decide what somebody may do, so adding a capability is a permission id plus a guard,
+not an audit of thirty `if (role === ...)` branches.
 
 ### Three independent axes
 
@@ -236,6 +251,15 @@ Two more things shape what a company account holds (full detail: `.claude/ARCHIT
   `prisma/migrations/1_database_objects`).
 - **Responses carry only what the account can use**: `user.features` lists only features the
   account holds permissions in, and role endpoints never send a disabled feature's permissions.
+- **Hidden features** (`access_control.features.hidden`, set for Dashboards and Agents) are
+  left out of every response, with their permissions (`dashboard.*`, `data.read`,
+  `access.*`, `scope.*`, `agent.*`): sign-in and `/auth/me` (which no longer carries a
+  `dashboards` list), role and permission grids, the feature list, company features, extra
+  permissions, overview counts (`dashboards`, `assignments`, `dashboardsGranted`,
+  `dashboardCount`) and the audit trail (dashboard events and the `dashboards` category).
+  They cannot be given to a role (`FEATURE_NOT_ENABLED`), and saving features or permissions
+  keeps whatever was stored for them. The code and routes are unchanged; clearing `hidden`
+  brings a feature back.
 
 ### Tenant isolation
 
@@ -254,6 +278,46 @@ resource in another company answers `404`, not `403` — telling them apart woul
 A `companyId` in a request body is **ignored** for a company-scoped caller rather than
 validated: the only correct value is one the client cannot influence.
 
+### Deleting keeps the row (soft delete)
+
+Deleting a user, company, group, company role, dashboard, context (connection) or published
+context version does not remove the row: it sets `deleted_at` and `deleted_by`, and every
+lookup, list, count, picker and access check skips it (`src/shared/db/softDelete.ts`:
+`NOT_DELETED` for Prisma, `notDeleted(alias)` and `notDeletedRef(table, column)` for SQL). A
+deleted record answers `404` exactly as a missing one did, and deleting it again is a `404`.
+The `access_control` views skip deleted rows too.
+
+| Record | Also on delete |
+|---|---|
+| user | status `disabled`, every session revoked, activation and reset links stop working |
+| company | only once it has no accounts that are not deleted; its groups, roles, dashboards and contexts are soft-deleted with it |
+| group | `active = false`, so it grants nothing |
+| company role | refused while an account that is not deleted holds it |
+| dashboard | grants and assignments are kept; a dashboard that is only a JSON file gets a deleted row so it stays hidden |
+| context | datasets, versions, reviews and shares are kept; the agent gate refuses it |
+| context version | the next publish does not reuse its number |
+
+Names are unique only among records that are not deleted (partial unique indexes in
+`8_soft_delete`): a deleted user's username and email, and a deleted company's, group's,
+role's or context's name, can be used again. Dashboard ids and version numbers are never reused.
+
+Still removed for good: shares, grants, dashboard assignments and group memberships (links,
+whose history is in the audit trail), extra permissions and data scopes when they are replaced,
+expired tokens and login attempts, and the half-created records a failed onboarding email rolls
+back. There is no endpoint yet to restore a record.
+
+**Permanent delete.** Every record delete above takes `?permanent=true` to remove the record
+from the database for good, with what depends on it, instead of keeping it as deleted; it also
+works on a record that is already soft-deleted. It needs the admin-only `delete.permanent`
+permission, held by company admins, platform admins and the platform owner and never by
+members (who therefore only ever soft-delete). A permanently deleted role first moves any
+deleted accounts still holding it to the company's Member role; a permanently deleted
+dashboard that also exists as a JSON file comes back from the file.
+
+The agent backend reads `connections` directly and does not know about `deleted_at`. Behind
+nginx the agent gate refuses a deleted context; a direct call to the ADK API (local
+development) is not stopped.
+
 ### Dashboards are still files
 
 There is no `dashboards` table. `modules/dashboards/dashboardService.ts` remains the only source of
@@ -267,7 +331,7 @@ text, validated against the registry on write and joined against it on read.
 | **Access token** | `ACCESS_TOKEN_EXPIRY` (15m) | HttpOnly cookie `da_access`, `Path=/` (nginx's agent gate reads it; it is stripped before `/svc/*`) | no — it expires |
 | **Refresh token** | `REFRESH_TOKEN_EXPIRY` (30d) | HttpOnly cookie `da_refresh`, `Path=/api/auth` | yes — it is a row |
 
-No token is ever in a response body: login, refresh, activation and password change return
+No token is ever in a response body: login, refresh, activation, password reset and password change return
 only the user, its permissions and the auth state. Both tokens are cookies no script can read.
 
 Access-token claims carry identity only. Role, permissions, company status and scopes are
@@ -277,7 +341,7 @@ their next call rather than at token expiry.
 Refresh **rotates**: every refresh issues a new token and marks the old one replaced.
 Presenting a replaced token means two parties hold the same secret, so the whole family —
 the entire login chain — is revoked at once. Sessions are also revoked on logout, password
-change, role change, deactivation, access reissue and company deactivation.
+change, password reset, role change, deactivation, access reissue and company deactivation.
 
 Only the HMAC of a refresh token is stored, keyed with `JWT_REFRESH_SECRET`, so a dump of
 `refresh_tokens` cannot be replayed without a secret that lives outside the database.
@@ -331,6 +395,8 @@ message is replaced with a generic one before it leaves the process.
 | `POST` | `/api/auth/login` | — |
 | `POST` | `/api/auth/refresh`, `/api/auth/logout` | refresh cookie + CSRF header |
 | `GET`/`POST` | `/api/auth/activation` | the activation token itself |
+| `POST` | `/api/auth/forgot-password` | — (throttled per username/email) |
+| `GET`/`POST` | `/api/auth/reset-password` | the reset token itself |
 | `GET` | `/api/auth/me`, `/api/auth/sessions` | signed in |
 | `POST` | `/api/auth/change-password` | signed in |
 | `GET` | `/api/companies`, `/api/companies/:id` | `company.read` |
@@ -421,6 +487,38 @@ password until a link gets through. That is the safe direction — the old passw
 to stop working — and the error message says so outright rather than leaving it to be
 discovered.
 
+The activation link works once and expires after `ACTIVATION_TOKEN_TTL_SECONDS` (48 hours).
+
+### Forgot password
+
+An active account can choose a new password without an administrator:
+
+```
+POST /api/auth/forgot-password { identifier }      username or email
+   -> always the same 200 answer, whether or not an account matches
+   -> after the response: an active account with a password, in an active company,
+      gets a reset link (stored as an HMAC, purpose "password_reset" in user_tokens)
+GET  /api/auth/reset-password?token=...             who the link is for
+POST /api/auth/reset-password { token, password }  sets the password, ends every
+                                                    session, signs the user in
+```
+
+- The link opens `APPLICATION_URL/reset-password?token=...`, works once and expires after
+  `PASSWORD_RESET_TOKEN_TTL_SECONDS` (1 hour). Asking again replaces the earlier link, and a
+  password change cancels any outstanding one.
+- Nothing in the answer or its timing tells the caller whether the account exists: the lookup
+  and the email run after the response is sent, and a delivery failure is only logged.
+- A pending account gets no link — it still needs a new activation link from an administrator —
+  and neither does a deactivated account or one in a deactivated company.
+- **Throttling.** At most `PASSWORD_RESET_MAX_REQUESTS` (3) requests per username or email in
+  `PASSWORD_RESET_WINDOW_SECONDS` (1 hour), counted in `login_attempts` under a `reset:` key
+  whether or not an account matches; the next one answers 429 `RATE_LIMITED` with how many
+  minutes to wait. An account is also sent at most 3 links an hour in total, so alternating its
+  username and email does not double that.
+- A successful reset also clears any sign-in lockout on the account's username and email.
+- Audit events: `password_reset_requested` (with `sent` and, when nothing was sent, `reason`)
+  and `password_reset`.
+
 ### Email
 
 `src/shared/email/emailService.ts` is the only way the application sends mail. Business code calls
@@ -450,6 +548,14 @@ the same layers as everything else — see `docs/context-layer.md` for its file 
 | | |
 |---|---|
 | Context layer | Warehouse connections. Domo is implemented; Snowflake, Databricks, BigQuery, Redshift and PostgreSQL are listed as `planned` and refused by the API. |
+
+A context is visible to its creator, to holders of `context.manage_all` (company admins by
+default) and to the people and groups it is shared with, at view, edit or full. Its creator and
+company admins (any `context.manage_all` holder, and platform accounts) can share it with any
+active person or group of its company - a company admin also shares the contexts members
+created; a member never shares a context someone else created, whatever their level. It can no
+longer be opened to the whole company: `general_access` is always `restricted`, and
+`PUT …/access/general` refuses `company`.
 
 `docs/context-layer.md` is worth reading before touching it: it stores a third-party credential **reversibly**, which is the one place
 in this application that is true, and it calls Domo endpoints that are not part
@@ -537,6 +643,18 @@ database was renamed.
 | `2_catalogue_in_database` | `connectors` and `audit_event_types`, the catalogue rows (permissions, features, access levels, system roles and their defaults) with their fixed UUIDs, and the trigger that gives the platform owner every new permission |
 | `3_scope_dimensions` | `access_control.scope_dimensions` |
 | `4_status_enums` | status-like columns become PostgreSQL enums (`user_status`, `role_tier`, `review_status`, …) in place of CHECK constraints; the views are recreated around the change |
+| `5_context_edit_permissions` | every holder of `context.read` is given `context.update` and `context.delete` |
+| `6_drop_context_publications` | drops the legacy `context_publications` table |
+| `7_password_reset_audit_events` | the `password_reset_requested` and `password_reset` audit event types |
+| `8_soft_delete` | `deleted_at` / `deleted_by` on users, companies, groups, roles, dashboards, connections and context versions; their unique names become partial unique indexes over rows that are not deleted; every context becomes `restricted`; the views skip deleted rows |
+| `9_01_permanent_delete_permission` | the admin-only `delete.permanent` permission, given to the company admin role |
+| `9_02_platform_admin_tier` | the `PLATFORM_ADMIN` value of `role_tier` (its own migration: a new enum value cannot be used in the transaction that adds it) |
+| `9_03_platform_admin_role` | the Platform admin system role, one platform owner (extra `SUPER_ADMIN` holders become platform admins, then a unique index), the user-role trigger and `user_resource_access` view taught about platform admins |
+| `9_04_hidden_features` | `features.hidden`, set for Dashboards and Agents; `dashboard.assign` joins the Dashboards feature |
+
+Prisma applies migrations in **folder-name order**, compared as text: `10_…` would run right
+after `1_…`. That is why the migrations after `8_soft_delete` are numbered `9_01_`, `9_02_`, …;
+keep that prefix (`9_05_`, `9_06_`, …) for the next ones.
 
 The database is shared. The agent backend (`Elze-backend`) owns `context_objects`,
 `context_versions`, `context_dataset_blueprint`, `pii_classifications`, `access_policies`,
@@ -587,7 +705,7 @@ using `config.database.db`, the `pg` pool.
 | | Where | Why |
 |---|---|---|
 | Database, `APPLICATION_URL`, signing secrets, SMTP | `.env` | deployment-specific, or a live credential |
-| Token lifetimes, login throttling, query concurrency | `src/config/appConfig.ts` | product decisions; a value that drifts per deployment is one nobody can reason about |
+| Token and link lifetimes, login and password reset throttling, query concurrency | `src/config/appConfig.ts` | product decisions; a value that drifts per deployment is one nobody can reason about |
 | Bootstrap owner's username, email and password | `.env` (`BOOTSTRAP_ADMIN_*`) | a first-use credential, read only while the users table is empty |
 
 The seeded account carries `must_change_password`, so signing in once replaces the bootstrap

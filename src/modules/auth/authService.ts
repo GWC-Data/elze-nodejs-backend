@@ -1,6 +1,6 @@
 import config from '../../config';
 import * as userRepository from '../users/userRepository';
-import { fail, codeOf, present } from '../../shared/errors/AppError';
+import { fail, codeOf, present, messageOf } from '../../shared/errors/AppError';
 import { hashPassword, verifyPassword } from '../../shared/security/password';
 import { requireString } from '../../shared/validation/commonValidator';
 import { passwordProblem, assertValid } from '../users/userValidator';
@@ -8,18 +8,23 @@ import { publicUser } from '../users/userSerializer';
 import * as tokens from './tokenService';
 import * as throttle from './loginThrottleService';
 import { resolveActivationToken, consumeActivationToken } from './activationService';
+import * as resets from './passwordResetService';
+import { passwordReset } from './passwordResetTemplate';
+import { sendEmail } from '../../shared/email/emailService';
 import { findActor } from '../users/userService';
-import { usableFeatures } from '../catalogue/catalogueService';
-import { listAccessibleDashboards } from '../access/accessService';
+import { usableFeatures, visibleFeatureKeys, visiblePermissionKeys } from '../catalogue/catalogueService';
 import { audit, EVENTS } from '../audit/auditService';
 import { AUTH_STATE, USER_STATUS } from '../../shared/db/statuses';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
 import type { IssuedRefreshToken } from './tokenService';
 import type { PublicUser, UserSource } from '../users/userSerializer';
+import type { LoginUserRow } from '../users/userRepository';
 
 const { withTransaction } = config.database;
-const { ACCESS_TOKEN_TTL_SECONDS } = config.auth;
+const { ACCESS_TOKEN_TTL_SECONDS, PASSWORD_RESET_TOKEN_TTL_SECONDS } = config.auth;
+
+const RESET_REQUESTED = 'If an account matches, we have emailed it a link to choose a new password.';
 
 type RequestBody = Record<string, unknown>;
 
@@ -36,15 +41,20 @@ function stateOf(user: { must_change_password: boolean }) {
   return user.must_change_password ? AUTH_STATE.PASSWORD_CHANGE_REQUIRED : AUTH_STATE.AUTHENTICATED;
 }
 
+function shownAccess(features: readonly string[], permissions: readonly string[]) {
+  return {
+    permissions: visiblePermissionKeys(permissions),
+    features: visibleFeatureKeys(usableFeatures(features, permissions)),
+  };
+}
+
 async function sessionPayload(user: UserSource) {
   const found = await findActor(user.id);
-  const permissions: string[] = found ? found.permissions : [];
   return {
     expiresIn: ACCESS_TOKEN_TTL_SECONDS,
     user: {
       ...publicUser(found ? found.user : user),
-      permissions,
-      features: found ? usableFeatures(found.features, permissions) : [],
+      ...(found ? shownAccess(found.features, found.permissions) : { permissions: [], features: [] }),
     },
   };
 }
@@ -144,11 +154,9 @@ async function logout(presented: unknown) {
 }
 
 async function me(actor: Actor, account: PublicUser) {
-  const dashboards = actor.mustChangePassword ? [] : await listAccessibleDashboards(actor);
   return {
     state: actor.mustChangePassword ? AUTH_STATE.PASSWORD_CHANGE_REQUIRED : AUTH_STATE.AUTHENTICATED,
-    user: { ...account, permissions: actor.permissions, features: usableFeatures(actor.features, actor.permissions) },
-    dashboards,
+    user: { ...account, ...shownAccess(actor.features, actor.permissions) },
   };
 }
 
@@ -176,6 +184,7 @@ async function changePassword(
   await withTransaction(async (conn: Tx) => {
     await userRepository.setActivePassword(conn, userId, hashPassword(newPassword));
     await tokens.revokeAllForUser(userId, 'password_changed', conn);
+    await resets.retireResetTokens(userId, conn);
   });
 
   const session = await startSession(present(await userRepository.findById(userId), 'The signed-in account'));
@@ -215,4 +224,107 @@ async function activate(body: RequestBody = {}) {
   return { cookies: session.cookies, body: { ...session.payload, state: AUTH_STATE.AUTHENTICATED } };
 }
 
-export { login, refresh, logout, me, sessions, changePassword, describeActivation, activate, endsSession };
+function resetRefusal(user: LoginUserRow): string | null {
+  if (user.status === USER_STATUS.DISABLED) return 'account_disabled';
+  if (user.status !== USER_STATUS.ACTIVE || !user.password_hash) return 'account_not_activated';
+  if (user.company_id && !user.companyActive) return 'company_disabled';
+  return null;
+}
+
+async function deliverResetLink(identifier: string): Promise<void> {
+  const user = await userRepository.findByIdentifier(identifier);
+  if (!user) {
+    audit(EVENTS.PASSWORD_RESET_REQUESTED, identifier, { known: false, sent: false });
+    return;
+  }
+
+  const target = { userId: user.id, companyId: user.company_id };
+  const refusal = resetRefusal(user);
+  if (refusal) {
+    audit(EVENTS.PASSWORD_RESET_REQUESTED, identifier, { ...target, sent: false, reason: refusal });
+    return;
+  }
+  if (!(await resets.hasResetAllowance(user.id))) {
+    audit(EVENTS.PASSWORD_RESET_REQUESTED, identifier, { ...target, sent: false, reason: 'account_limit' });
+    return;
+  }
+
+  const { token } = await resets.issueResetToken(user.id);
+  await sendEmail({
+    to: user.email,
+    ...passwordReset({
+      displayName: user.display_name,
+      username: user.username,
+      companyName: user.companyName || null,
+      resetUrl: resets.resetUrl(token),
+      ttlSeconds: PASSWORD_RESET_TOKEN_TTL_SECONDS,
+    }),
+  });
+  audit(EVENTS.PASSWORD_RESET_REQUESTED, identifier, { ...target, sent: true });
+}
+
+async function forgotPassword(body: RequestBody = {}) {
+  const identifier = requireString(body.identifier || body.email || body.username, 'Username or email', { max: 254 });
+
+  try {
+    await resets.assertResetRequestAllowed(identifier);
+  } catch (err) {
+    audit(EVENTS.PASSWORD_RESET_REQUESTED, identifier, { sent: false, reason: 'rate_limited' });
+    throw err;
+  }
+  await resets.recordResetRequest(identifier);
+
+  void deliverResetLink(identifier).catch((err: unknown) => {
+    console.error(`[auth] password reset link for "${identifier}" was not sent: ${messageOf(err)}`);
+  });
+
+  return { message: RESET_REQUESTED };
+}
+
+async function describePasswordReset(token: unknown) {
+  const row = await resets.resolveResetToken(token);
+  return {
+    username: row.username,
+    email: row.email,
+    displayName: row.display_name || null,
+    companyName: row.companyName || null,
+  };
+}
+
+async function resetPassword(body: RequestBody = {}) {
+  const token = requireString(body.token, 'Reset token', { max: 200 });
+  const { password } = body;
+
+  assertValid(passwordProblem(password));
+
+  const row = await resets.resolveResetToken(token);
+
+  await withTransaction(async (conn: Tx) => {
+    await resets.consumeResetToken(row.id, conn);
+    await userRepository.setActivePassword(conn, row.user_id, hashPassword(password));
+    await tokens.revokeAllForUser(row.user_id, 'password_reset', conn);
+  });
+
+  const user = present(await userRepository.findById(row.user_id), 'The account');
+  await Promise.all([throttle.recordSuccess(user.username), throttle.recordSuccess(user.email)]);
+  await userRepository.recordLogin(user.id);
+
+  const session = await startSession(user);
+  audit(EVENTS.PASSWORD_RESET, user, { userId: user.id, companyId: user.company_id });
+  return { cookies: session.cookies, body: { ...session.payload, state: AUTH_STATE.AUTHENTICATED } };
+}
+
+export {
+  login,
+  refresh,
+  logout,
+  me,
+  sessions,
+  changePassword,
+  describeActivation,
+  activate,
+  forgotPassword,
+  describePasswordReset,
+  resetPassword,
+  endsSession,
+};

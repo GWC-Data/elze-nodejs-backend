@@ -1,5 +1,5 @@
 import { fail } from '../../shared/errors/AppError';
-import { ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
+import { PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
 import {
   featureKeys,
   featureOfPermission,
@@ -131,9 +131,26 @@ function levelAtLeast(level: string | null | undefined, required: string): boole
   return Boolean(level) && levelRank('dashboard', level) >= levelRank('dashboard', required);
 }
 
+function isPlatformOwner(actor: Actor | null | undefined): boolean {
+  return Boolean(actor) && actor?.role === SUPER_ADMIN;
+}
+
+function seesPlatformAccounts(actor: Actor): boolean {
+  return isPlatformOwner(actor);
+}
+
 function assertCanAssignRole(actor: Actor, targetRole: string) {
   const scope = scopeOfTier(targetRole);
   if (!scope) throw fail('VALIDATION_ERROR', `Unknown role: "${targetRole}"`);
+  if (targetRole === SUPER_ADMIN) {
+    throw fail(
+      'VALIDATION_ERROR',
+      'There is only one platform owner. Give the account the PLATFORM_ADMIN role instead.'
+    );
+  }
+  if (targetRole === PLATFORM_ADMIN && !isPlatformOwner(actor)) {
+    throw fail('INSUFFICIENT_PERMISSION', 'Only the platform owner can create or change platform admins.');
+  }
   if (scope === ROLE_SCOPES.platform && !actor.isPlatform) {
     throw fail('INSUFFICIENT_PERMISSION', `Only a platform administrator can assign the ${targetRole} role.`);
   }
@@ -148,6 +165,9 @@ function assertCanManageUser(actor: Actor, target: ManagedUser): void {
   const targetScope = scopeOfTier(target.role);
   if (targetScope === ROLE_SCOPES.platform && !actor.isPlatform) {
     throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
+  }
+  if (targetScope === ROLE_SCOPES.platform && !seesPlatformAccounts(actor)) {
+    throw fail('TENANT_ACCESS_DENIED', 'Only the platform owner manages platform accounts.');
   }
 
   assertCompanyMatch(actor, target.company_id, 'That account');
@@ -181,6 +201,8 @@ export {
   resolveTargetCompany,
   strongestLevel,
   levelAtLeast,
+  isPlatformOwner,
+  seesPlatformAccounts,
   assertCanAssignRole,
   assertCanManageUser,
   assertRolePermissionsAllowed,

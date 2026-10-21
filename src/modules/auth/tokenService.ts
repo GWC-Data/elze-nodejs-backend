@@ -65,7 +65,14 @@ async function consumeRefreshToken(raw: unknown) {
 const revokeFamily = tokenRepository.revokeFamily;
 const revokeAllForUser = tokenRepository.revokeAllForUser;
 const revokeAllForCompany = tokenRepository.revokeAllForCompany;
-const pruneExpiredTokens = tokenRepository.pruneExpiredRefresh;
+async function pruneExpiredTokens(): Promise<number> {
+  const [refresh, resets] = await Promise.all([
+    tokenRepository.pruneExpiredRefresh(),
+    tokenRepository.pruneExpiredResets(),
+  ]);
+  return refresh + resets;
+}
+
 const listSessions = tokenRepository.listSessions;
 
 export {

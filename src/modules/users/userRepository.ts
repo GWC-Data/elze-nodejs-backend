@@ -2,6 +2,7 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { pagedRows, companyScope, rawRows } from '../../shared/db/baseRepository';
 import { likePattern, orderBy } from '../../shared/db/listQuery';
+import { NOT_DELETED, notDeleted, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ListWindow } from '../../shared/db/baseRepository';
@@ -11,6 +12,7 @@ const { prisma, withTransaction } = config.database;
 
 interface UserFilter {
   companyId?: number;
+  companyAccountsOnly?: boolean;
   role?: string;
   status?: string;
   search?: string;
@@ -91,13 +93,13 @@ async function findByIdentifier(value: string): Promise<LoginUserRow | null> {
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.username = ${value} OR u.email = ${value.toLowerCase()}`
+      WHERE (u.username = ${value} OR u.email = ${value.toLowerCase()}) AND ${notDeleted('u')}`
   );
   return rows[0] || null;
 }
 
 async function findCredentialsById(id: number) {
-  const user = await prisma.user.findUnique({ where: { id }, select: { passwordHash: true } });
+  const user = await prisma.user.findFirst({ where: { id, ...NOT_DELETED }, select: { passwordHash: true } });
   return user ? { password_hash: user.passwordHash } : null;
 }
 
@@ -118,7 +120,7 @@ async function findActorRow(id: number): Promise<ActorRow | null> {
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id}`
+      WHERE u.id = ${id} AND ${notDeleted('u')}`
   );
   return rows[0] || null;
 }
@@ -130,26 +132,32 @@ async function findById(id: number, tx: Tx = prisma): Promise<UserWithCompanyRow
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id}`
+      WHERE u.id = ${id} AND ${notDeleted('u')}`
   );
   return rows[0] || null;
 }
 
-async function findInScope(actor: Actor, id: number): Promise<UserInScopeRow | null> {
+async function findInScope(
+  actor: Actor,
+  id: number,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<UserInScopeRow | null> {
+  const live = includeDeleted ? Prisma.sql`TRUE` : notDeleted('u');
   const rows = await rawRows<UserInScopeRow>(
     prisma,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.name AS "companyName"
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id} AND ${companyScope(actor, 'u.company_id')}`
+      WHERE u.id = ${id} AND ${live} AND ${companyScope(actor, 'u.company_id')}`
   );
   return rows[0] || null;
 }
 
 function whereOf(filter: UserFilter): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [];
+  const conditions: Prisma.Sql[] = [notDeleted('u')];
   if (filter.companyId !== undefined) conditions.push(Prisma.sql`u.company_id = ${filter.companyId}`);
+  if (filter.companyAccountsOnly) conditions.push(Prisma.sql`u.company_id IS NOT NULL`);
   if (filter.role) conditions.push(Prisma.sql`r.tier = ${filter.role}`);
   if (filter.status) conditions.push(Prisma.sql`u.status = ${filter.status}`);
   if (filter.search) {
@@ -158,7 +166,7 @@ function whereOf(filter: UserFilter): Prisma.Sql {
       Prisma.sql`(u.username ILIKE ${pattern} OR u.email ILIKE ${pattern} OR u.display_name ILIKE ${pattern})`
     );
   }
-  return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
+  return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 }
 
 async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: UserListRow) => R) {
@@ -179,9 +187,14 @@ async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: Us
   );
 }
 
-async function listOptions(actor: Actor) {
+async function listOptions(actor: Actor, { companyAccountsOnly = false }: { companyAccountsOnly?: boolean } = {}) {
+  const scope = actor.isPlatform
+    ? companyAccountsOnly
+      ? { companyId: { not: null } }
+      : {}
+    : { companyId: actor.companyId as number };
   return prisma.user.findMany({
-    where: { status: 'active', ...(actor.isPlatform ? {} : { companyId: actor.companyId as number }) },
+    where: { status: 'active', ...NOT_DELETED, ...scope },
     select: { id: true, username: true, email: true },
     orderBy: { username: 'asc' },
   });
@@ -234,7 +247,7 @@ async function setRole(userId: number, roleId: string, assignedBy: number | null
 
 async function updateColumns(id: number, changes: { displayName?: string | null; status?: UserStatus }): Promise<void> {
   if (!Object.keys(changes).length) return;
-  await prisma.user.updateMany({ where: { id }, data: changes });
+  await prisma.user.updateMany({ where: { id, ...NOT_DELETED }, data: changes });
 }
 
 async function setActivePassword(tx: Tx, userId: number, passwordHash: string): Promise<void> {
@@ -255,13 +268,20 @@ async function recordLogin(userId: number): Promise<void> {
   await prisma.user.updateMany({ where: { id: userId }, data: { lastLoginAt: new Date() } });
 }
 
-async function remove(id: number): Promise<boolean> {
-  const result = await prisma.user.deleteMany({ where: { id } });
+async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+  const result = await prisma.user.updateMany({
+    where: { id, ...NOT_DELETED },
+    data: { ...softDeletion(deletedBy), status: 'disabled' },
+  });
   return result.count > 0;
 }
 
+async function discard(id: number): Promise<void> {
+  await prisma.user.deleteMany({ where: { id } });
+}
+
 async function countByCompany(companyId: number): Promise<number> {
-  return prisma.user.count({ where: { companyId } });
+  return prisma.user.count({ where: { companyId, ...NOT_DELETED } });
 }
 
 export {
@@ -279,7 +299,8 @@ export {
   setActivePassword,
   clearCredential,
   recordLogin,
-  remove,
+  softDelete,
+  discard,
   countByCompany,
 };
 export type { UserFilter, UserRow, UserInScopeRow, UserWithCompanyRow, LoginUserRow, ActorRow, UserListRow };

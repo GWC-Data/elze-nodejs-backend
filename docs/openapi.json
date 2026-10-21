@@ -25,7 +25,7 @@
     },
     {
       "name": "Auth",
-      "description": "Sign-in, sessions, password change and account activation."
+      "description": "Sign-in, sessions, password change, password reset and account activation."
     },
     {
       "name": "Platform",
@@ -595,6 +595,178 @@
         }
       }
     },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "authForgotPassword",
+        "summary": "Ask for a password reset link",
+        "description": "Starts a self-service password reset for the account whose username or email matches `identifier`. The answer is the same whether or not an account matches, and the email is sent after the response, so neither the body nor the timing tells the caller which accounts exist; a delivery failure is only logged. A link is emailed only to an active account that has a password and whose company is active (a pending account still needs a new activation link from an administrator). The link opens `APPLICATION_URL/reset-password?token=...`, works once, expires after PASSWORD_RESET_TOKEN_TTL_SECONDS (1 hour) and replaces any earlier reset link of the account. At most PASSWORD_RESET_MAX_REQUESTS (3) requests per username or email are accepted in PASSWORD_RESET_WINDOW_SECONDS (1 hour), whether or not an account matches; the next one answers 429 `RATE_LIMITED` with a message saying how many minutes to wait. An account is also sent at most 3 links an hour in total. No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (identifier missing or over 254 characters), 429 `RATE_LIMITED`, 503 `SERVICE_UNAVAILABLE`.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request was accepted. The same answer is given when no account matches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ForgotPasswordResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "authDescribePasswordReset",
+        "summary": "Describe a password reset link",
+        "description": "Looks up a password reset token (from the reset email link) and returns the account it is for, so the reset page can greet the user before they choose a password. No authentication. Errors: 400 `INVALID_RESET_TOKEN` (missing, unknown, used, replaced by a newer link, expired, or the account is no longer active), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "description": "The reset token from the password reset link.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account the token resets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/PasswordResetDetails"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "authResetPassword",
+        "summary": "Set a new password with a reset link",
+        "description": "Consumes a password reset token, sets the account's new password, revokes every earlier session of the account, clears any sign-in lockout on its username and email, and signs the user in. On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (token missing or over 200 characters; password policy: at least MIN_PASSWORD_LENGTH characters (default 8), at most 200, with at least one digit or symbol), 400 `INVALID_RESET_TOKEN` (unknown, used, replaced, expired, or the account is no longer active), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed and signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthSession"
+                    }
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "description": "Session cookies: `da_access` (HttpOnly, path `/`, lifetime ACCESS_TOKEN_TTL_SECONDS), `da_refresh` (HttpOnly, path `/api/auth`, lives until the refresh token expires) and `da_csrf` (readable by scripts, path `/`, same lifetime as the refresh token). A legacy `da_access` cookie at path `/api` is cleared.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/platform/overview": {
       "get": {
         "tags": [
@@ -705,7 +877,7 @@
         ],
         "operationId": "listPlatformFeatures",
         "summary": "Feature catalogue",
-        "description": "Lists every product feature from the catalogue. Locked features are always on for every company; the others can be switched per company. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `company.read` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
+        "description": "Lists every product feature from the catalogue. Locked features are always on for every company; the others can be switched per company. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `company.read` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password. Hidden features (Dashboards and Agents) are left out here and from every other response, with their permissions; saving a company's features keeps whatever was stored for them.",
         "security": [
           {
             "cookieAuth": []
@@ -1140,7 +1312,7 @@
         ],
         "operationId": "deletePlatformCompany",
         "summary": "Delete a company",
-        "description": "Permanently deletes a company. Refused with 409 `CONFLICT` while the company still has any user accounts. Errors: 400 `VALIDATION_ERROR` (bad id), 404 `RESOURCE_NOT_FOUND`. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `company.delete` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password. State-changing request: the `X-CSRF-Token` header must equal the `da_csrf` cookie, otherwise 403 `CSRF_TOKEN_INVALID`.",
+        "description": "Deletes a company (soft delete): the row is kept with `deleted_at`/`deleted_by` and the company disappears everywhere, together with its groups, roles, dashboards and contexts, which are soft-deleted with it. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its name and slug can be used again. Refused with 409 `CONFLICT` while the company still has accounts that are not deleted. Errors: 400 `VALIDATION_ERROR` (bad id), 404 `RESOURCE_NOT_FOUND`. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `company.delete` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password. State-changing request: the `X-CSRF-Token` header must equal the `da_csrf` cookie, otherwise 403 `CSRF_TOKEN_INVALID`.",
         "security": [
           {
             "cookieAuth": [],
@@ -1160,6 +1332,16 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -1188,6 +1370,10 @@
                         "deleted": {
                           "type": "boolean",
                           "const": true
+                        },
+                        "permanent": {
+                          "type": "boolean",
+                          "description": "True when the record was removed for good."
                         }
                       }
                     }
@@ -1667,7 +1853,7 @@
         ],
         "operationId": "listSystemRoles",
         "summary": "List system roles",
-        "description": "Lists the three system roles (SUPER_ADMIN, COMPANY_ADMIN, USER) with the number of accounts holding a role of that tier. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `role.read` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
+        "description": "Lists the four system roles (SUPER_ADMIN - the one platform owner, PLATFORM_ADMIN, COMPANY_ADMIN, USER) with the number of accounts holding a role of that tier. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `role.read` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
         "security": [
           {
             "cookieAuth": []
@@ -1703,6 +1889,65 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/platform/roles/assignable": {
+      "get": {
+        "tags": [
+          "System roles"
+        ],
+        "operationId": "listAssignableRoles",
+        "summary": "Roles an account may be given",
+        "description": "The built-in roles to offer when creating or editing an account. With `companyId`, an account of that company: Company admin and Member only, never a platform role. Without it, a platform account: Platform admin, offered only to the platform owner (an empty list for platform admins). SUPER_ADMIN is never offered: there is only one platform owner. Company roles a company created are listed by `GET /api/roles`. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `user.create` permission (403 `INSUFFICIENT_PERMISSION`). Errors: 400 `VALIDATION_ERROR` (companyId not a positive integer). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "The company the account belongs to. Leave it out for a platform account.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The roles to offer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AssignableRoles"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2349,7 +2594,7 @@
         ],
         "operationId": "deleteDashboard",
         "summary": "Delete a dashboard",
-        "description": "Deletes a dashboard and its grants. Company accounts may only delete dashboards that belong to their company; platform templates (no company) can only be deleted by platform accounts (403 `TENANT_ACCESS_DENIED` otherwise). Errors: 400 `INVALID_DASHBOARD_ID`, 404 `DASHBOARD_NOT_FOUND`. Requires the `dashboard.delete` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires at least `admin` access to the dashboard (403 `INSUFFICIENT_PERMISSION` when weaker; 404 `DASHBOARD_NOT_FOUND` when the caller holds no access or it does not exist). Platform accounts and holders of `access.grant` count as `admin` on dashboards available to them. Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password. State-changing request: the `X-CSRF-Token` header must equal the `da_csrf` cookie, otherwise 403 `CSRF_TOKEN_INVALID`.",
+        "description": "Deletes a dashboard (soft delete): the row is kept with `deleted_at`/`deleted_by`, its grants and company assignments stay in place, and the dashboard answers 404 everywhere. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. A dashboard that exists only as a JSON file gets a deleted database row so it stays hidden. Its id is not reused. Company accounts may only delete dashboards that belong to their company; platform templates (no company) can only be deleted by platform accounts (403 `TENANT_ACCESS_DENIED` otherwise). Errors: 400 `INVALID_DASHBOARD_ID`, 404 `DASHBOARD_NOT_FOUND`. Requires the `dashboard.delete` permission (403 `INSUFFICIENT_PERMISSION`, or `FEATURE_NOT_ENABLED` when the permission belongs to a feature the company does not have). Requires at least `admin` access to the dashboard (403 `INSUFFICIENT_PERMISSION` when weaker; 404 `DASHBOARD_NOT_FOUND` when the caller holds no access or it does not exist). Platform accounts and holders of `access.grant` count as `admin` on dashboards available to them. Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password. State-changing request: the `X-CSRF-Token` header must equal the `da_csrf` cookie, otherwise 403 `CSRF_TOKEN_INVALID`.",
         "security": [
           {
             "cookieAuth": [],
@@ -2370,6 +2615,16 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{1,64}$",
               "maxLength": 64
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -2402,6 +2657,10 @@
                         },
                         "dashboardId": {
                           "type": "string"
+                        },
+                        "permanent": {
+                          "type": "boolean",
+                          "description": "True when the record was removed for good."
                         }
                       }
                     }
@@ -2747,7 +3006,7 @@
         ],
         "operationId": "createUser",
         "summary": "Create an account and email an activation link",
-        "description": "Creates a pending account and emails it an activation link. If the email cannot be sent the account is removed again and 502 EMAIL_DELIVERY_FAILED is returned. Errors: 400 VALIDATION_ERROR (missing or unknown role, bad username/email, companyId missing for the platform owner, company deactivated, customRoleId not a UUID or given for a platform account); 403 INSUFFICIENT_PERMISSION when a company account tries to create a SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown company or custom role; 409 CONFLICT when the username or email is taken.\n\nRequires permission `user.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Creates a pending account and emails it an activation link. SUPER_ADMIN cannot be given (400 VALIDATION_ERROR: there is only one platform owner); PLATFORM_ADMIN only by the platform owner (403 INSUFFICIENT_PERMISSION otherwise) and never to a company account. If the email cannot be sent the account is removed again and 502 EMAIL_DELIVERY_FAILED is returned. Errors: 400 VALIDATION_ERROR (missing or unknown role, bad username/email, companyId missing for the platform owner, company deactivated, customRoleId not a UUID or given for a platform account); 403 INSUFFICIENT_PERMISSION when a company account tries to create a SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown company or custom role; 409 CONFLICT when the username or email is taken.\n\nRequires permission `user.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.create"
         ],
@@ -2890,7 +3149,7 @@
         ],
         "operationId": "updateUser",
         "summary": "Update an account",
-        "description": "Changes the role tier, custom company role and/or display name of an account and returns the updated account. Changing the role tier signs the account out of every session. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible. Also 400 VALIDATION_ERROR for an unknown role, a role that does not fit the account's company, an invalid customRoleId or nothing to update; 403 INSUFFICIENT_PERMISSION when a company account assigns SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown custom role.\n\nRequires permission `user.update` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Changes the role tier, custom company role and/or display name of an account and returns the updated account. SUPER_ADMIN cannot be given (400 VALIDATION_ERROR: there is only one platform owner); PLATFORM_ADMIN only by the platform owner (403 INSUFFICIENT_PERMISSION otherwise) and never to a company account. Changing the role tier signs the account out of every session. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible. Also 400 VALIDATION_ERROR for an unknown role, a role that does not fit the account's company, an invalid customRoleId or nothing to update; 403 INSUFFICIENT_PERMISSION when a company account assigns SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown custom role.\n\nRequires permission `user.update` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.update"
         ],
@@ -2969,7 +3228,7 @@
         ],
         "operationId": "deleteUser",
         "summary": "Delete an account",
-        "description": "Permanently deletes an account. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible.\n\nRequires permission `user.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Deletes an account (soft delete): the row is kept with `deleted_at`/`deleted_by` and status `disabled`, every session is ended, its activation and password reset links stop working, and it disappears from every list, lookup and sign-in. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its username and email can be used again. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible.\n\nRequires permission `user.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.delete"
         ],
@@ -2988,6 +3247,16 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -3911,7 +4180,7 @@
         ],
         "operationId": "deleteGroup",
         "summary": "Delete a group",
-        "description": "Deletes a group. 404 RESOURCE_NOT_FOUND when the group is not visible to the caller.\n\nRequires permission `group.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Deletes a group (soft delete): the row is kept with `deleted_at`/`deleted_by`, the group becomes inactive so it grants nothing, and it disappears from every list. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its name can be used again. 404 RESOURCE_NOT_FOUND when the group is not visible to the caller.\n\nRequires permission `group.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "group.delete"
         ],
@@ -3930,6 +4199,16 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -5537,7 +5816,7 @@
         ],
         "operationId": "deleteCompanyRole",
         "summary": "Delete a custom company role",
-        "description": "Deletes a custom role. 404 RESOURCE_NOT_FOUND when the role is not visible; 409 CONFLICT while any account still holds the role.\n\nRequires permission `role.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Deletes a custom role (soft delete): the row is kept with `deleted_at`/`deleted_by`, it disappears from every list and can no longer be given to anyone. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its name can be used again. 404 RESOURCE_NOT_FOUND when the role is not visible; 409 CONFLICT while any account that is not deleted still holds the role.\n\nRequires permission `role.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "role.delete"
         ],
@@ -5556,6 +5835,16 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -5666,7 +5955,7 @@
         ],
         "operationId": "listContextConnections",
         "summary": "List connections",
-        "description": "Lists the connections the caller can see, ordered by provider then name, each with its selected-dataset count, the caller's access and a headline of its draft and latest published version. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created, ones with general access `company`, and ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Lists the connections the caller can see, ordered by provider then name, each with its selected-dataset count, the caller's access and a headline of its draft and latest published version. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created and the ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -5797,7 +6086,7 @@
         ],
         "operationId": "listContextDraftConnections",
         "summary": "List draft contexts",
-        "description": "Pages through the visible connections that have an open draft or have never been published, newest activity first (draft update time, else connection creation time). `search` (trimmed, max 100 characters) matches the connection name or the draft name, case-insensitively. `page` defaults to 1; `pageSize` defaults to 10 and is capped at 50; invalid values fall back to the defaults. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created, ones with general access `company`, and ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Pages through the visible connections that have an open draft or have never been published, newest activity first (draft update time, else connection creation time). `search` (trimmed, max 100 characters) matches the connection name or the draft name, case-insensitively. `page` defaults to 1; `pageSize` defaults to 10 and is capped at 50; invalid values fall back to the defaults. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created and the ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -5886,7 +6175,7 @@
         ],
         "operationId": "listContextPublishedVersions",
         "summary": "List published contexts with versions",
-        "description": "Lists every published version the caller can see, grouped per context (connection + context name), groups ordered by their newest publish time; within a group versions are newest first and the first is flagged `live`. `search` (trimmed, max 100 characters) matches the version name or the connection name. Paged by group: `page` defaults to 1, `pageSize` defaults to 10 and is capped at 50 (the page values are not echoed back). Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created, ones with general access `company`, and ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Lists every published version the caller can see, grouped per context (connection + context name), groups ordered by their newest publish time; within a group versions are newest first and the first is flagged `live`. `search` (trimmed, max 100 characters) matches the version name or the connection name. Paged by group: `page` defaults to 1, `pageSize` defaults to 10 and is capped at 50 (the page values are not echoed back). Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created and the ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -5949,7 +6238,7 @@
         ],
         "operationId": "listContextPublishedConnections",
         "summary": "List connections with a published context",
-        "description": "Lists the visible connections that have at least one published version, as `{ id, name }` pairs ordered by name (used by the chat context picker). Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created, ones with general access `company`, and ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Lists the visible connections that have at least one published version, as `{ id, name }` pairs ordered by name (used by the chat context picker). Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created and the ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6004,7 +6293,7 @@
         ],
         "operationId": "listContextPublishedVersionOptions",
         "summary": "List published versions for pickers",
-        "description": "Lists every published version of the visible connections as a flat list ordered by context name, connection name, then version (highest first), flagging the highest version of each connection + name as `live`. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created, ones with general access `company`, and ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Lists every published version of the visible connections as a flat list ordered by context name, connection name, then version (highest first), flagging the highest version of each connection + name as `live`. Results are company-scoped (platform accounts see every company). Platform accounts and holders of `context.manage_all` see every connection in scope; anyone else sees the connections they created and the ones shared with them directly or through an active group. Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6059,7 +6348,7 @@
         ],
         "operationId": "getContextConnectionMcp",
         "summary": "Get MCP connection details",
-        "description": "Returns how an MCP client connects to the latest published context of this connection: server URL, transport, auth mode, the available tools and a ready-made client configuration. No token is included. 404 RESOURCE_NOT_FOUND when the connection has no published context yet. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns how an MCP client connects to the latest published context of this connection: server URL, transport, auth mode, the available tools and a ready-made client configuration. No token is included. 404 RESOURCE_NOT_FOUND when the connection has no published context yet. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6127,7 +6416,7 @@
         ],
         "operationId": "getContextConnection",
         "summary": "Get a connection",
-        "description": "Returns one connection with its selected datasets and the caller's access. With `version`, `selectedDatasets` are the datasets recorded in that published version instead of the current selection. The token is never returned, only `secretHint`. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns one connection with its selected datasets and the caller's access. With `version`, `selectedDatasets` are the datasets recorded in that published version instead of the current selection. The token is never returned, only `secretHint`. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6209,7 +6498,7 @@
         ],
         "operationId": "deleteContextConnection",
         "summary": "Delete a connection (context)",
-        "description": "Deletes the connection together with everything stored under it (datasets, versions, grants). Requires full access to the context: its owner, a platform account, a context.manage_all holder, or a full grant. A caller with only view/edit access gets 403; one who cannot see it gets 404. Returns 200 with a body, not 204.",
+        "description": "Deletes the connection (soft delete): the row is kept with `deleted_at`/`deleted_by`, together with its datasets, versions, reviews and shares, and the context answers 404 everywhere, the agent gate included. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its name can be used again. Requires full access to the context: its owner, a platform account, a context.manage_all holder, or a full grant. A caller with only view/edit access gets 403; one who cannot see it gets 404. Returns 200 with a body, not 204.",
         "x-permissions": [
           "context.delete"
         ],
@@ -6223,6 +6512,16 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -6272,7 +6571,7 @@
         ],
         "operationId": "getContextProfile",
         "summary": "Get the context name and description",
-        "description": "Returns the name and description saved for this connection's context, or `null` when none has been saved yet. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns the name and description saved for this connection's context, or `null` when none has been saved yet. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6345,7 +6644,7 @@
         ],
         "operationId": "saveContextProfile",
         "summary": "Save the context name and description",
-        "description": "Creates or replaces the name and description of this connection's context (one per connection). 400 VALIDATION_ERROR when `name` is missing, blank or longer than 120 characters. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Creates or replaces the name and description of this connection's context (one per connection). 400 VALIDATION_ERROR when `name` is missing, blank or longer than 120 characters. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -6427,7 +6726,7 @@
         ],
         "operationId": "verifyContextConnection",
         "summary": "Re-check a connection",
-        "description": "Checks the stored token against the warehouse again and returns the refreshed connection and the account the token belongs to. No request body. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Checks the stored token against the warehouse again and returns the refreshed connection and the account the token belongs to. No request body. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -6505,7 +6804,7 @@
         ],
         "operationId": "listContextConnectionDatasets",
         "summary": "Browse datasets",
-        "description": "Pages through the datasets available in the warehouse. Live listing: `pageSize` must be 10, 25 or 50 (anything else becomes 25), `page` defaults to 1, `search` (max 100 characters) filters by name, and a UUID-shaped `search` looks the dataset up by id (page 1 only). Pages are cached for 2 minutes per instance and token; `fresh=true` bypasses and clears that cache. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. With `version`, the datasets recorded in that published version are listed instead, without calling the warehouse: `search` filters by name, `pageSize` defaults to 25 and is capped at 50. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Pages through the datasets available in the warehouse. Live listing: `pageSize` must be 10, 25 or 50 (anything else becomes 25), `page` defaults to 1, `search` (max 100 characters) filters by name, and a UUID-shaped `search` looks the dataset up by id (page 1 only). Pages are cached for 2 minutes per instance and token; `fresh=true` bypasses and clears that cache. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. With `version`, the datasets recorded in that published version are listed instead, without calling the warehouse: `search` filters by name, `pageSize` defaults to 25 and is capped at 50. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6694,7 +6993,7 @@
         ],
         "operationId": "getContextConnectionProfile",
         "summary": "Get the dataset overview",
-        "description": "Returns an overview of the selected datasets (or, with `version`, of the datasets recorded in that published version), each treated as one table with its row and column counts. Does not call the warehouse. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns an overview of the selected datasets (or, with `version`, of the datasets recorded in that published version), each treated as one table with its row and column counts. Does not call the warehouse. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6772,7 +7071,7 @@
         ],
         "operationId": "getContextTableProfile",
         "summary": "Profile one table",
-        "description": "Profiles one table (dataset). Live: the table must be one of the connection's selected datasets (404 RESOURCE_NOT_FOUND otherwise); the warehouse record, up to 500 sample rows and the stored size are fetched and column statistics are computed from the sample. 400 VALIDATION_ERROR when the connector cannot profile tables. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. With `version`: the table must be part of that published version (404 otherwise) and the profile is rebuilt from the version's stored facts without calling the warehouse. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Profiles one table (dataset). Live: the table must be one of the connection's selected datasets (404 RESOURCE_NOT_FOUND otherwise); the warehouse record, up to 500 sample rows and the stored size are fetched and column statistics are computed from the sample. 400 VALIDATION_ERROR when the connector cannot profile tables. Calls the warehouse (Domo) with the stored token: 400 CONNECTOR_AUTH_FAILED when the warehouse rejects the token or the stored token cannot be decrypted (the connection is then marked `invalid`), 502 CONNECTOR_UNREACHABLE when the instance cannot be reached, times out (20 s) or answers with an error or an unrecognised shape, 429 RATE_LIMITED when too many warehouse requests are already queued for that instance. A successful call marks the connection `connected` and updates `lastVerifiedAt`. With `version`: the table must be part of that published version (404 otherwise) and the profile is rebuilt from the version's stored facts without calling the warehouse. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6869,7 +7168,7 @@
         ],
         "operationId": "getContextVersionState",
         "summary": "List versions",
-        "description": "Returns the version state of the connection: the open draft (if any), the latest published version and every version, newest first. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns the version state of the connection: the open draft (if any), the latest published version and every version, newest first. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6935,7 +7234,7 @@
         ],
         "operationId": "createContextVersion",
         "summary": "Start a new version",
-        "description": "Opens a draft for the next version (named after the latest published version, or the connection, and numbered after it) at the `discover` step, or touches the existing draft, moving it forward to `discover` if it is earlier. Returns the resulting version state. No request body. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Opens a draft for the next version (named after the latest published version, or the connection, and numbered after it) at the `discover` step, or touches the existing draft, moving it forward to `discover` if it is earlier. Returns the resulting version state. No request body. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -7004,7 +7303,7 @@
         ],
         "operationId": "deleteContextVersion",
         "summary": "Delete a published version",
-        "description": "Permanently deletes one published version of the connection (drafts cannot be deleted here). 404 RESOURCE_NOT_FOUND (\"Published version not found\") when the id is not a published version of this connection. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `full` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you delete it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Deletes one published version of the connection (soft delete; drafts cannot be deleted here): the row is kept with `deleted_at`/`deleted_by` and disappears from the history, version mode and the published lists. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`. Its version number is not reused. 404 RESOURCE_NOT_FOUND (\"Published version not found\") when the id is not a published version of this connection. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `full` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you delete it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -7035,6 +7334,16 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
@@ -7061,6 +7370,10 @@
                       "properties": {
                         "deleted": {
                           "$ref": "#/components/schemas/ContextDeletedVersion"
+                        },
+                        "permanent": {
+                          "type": "boolean",
+                          "description": "True when the record was removed for good."
                         }
                       }
                     }
@@ -7091,7 +7404,7 @@
         ],
         "operationId": "trackContextDraftStep",
         "summary": "Record the wizard step",
-        "description": "Moves the open draft forward to `step` (it never moves backwards). Does not create a draft: `draft` is null when the connection has none. 400 VALIDATION_ERROR for a missing or unknown step. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Moves the open draft forward to `step` (it never moves backwards). Does not create a draft: `draft` is null when the connection has none. 400 VALIDATION_ERROR for a missing or unknown step. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -7173,7 +7486,7 @@
         ],
         "operationId": "getContextExtraction",
         "summary": "Get the extraction report",
-        "description": "Returns the most recent extraction report recorded on any version of the connection, or the one of a specific published version when `version` is given; `null` when there is none. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns the most recent extraction report recorded on any version of the connection, or the one of a specific published version when `version` is given; `null` when there is none. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -7256,7 +7569,7 @@
         ],
         "operationId": "recordContextExtraction",
         "summary": "Record an extraction report",
-        "description": "Stores an agent-produced extraction report on the draft (opening one if needed), sets its extraction mode to `agent`, and moves the draft forward to the `understand` step. 400 VALIDATION_ERROR when `report` is missing or blank. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share, their group shares, or `view` when the connection's general access is `company`. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Stores an agent-produced extraction report on the draft (opening one if needed), sets its extraction mode to `agent`, and moves the draft forward to the `understand` step. 400 VALIDATION_ERROR when `report` is missing or blank. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": [],
@@ -7351,7 +7664,7 @@
         ],
         "operationId": "getContextGlossary",
         "summary": "Business glossary (Understand step)",
-        "description": "Glossary built from the table, metric and glossary facts of the latest extraction run (or a published version). Each fact becomes a term typed Entity (table), Metric (metric), Dimension (glossary fact with payload.kind \"dimension\") or Term (other glossary facts), sorted by type then name. \"stats\" always describes all terms; \"matched\" and \"terms\" honour filter and search. search matches the term, its definition and appliesTo (case-insensitive). Default page size is 10 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Glossary built from the table, metric and glossary facts of the latest extraction run (or a published version). Each fact becomes a term typed Entity (table), Metric (metric), Dimension (glossary fact with payload.kind \"dimension\") or Term (other glossary facts), sorted by type then name. \"stats\" always describes all terms; \"matched\" and \"terms\" honour filter and search. search matches the term, its definition and appliesTo (case-insensitive). Default page size is 10 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7458,7 +7771,7 @@
         ],
         "operationId": "listContextObjects",
         "summary": "List facts (context objects)",
-        "description": "Pages through the raw facts the extraction agent recorded for the latest extraction run of this connection (or for a published version's snapshot), ordered by object type, qualified name and id. Filters: type, minConfidence and search (matches the qualified name or the payload text, first 100 characters used). Review status is not filterable here. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Pages through the raw facts the extraction agent recorded for the latest extraction run of this connection (or for a published version's snapshot), ordered by object type, qualified name and id. Filters: type, minConfidence and search (matches the qualified name or the payload text, first 100 characters used). Review status is not filterable here. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7572,7 +7885,7 @@
         ],
         "operationId": "listContextFactsByTable",
         "summary": "Facts grouped per table",
-        "description": "Groups the facts of the latest extraction run (or a published version) by table: each table fact with its column_stats facts and the other facts that mention the table by name (\"related\"; a fact can appear under several tables). Facts tied to no table are returned in \"unattached\" (not paged). Tables are sorted by name and paged (default page size 10, max 100). search (first 100 characters) keeps tables where the table, a column or a related fact matches; review=pending keeps only pending facts and tables that are pending or have pending columns. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Groups the facts of the latest extraction run (or a published version) by table: each table fact with its column_stats facts and the other facts that mention the table by name (\"related\"; a fact can appear under several tables). Facts tied to no table are returned in \"unattached\" (not paged). Tables are sorted by name and paged (default page size 10, max 100). search (first 100 characters) keeps tables where the table, a column or a related fact matches; review=pending keeps only pending facts and tables that are pending or have pending columns. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7674,7 +7987,7 @@
         ],
         "operationId": "getContextModelGraph",
         "summary": "Data model graph (Model step)",
-        "description": "Builds the relationship graph from the facts of the latest extraction run (or a published version): one node per table fact (columns from the table payload and column_stats facts), one edge per join fact, plus inferred edges for declared foreign keys (confidence 1), columns named like another table's primary key (0.8) and same-named non-generic columns (0.5) between tables not already joined. status is \"pending\" when no facts exist yet. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Builds the relationship graph from the facts of the latest extraction run (or a published version): one node per table fact (columns from the table payload and column_stats facts), one edge per join fact, plus inferred edges for declared foreign keys (confidence 1), columns named like another table's primary key (0.8) and same-named non-generic columns (0.5) between tables not already joined. status is \"pending\" when no facts exist yet. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7752,7 +8065,7 @@
         ],
         "operationId": "listReviewQueue",
         "summary": "Review queue",
-        "description": "Pages through the facts to review for the latest extraction run (or, read-only, a published version where everything is approved), ordered by object type, qualified name and id. Filters: type, status, minConfidence, search (qualified name or payload text, first 100 characters used). Also reports how many pending facts have confidence of at least 0.9 (respecting the type filter only), for the \"approve high-confidence\" action. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Pages through the facts to review for the latest extraction run (or, read-only, a published version where everything is approved), ordered by object type, qualified name and id. Filters: type, status, minConfidence, search (qualified name or payload text, first 100 characters used). Also reports how many pending facts have confidence of at least 0.9 (respecting the type filter only), for the \"approve high-confidence\" action. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8161,7 +8474,7 @@
         ],
         "operationId": "getPublishSummary",
         "summary": "Publish step summary",
-        "description": "What publishing would contain: counts of approved and pending facts, datasets, tables and facts per kind, which content sections are included, the suggested name and previous version number, the open draft, and blockers/warnings (\"nothing-approved\" blocker, \"pending-review\" warning). With ?version= it describes that published version instead: no blockers, ready is false, draft is null. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "What publishing would contain: counts of approved and pending facts, datasets, tables and facts per kind, which content sections are included, the suggested name and previous version number, the open draft, and blockers/warnings (\"nothing-approved\" blocker, \"pending-review\" warning). With ?version= it describes that published version instead: no blockers, ready is false, draft is null. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8240,7 +8553,7 @@
         ],
         "operationId": "validateContextPublish",
         "summary": "Check whether the context can be published",
-        "description": "Runs the publish summary checks for the current draft and splits them into blockers and warnings. valid is false only when a blocker exists (nothing approved yet). No request body; nothing is written. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Runs the publish summary checks for the current draft and splits them into blockers and warnings. valid is false only when a blocker exists (nothing approved yet). No request body; nothing is written. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8308,7 +8621,7 @@
         ],
         "operationId": "listContextPublications",
         "summary": "List published versions of the context",
-        "description": "Every published version of this connection, newest first. Not paged. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Every published version of this connection, newest first. Not paged. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8459,7 +8772,7 @@
         ],
         "operationId": "getContextSharing",
         "summary": "Sharing state of a context",
-        "description": "Owner, general access, the context access levels (from the access_control.access_levels catalogue), the user and group grants, and the caller's own level and whether they may share. Anyone who can see the context may read this. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access \"company\" (view). A context the caller cannot see is reported as 404.",
+        "description": "Owner, general access, the context access levels (from the access_control.access_levels catalogue), the user and group grants, and the caller's own level and whether they may share. Anyone who can see the context may read this. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8527,7 +8840,7 @@
         ],
         "operationId": "listContextShareablePeople",
         "summary": "People the context can be shared with",
-        "description": "Active users of the connection's company, excluding the owner, ordered by display name (or username). Not paged. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Active users of the connection's company, excluding the owner, ordered by display name (or username). Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8599,7 +8912,7 @@
         ],
         "operationId": "setContextGeneralAccess",
         "summary": "Set general access",
-        "description": "Sets who can see the context without a grant: \"restricted\" (only the owner, admins and grantees) or \"company\" (everyone in the company gets view). Setting the current value is a no-op. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Kept for compatibility: the only accepted value is \"restricted\" (only the owner, admins and the people and groups it is shared with can see the context). \"company\" is refused with 400 VALIDATION_ERROR - a context can no longer be opened to the whole company. Setting the current value is a no-op. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -8681,7 +8994,7 @@
         ],
         "operationId": "shareContextWithUser",
         "summary": "Grant or change a user's access",
-        "description": "Creates or replaces the user's grant on this context with the given access level. The user must be active and belong to the connection's company (otherwise 404 \"User not found\"); granting to the owner returns 400. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Creates or replaces the user's grant on this context with the given access level. The user must be active and belong to the connection's company (otherwise 404 \"User not found\"); granting to the owner returns 400. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -8771,7 +9084,7 @@
         ],
         "operationId": "unshareContextWithUser",
         "summary": "Remove a user's grant",
-        "description": "Removes the user's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Removes the user's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -8852,7 +9165,7 @@
         ],
         "operationId": "listContextShareableGroups",
         "summary": "Groups the context can be shared with",
-        "description": "Active groups of the connection's company with their member counts, ordered by name. Not paged. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Active groups of the connection's company with their member counts, ordered by name. Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8924,7 +9237,7 @@
         ],
         "operationId": "shareContextWithGroup",
         "summary": "Grant or change a group's access",
-        "description": "Creates or replaces the group's grant on this context with the given access level. Members get the strongest of their user grant, group grants and general access. The group must be active and belong to the connection's company (otherwise 404 \"Group not found\"). Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Creates or replaces the group's grant on this context with the given access level. Members get the strongest of their user grant and group grants. The group must be active and belong to the connection's company (otherwise 404 \"Group not found\"). Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -9014,7 +9327,7 @@
         ],
         "operationId": "unshareContextWithGroup",
         "summary": "Remove a group's grant",
-        "description": "Removes the group's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only the person who may share the context can call this: its creator, or - when the context has no recorded creator - a platform account or context.manage_all holder (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Removes the group's grant on this context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -9199,7 +9512,7 @@
         ],
         "operationId": "listUsersAsPlatformOwner",
         "summary": "List accounts",
-        "description": "Platform-owner version of `GET /api/users`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company.\n\nReturns one page of accounts. Company accounts see their own company only; the platform owner sees every account and may filter by company. Defaults: pageSize 15 (max 100), sort name, dir asc. Search matches username, email and display name. 400 VALIDATION_ERROR for bad paging, sort, dir, companyId, role or status values.\n\nRequires permission `user.read` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Platform-owner version of `GET /api/users`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company.\n\nReturns one page of accounts. Company accounts see their own company only; the platform owner sees every account and may filter by company. Defaults: pageSize 15 (max 100), sort name, dir asc. Search matches username, email and display name. 400 VALIDATION_ERROR for bad paging, sort, dir, companyId, role or status values.\n\nRequires permission `user.read` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready. Platform accounts (the platform owner and platform admins) are listed only to the platform owner; a platform admin sees company accounts only, and gets 404 for a platform account by id.",
         "x-permissions": [
           "user.read"
         ],
@@ -9322,7 +9635,7 @@
         ],
         "operationId": "createUserAsPlatformOwner",
         "summary": "Create an account and email an activation link",
-        "description": "Platform-owner version of `POST /api/users`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company.\n\nCreates a pending account and emails it an activation link. If the email cannot be sent the account is removed again and 502 EMAIL_DELIVERY_FAILED is returned. Errors: 400 VALIDATION_ERROR (missing or unknown role, bad username/email, companyId missing for the platform owner, company deactivated, customRoleId not a UUID or given for a platform account); 403 INSUFFICIENT_PERMISSION when a company account tries to create a SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown company or custom role; 409 CONFLICT when the username or email is taken.\n\nRequires permission `user.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Platform-owner version of `POST /api/users`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company. SUPER_ADMIN cannot be given (400 VALIDATION_ERROR: there is only one platform owner); PLATFORM_ADMIN only by the platform owner (403 INSUFFICIENT_PERMISSION otherwise) and never to a company account.\n\nCreates a pending account and emails it an activation link. If the email cannot be sent the account is removed again and 502 EMAIL_DELIVERY_FAILED is returned. Errors: 400 VALIDATION_ERROR (missing or unknown role, bad username/email, companyId missing for the platform owner, company deactivated, customRoleId not a UUID or given for a platform account); 403 INSUFFICIENT_PERMISSION when a company account tries to create a SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown company or custom role; 409 CONFLICT when the username or email is taken.\n\nRequires permission `user.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.create"
         ],
@@ -9467,7 +9780,7 @@
         ],
         "operationId": "updateUserAsPlatformOwner",
         "summary": "Update an account",
-        "description": "Platform-owner version of `PATCH /api/users/{id}`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company.\n\nChanges the role tier, custom company role and/or display name of an account and returns the updated account. Changing the role tier signs the account out of every session. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible. Also 400 VALIDATION_ERROR for an unknown role, a role that does not fit the account's company, an invalid customRoleId or nothing to update; 403 INSUFFICIENT_PERMISSION when a company account assigns SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown custom role.\n\nRequires permission `user.update` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Platform-owner version of `PATCH /api/users/{id}`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company. SUPER_ADMIN cannot be given (400 VALIDATION_ERROR: there is only one platform owner); PLATFORM_ADMIN only by the platform owner (403 INSUFFICIENT_PERMISSION otherwise) and never to a company account.\n\nChanges the role tier, custom company role and/or display name of an account and returns the updated account. Changing the role tier signs the account out of every session. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible. Also 400 VALIDATION_ERROR for an unknown role, a role that does not fit the account's company, an invalid customRoleId or nothing to update; 403 INSUFFICIENT_PERMISSION when a company account assigns SUPER_ADMIN; 404 RESOURCE_NOT_FOUND for an unknown custom role.\n\nRequires permission `user.update` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.update"
         ],
@@ -9547,7 +9860,7 @@
         ],
         "operationId": "deleteUserAsPlatformOwner",
         "summary": "Delete an account",
-        "description": "Platform-owner version of `DELETE /api/users/{id}`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company.\n\nPermanently deletes an account. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible.\n\nRequires permission `user.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Platform-owner version of `DELETE /api/users/{id}`: the same handler, mounted under /api/platform behind requirePlatform, so it can act on any company. Without `?permanent=true` the delete is soft: the row is kept with `deleted_at`/`deleted_by` and hidden everywhere. With it, the record is removed from the database for good, together with what depends on it, and that also works on a record that was already soft-deleted; it needs the `delete.permanent` permission, held by company admins, platform admins and the platform owner, never by members (403 `INSUFFICIENT_PERMISSION` otherwise). The response says which one happened in `permanent`.\n\nDeletes an account (soft delete): the row is kept with `deleted_at`/`deleted_by` and status `disabled`, every session is ended, its activation and password reset links stop working, and it disappears from every list, lookup and sign-in. Its username and email can be used again. The caller must be allowed to manage the account: not their own account (400 VALIDATION_ERROR), and for company accounts only USER accounts of their own company (403 TENANT_ACCESS_DENIED for platform accounts, other companies and other administrators). 404 RESOURCE_NOT_FOUND when the account is not visible.\n\nRequires permission `user.delete` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "user.delete"
         ],
@@ -9566,6 +9879,16 @@
             "schema": {
               "type": "integer",
               "minimum": 1
+            }
+          },
+          {
+            "name": "permanent",
+            "in": "query",
+            "required": false,
+            "description": "`true` removes the record from the database for good (an already deleted record too) instead of keeping it as deleted. Needs the `delete.permanent` permission, otherwise 403 `INSUFFICIENT_PERMISSION`. `true`/`false`/`1`/`0`; anything else is 400 `VALIDATION_ERROR`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
             }
           }
         ],
@@ -10565,6 +10888,53 @@
           }
         }
       },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": [
+          "identifier"
+        ],
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 254,
+            "description": "Username or email of the account. `email` and `username` are accepted as aliases."
+          }
+        }
+      },
+      "ForgotPasswordResult": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "A neutral confirmation to show the user; identical whether or not an account matched."
+          }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Reset token from the password reset link."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200,
+            "description": "At least MIN_PASSWORD_LENGTH characters (default 8, configurable 8-128), at most 200, containing at least one non-letter (digit or symbol)."
+          }
+        }
+      },
       "UserProfile": {
         "type": "object",
         "description": "Public view of a user account (userSerializer.publicUser).",
@@ -10620,6 +10990,7 @@
             "type": "string",
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER"
             ],
@@ -10751,8 +11122,7 @@
         "type": "object",
         "required": [
           "state",
-          "user",
-          "dashboards"
+          "user"
         ],
         "properties": {
           "state": {
@@ -10764,13 +11134,6 @@
           },
           "user": {
             "$ref": "#/components/schemas/SessionUser"
-          },
-          "dashboards": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SessionDashboard"
-            },
-            "description": "Empty while a password change is required."
           }
         }
       },
@@ -10799,6 +11162,36 @@
         }
       },
       "ActivationDetails": {
+        "type": "object",
+        "required": [
+          "username",
+          "email",
+          "displayName",
+          "companyName"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PasswordResetDetails": {
         "type": "object",
         "required": [
           "username",
@@ -10908,8 +11301,6 @@
           "usersPending",
           "companyAdmins",
           "groups",
-          "assignments",
-          "dashboards",
           "factsGenerated",
           "factsPending"
         ],
@@ -10937,13 +11328,6 @@
             "type": "integer"
           },
           "groups": {
-            "type": "integer"
-          },
-          "assignments": {
-            "type": "integer",
-            "description": "Company-dashboard assignments."
-          },
-          "dashboards": {
             "type": "integer"
           },
           "factsGenerated": {
@@ -11045,14 +11429,10 @@
           "engine": {
             "type": "object",
             "required": [
-              "queryConcurrency",
-              "dashboardCount"
+              "queryConcurrency"
             ],
             "properties": {
               "queryConcurrency": {
-                "type": "integer"
-              },
-              "dashboardCount": {
                 "type": "integer"
               }
             }
@@ -11199,10 +11579,6 @@
           "userCount": {
             "type": "integer",
             "description": "Present on list and detail responses."
-          },
-          "dashboardCount": {
-            "type": "integer",
-            "description": "Assigned dashboards. Present on list and detail responses."
           },
           "pendingCount": {
             "type": "integer",
@@ -11454,6 +11830,7 @@
             "type": "string",
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER"
             ],
@@ -11501,6 +11878,7 @@
             "type": "string",
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER"
             ]
@@ -11552,8 +11930,6 @@
           "usersPending",
           "groups",
           "groupsActive",
-          "dashboards",
-          "dashboardsGranted",
           "factsGenerated",
           "factsPending"
         ],
@@ -11572,14 +11948,6 @@
           },
           "groupsActive": {
             "type": "integer"
-          },
-          "dashboards": {
-            "type": "integer",
-            "description": "Dashboards assigned to the company."
-          },
-          "dashboardsGranted": {
-            "type": "integer",
-            "description": "Dashboards the caller can open."
           },
           "factsGenerated": {
             "type": [
@@ -12345,6 +12713,7 @@
             ],
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER",
               null
@@ -12477,6 +12846,7 @@
             ],
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER",
               null
@@ -12581,7 +12951,7 @@
           "role": {
             "type": "string",
             "enum": [
-              "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER"
             ],
@@ -12609,7 +12979,7 @@
           "role": {
             "type": "string",
             "enum": [
-              "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER"
             ],
@@ -12641,6 +13011,10 @@
           "deleted": {
             "type": "boolean",
             "const": true
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "True when the record was removed for good."
           }
         }
       },
@@ -12797,6 +13171,7 @@
                 ],
                 "enum": [
                   "SUPER_ADMIN",
+                  "PLATFORM_ADMIN",
                   "COMPANY_ADMIN",
                   "USER",
                   null
@@ -13046,6 +13421,7 @@
             ],
             "enum": [
               "SUPER_ADMIN",
+              "PLATFORM_ADMIN",
               "COMPANY_ADMIN",
               "USER",
               null
@@ -14006,13 +14382,12 @@
           },
           "canShare": {
             "type": "boolean",
-            "description": "True for the owner; when the connection has no owner, true for platform accounts and holders of `context.manage_all`."
+            "description": "True for the owner, for holders of `context.manage_all` (company admins) and for platform accounts, whoever created the context. False for everyone else, whatever their level."
           },
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted",
-              "company"
+              "restricted"
             ],
             "description": "`company` gives every user of the company view access."
           }
@@ -17108,8 +17483,7 @@
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted",
-              "company"
+              "restricted"
             ]
           }
         }
@@ -17200,6 +17574,10 @@
           "deleted": {
             "type": "boolean",
             "const": true
+          },
+          "permanent": {
+            "type": "boolean",
+            "description": "True when the record was removed for good."
           }
         }
       },
@@ -17364,10 +17742,9 @@
           },
           "generalAccess": {
             "type": "string",
-            "description": "restricted = only owner, admins and grantees; company = everyone in the company can view.",
+            "description": "Always `restricted`: only the owner, admins and the people and groups it is shared with can see it.",
             "enum": [
-              "restricted",
-              "company"
+              "restricted"
             ]
           },
           "levels": {
@@ -17479,8 +17856,7 @@
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted",
-              "company"
+              "restricted"
             ]
           }
         }
@@ -17500,6 +17876,62 @@
               "b867ada1-5e89-4675-8792-951b56d1695d",
               "80bb5d1c-7589-485f-b1cd-32fe6993d8b3"
             ]
+          }
+        }
+      },
+      "AssignableRoles": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "roles"
+        ],
+        "properties": {
+          "companyId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The company asked about, or null for a platform account."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "role",
+                "label",
+                "description",
+                "scope"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "PLATFORM_ADMIN",
+                    "COMPANY_ADMIN",
+                    "USER"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "platform",
+                    "company"
+                  ]
+                }
+              }
+            }
           }
         }
       }

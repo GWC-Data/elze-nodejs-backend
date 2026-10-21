@@ -2,7 +2,13 @@ import config from '../../config';
 import * as userRepository from './userRepository';
 import { fail } from '../../shared/errors/AppError';
 import { publicUser, userListItem } from './userSerializer';
-import { resolveTargetCompany, assertCanAssignRole, assertCanManageUser } from '../auth/authorizationService';
+import {
+  resolveTargetCompany,
+  assertCanAssignRole,
+  assertCanManageUser,
+  assertPermission,
+  seesPlatformAccounts,
+} from '../auth/authorizationService';
 import { assertRoleCompanyPairing } from '../roles/roleService';
 import { requireActiveCompany } from '../companies/companyService';
 import { resolveAssignableRole, builtInRoleId } from '../roles/companyRoleService';
@@ -37,13 +43,20 @@ async function findActor(id: number) {
 }
 
 async function requireUserInScope(actor: Actor, id: number) {
-  const user = await userRepository.findInScope(actor, id);
+  return requireVisibleUser(actor, id);
+}
+
+async function requireVisibleUser(actor: Actor, id: number, { includeDeleted = false } = {}) {
+  const user = await userRepository.findInScope(actor, id, { includeDeleted });
   if (!user) throw fail('RESOURCE_NOT_FOUND', 'User not found');
+  if (scopeOfTier(user.role) === 'platform' && !seesPlatformAccounts(actor)) {
+    throw fail('RESOURCE_NOT_FOUND', 'User not found');
+  }
   return user;
 }
 
-async function requireManageable(actor: Actor, id: number) {
-  const target = await requireUserInScope(actor, id);
+async function requireManageable(actor: Actor, id: number, { includeDeleted = false } = {}) {
+  const target = await requireVisibleUser(actor, id, { includeDeleted });
   assertCanManageUser(actor, target);
   return target;
 }
@@ -64,6 +77,7 @@ async function listUsers(
   } else {
     filter.companyId = actor.companyId as number;
   }
+  if (actor.isPlatform && !seesPlatformAccounts(actor)) filter.companyAccountsOnly = true;
   if (role) {
     if (!scopeOfTier(String(role))) throw fail('VALIDATION_ERROR', `Unknown role: "${role}"`);
     filter.role = String(role);
@@ -237,14 +251,26 @@ async function reissueActivation(actor: Actor, id: number) {
   return currentUser(id);
 }
 
-async function deleteUser(actor: Actor, id: number): Promise<void> {
-  const target = await requireManageable(actor, id);
-  await userRepository.remove(id);
-  audit(EVENTS.USER_DELETED, actor, { userId: id, targetUsername: target.username });
+async function deleteUser(
+  actor: Actor,
+  id: number,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<void> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const target = await requireManageable(actor, id, { includeDeleted: permanent });
+  if (permanent) {
+    await userRepository.discard(id);
+  } else {
+    if (!(await userRepository.softDelete(id, actor.id))) throw fail('RESOURCE_NOT_FOUND', 'User not found');
+    await revokeAllForUser(id, 'account_deleted');
+  }
+  audit(EVENTS.USER_DELETED, actor, { userId: id, targetUsername: target.username, soft: !permanent, permanent });
 }
 
 const USER_SORTS = userRepository.USER_SORTS;
-const listUserOptions = userRepository.listOptions;
+function listUserOptions(actor: Actor) {
+  return userRepository.listOptions(actor, { companyAccountsOnly: actor.isPlatform && !seesPlatformAccounts(actor) });
+}
 
 export {
   USER_SORTS,

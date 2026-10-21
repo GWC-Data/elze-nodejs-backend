@@ -1,11 +1,21 @@
 import * as roleRepository from './roleRepository';
 import { fail, present } from '../../shared/errors/AppError';
-import { requireUuid } from '../../shared/validation/commonValidator';
-import { assertRolePermissionsAllowed } from '../auth/authorizationService';
+import { requireId, requireUuid } from '../../shared/validation/commonValidator';
+import { assertRolePermissionsAllowed, isPlatformOwner } from '../auth/authorizationService';
 import { followDefaults } from './builtInRolesService';
 import { audit, EVENTS } from '../audit/auditService';
-import { ROLE_SCOPES, SUPER_ADMIN, scopeOfTier } from '../catalogue/roleTiers';
-import { allPermissions, permissionByKey, permissionIdsOf, permissionKeysOf } from '../catalogue/catalogueService';
+import { COMPANY_ADMIN, PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
+import {
+  allPermissions,
+  hiddenPermissionKeys,
+  isHiddenPermission,
+  permissionByKey,
+  permissionIdsOf,
+  permissionKeysOf,
+  systemRoles,
+  visiblePermissionIds,
+  visiblePermissions,
+} from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
 
 function parsePermissionIds(value: unknown): string[] {
@@ -49,7 +59,7 @@ function assertRoleCompanyPairing(roleName: string, companyId: number | null | u
 }
 
 function permissionCatalogue() {
-  return allPermissions().map((p) => describePermission(p.key));
+  return visiblePermissions().map((p) => describePermission(p.key));
 }
 
 async function listRoles() {
@@ -62,6 +72,25 @@ async function listRoles() {
     description: r.description,
     userCount: Number(r.userCount),
   }));
+}
+
+function assignableRoles(actor: Actor, requestedCompanyId: unknown) {
+  const forCompany = requestedCompanyId !== undefined && requestedCompanyId !== null && requestedCompanyId !== '';
+  const companyId = forCompany ? requireId(requestedCompanyId, 'companyId') : null;
+  const tiers: string[] = forCompany ? [COMPANY_ADMIN, USER] : isPlatformOwner(actor) ? [PLATFORM_ADMIN] : [];
+  return {
+    companyId,
+    roles: systemRoles()
+      .filter((role) => tiers.includes(role.tier))
+      .sort((a, b) => tiers.indexOf(a.tier) - tiers.indexOf(b.tier))
+      .map((role) => ({
+        id: role.id,
+        role: role.tier,
+        label: role.name,
+        description: role.description,
+        scope: scopeOfTier(role.tier),
+      })),
+  };
 }
 
 async function requireSystemRole(id: unknown) {
@@ -77,7 +106,7 @@ function shapeRolePermissions(role: { id: string; tier: string; name: string }, 
     label: role.name,
     scope: scopeOfTier(role.tier),
     editable: role.tier !== SUPER_ADMIN,
-    permissionIds: [...permissionIds],
+    permissionIds: visiblePermissionIds(permissionIds),
   };
 }
 
@@ -101,7 +130,8 @@ async function replaceRolePermissions(actor: Actor, id: unknown, permissionIds: 
     );
   }
 
-  const keys = parsePermissionIds(permissionIds);
+  const submitted = parsePermissionIds(permissionIds).filter((key) => !isHiddenPermission(key));
+  const keys = [...submitted, ...hiddenPermissionKeys(permissionKeysOf(role.permissionIds))];
   assertRolePermissionsAllowed(present(scopeOfTier(role.tier), `The scope of ${role.tier}`), keys);
 
   const ids = permissionIdsOf(keys);
@@ -123,6 +153,7 @@ export {
   assertRoleCompanyPairing,
   permissionCatalogue,
   listRoles,
+  assignableRoles,
   describeRolePermissions,
   replaceRolePermissions,
 };

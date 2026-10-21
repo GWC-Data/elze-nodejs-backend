@@ -49,4 +49,28 @@ async function activate(req: Request, res: Response): Promise<void> {
   respondWithSession(res, await authService.activate(bodyOf(req.body)));
 }
 
-export { login, refresh, logout, me, sessions, changePassword, describeActivation, activate };
+async function forgotPassword(req: Request, res: Response): Promise<void> {
+  ok(res, await authService.forgotPassword(bodyOf(req.body)));
+}
+
+async function describePasswordReset(req: Request, res: Response): Promise<void> {
+  ok(res, await authService.describePasswordReset(req.query.token));
+}
+
+async function resetPassword(req: Request, res: Response): Promise<void> {
+  respondWithSession(res, await authService.resetPassword(bodyOf(req.body)));
+}
+
+export {
+  login,
+  refresh,
+  logout,
+  me,
+  sessions,
+  changePassword,
+  describeActivation,
+  activate,
+  forgotPassword,
+  describePasswordReset,
+  resetPassword,
+};

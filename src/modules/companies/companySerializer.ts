@@ -1,4 +1,4 @@
-import { effectiveFeatures, featureKeysOf } from '../catalogue/catalogueService';
+import { effectiveFeatures, featureKeysOf, visibleFeatureKeys } from '../catalogue/catalogueService';
 import type { CompanyOptionRow, CompanyRow } from './companyRepository';
 
 type CompanySource = CompanyRow & {
@@ -17,9 +17,9 @@ function shapeCompany(row: CompanySource | null | undefined) {
     active: Boolean(row.active),
     createdAt: row.created_at || null,
     userCount: row.userCount === undefined ? undefined : Number(row.userCount),
-    dashboardCount: row.dashboardCount === undefined ? undefined : Number(row.dashboardCount),
     pendingCount: row.pendingCount === undefined ? undefined : Number(row.pendingCount),
-    features: row.feature_ids === undefined ? undefined : effectiveFeatures(featureKeysOf(row.feature_ids)),
+    features:
+      row.feature_ids === undefined ? undefined : visibleFeatureKeys(effectiveFeatures(featureKeysOf(row.feature_ids))),
   };
 }
 

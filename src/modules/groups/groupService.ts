@@ -4,7 +4,7 @@ import * as contextAccessRepository from '../contextLayer/contextAccessRepositor
 import { fail } from '../../shared/errors/AppError';
 import { requireString, requireArray } from '../../shared/validation/commonValidator';
 import { shapeGroup } from './groupSerializer';
-import { resolveTargetCompany } from '../auth/authorizationService';
+import { assertPermission, resolveTargetCompany } from '../auth/authorizationService';
 import { requireCompany } from '../companies/companyService';
 import { audit, EVENTS } from '../audit/auditService';
 import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
@@ -28,8 +28,8 @@ async function listGroups(actor: Actor) {
   return rows.map((row) => shapeGroup(row));
 }
 
-async function requireGroupInScope(actor: Actor, id: number) {
-  const row = await groupRepository.findInScope(actor, id);
+async function requireGroupInScope(actor: Actor, id: number, { includeDeleted = false } = {}) {
+  const row = await groupRepository.findInScope(actor, id, { includeDeleted });
   if (!row) throw fail('RESOURCE_NOT_FOUND', 'Group not found');
   return shapeGroup(row);
 }
@@ -128,10 +128,25 @@ async function updateGroup(actor: Actor, id: number, { name, active, userIds }: 
   return requireGroupInScope(actor, id);
 }
 
-async function deleteGroup(actor: Actor, id: number): Promise<void> {
-  const group = await requireGroupInScope(actor, id);
-  await groupRepository.remove(id);
-  audit(EVENTS.GROUP_DELETED, actor, { groupId: id, name: group.name, companyId: group.companyId });
+async function deleteGroup(
+  actor: Actor,
+  id: number,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<void> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const group = await requireGroupInScope(actor, id, { includeDeleted: permanent });
+  if (permanent) {
+    await groupRepository.discard(id);
+  } else if (!(await groupRepository.softDelete(id, actor.id))) {
+    throw fail('RESOURCE_NOT_FOUND', 'Group not found');
+  }
+  audit(EVENTS.GROUP_DELETED, actor, {
+    groupId: id,
+    name: group.name,
+    companyId: group.companyId,
+    soft: !permanent,
+    permanent,
+  });
 }
 
 async function listMembers(actor: Actor, id: number) {

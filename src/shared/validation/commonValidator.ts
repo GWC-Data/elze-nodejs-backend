@@ -27,6 +27,14 @@ function requireUuid(value: unknown, label = 'id'): string {
   return id;
 }
 
+function optionalFlag(value: unknown, label: string): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  const text = String(value).trim().toLowerCase();
+  if (text === 'true' || text === '1') return true;
+  if (text === 'false' || text === '0') return false;
+  throw fail('VALIDATION_ERROR', `${label} must be true or false`);
+}
+
 function requireArray(value: unknown, message: string): unknown[] {
   if (!Array.isArray(value)) throw fail('VALIDATION_ERROR', message);
   return value;
@@ -36,4 +44,4 @@ function bodyOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-export { requireId, requireUuid, requireString, requireArray, bodyOf };
+export { requireId, requireUuid, requireString, requireArray, optionalFlag, bodyOf };

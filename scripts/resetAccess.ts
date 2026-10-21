@@ -2,6 +2,7 @@ import config from '../src/config';
 const { prisma, withTransaction } = config.database;
 import { Prisma } from '../src/generated/prisma/client';
 import { rawRows } from '../src/shared/db/baseRepository';
+import { NOT_DELETED } from '../src/shared/db/softDelete';
 import { bootstrapAppMeta } from '../src/modules/system/bootstrapService';
 import { issueActivationToken, activationUrl } from '../src/modules/auth/activationService';
 import { revokeAllForUser } from '../src/modules/auth/tokenService';
@@ -64,6 +65,7 @@ async function list(): Promise<void> {
        LEFT JOIN companies c ON c.id = u.company_id
        LEFT JOIN access_control.user_roles ur ON ur.user_id = u.id
        LEFT JOIN access_control.roles r ON r.id = ur.role_id
+      WHERE u.deleted_at IS NULL
       ORDER BY c.name NULLS FIRST, u.username`
   );
   if (!rows.length) {
@@ -76,8 +78,8 @@ async function list(): Promise<void> {
 }
 
 async function reset({ username, email }: Args): Promise<void> {
-  const found = await prisma.user.findUnique({
-    where: { username: String(username) },
+  const found = await prisma.user.findFirst({
+    where: { username: String(username), ...NOT_DELETED },
     include: { company: { select: { name: true } } },
   });
   if (!found) throw new Error(`No account named "${username}"`);

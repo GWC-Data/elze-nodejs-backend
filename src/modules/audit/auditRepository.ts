@@ -30,13 +30,18 @@ interface AuditLogRow {
   company_name: string | null;
 }
 
-type AuditScope = { kind: 'all' } | { kind: 'company'; companyId: number } | { kind: 'self'; userId: number };
+type AuditScope =
+  | { kind: 'all'; hidePlatformTargetsExcept?: number }
+  | { kind: 'company'; companyId: number }
+  | { kind: 'self'; userId: number };
 
 interface AuditFilter {
   scope: AuditScope;
   event?: string | null;
   categoryEvents?: string[] | null;
   actionEvents?: string[] | null;
+  hiddenEvents?: string[];
+  hideDashboardDenials?: boolean;
   from?: string | null;
   to?: string | null;
   search?: string | null;
@@ -66,7 +71,16 @@ function whereFor(filter: AuditFilter): Prisma.Sql {
     conditions.push(Prisma.sql`(a.company_id = ${scope.companyId} OR a.actor_company_id = ${scope.companyId})`);
   } else if (scope.kind === 'self') {
     conditions.push(Prisma.sql`(a.actor_id = ${scope.userId} OR a.target_user_id = ${scope.userId})`);
+  } else if (scope.hidePlatformTargetsExcept !== undefined) {
+    conditions.push(Prisma.sql`(a.target_user_id IS NULL OR a.target_user_id = ${scope.hidePlatformTargetsExcept}
+      OR NOT EXISTS (SELECT 1 FROM access_control.user_roles pur
+                       JOIN access_control.roles pr ON pr.id = pur.role_id AND pr.kind = 'system'
+                        AND pr.tier IN ('SUPER_ADMIN', 'PLATFORM_ADMIN')
+                      WHERE pur.user_id = a.target_user_id))`);
   }
+  if (filter.hiddenEvents?.length) conditions.push(Prisma.sql`a.event <> ALL (${filter.hiddenEvents}::text[])`);
+  if (filter.hideDashboardDenials)
+    conditions.push(Prisma.sql`NOT (a.event = 'access_denied' AND a.detail ? 'dashboardId')`);
   if (filter.event) conditions.push(Prisma.sql`a.event = ${filter.event}`);
   if (filter.categoryEvents) conditions.push(Prisma.sql`a.event = ANY (${filter.categoryEvents}::text[])`);
   if (filter.actionEvents) conditions.push(Prisma.sql`a.event = ANY (${filter.actionEvents}::text[])`);

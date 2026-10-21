@@ -13,6 +13,7 @@ import { columnCatalogue, hydratedView } from './dashboardSerializer';
 import { hydrateDashboard } from '../queryEngine/queryEngineService';
 import { resolveSourceMetadata } from '../queryEngine/metadataService';
 import { audit, EVENTS } from '../audit/auditService';
+import { assertPermission } from '../auth/authorizationService';
 import { DASHBOARD_ID_RE, NEW_DASHBOARD_VERSION, DEFAULT_DATA_SOURCE, DEFAULT_LAYOUT } from './dashboardConstants';
 import type { Actor } from '../../shared/types/actor';
 import type { CardUpdate, DraftCard } from './dashboardValidator';
@@ -75,6 +76,7 @@ async function getSpec(dashboardId: unknown): Promise<DashboardSpec> {
 
   try {
     const row = await dashboardRepository.findById(id);
+    if (row?.deleted) throw new DashboardNotFoundError(id);
     if (row) {
       const stored: unknown = typeof row.spec === 'string' ? JSON.parse(row.spec) : row.spec;
       const spec = normalizeSpec(stored);
@@ -85,7 +87,9 @@ async function getSpec(dashboardId: unknown): Promise<DashboardSpec> {
       specCache.set(id, spec);
       return spec;
     }
-  } catch (_) {}
+  } catch (err) {
+    if (err instanceof DashboardNotFoundError) throw err;
+  }
 
   const filePath = specPathFor(id);
   if (filePath) {
@@ -139,6 +143,14 @@ function listDiskDashboards(): DashboardEntry[] {
 async function dashboardExists(dashboardId: string): Promise<boolean> {
   if (!DASHBOARD_ID_RE.test(String(dashboardId || ''))) return false;
   try {
+    const state = await dashboardRepository.rowState(dashboardId);
+    if (state) return state === 'live';
+  } catch (_) {}
+  return dashboardRepository.fileExists(registryPathFor(dashboardId));
+}
+
+async function dashboardIdTaken(dashboardId: string): Promise<boolean> {
+  try {
     if (await dashboardRepository.existsInDb(dashboardId)) return true;
   } catch (_) {}
   return dashboardRepository.fileExists(registryPathFor(dashboardId));
@@ -149,6 +161,7 @@ async function listDashboards(companyId: number | null | undefined = undefined):
   const seen = new Set<string>();
 
   try {
+    for (const id of await dashboardRepository.deletedIds()) seen.add(id);
     for (const row of await dashboardRepository.list(companyId)) {
       seen.add(row.id);
       entries.push({
@@ -221,9 +234,16 @@ async function saveSpec(
   return id;
 }
 
-async function deleteDashboard(dashboardId: unknown): Promise<void> {
+async function deleteDashboard(dashboardId: unknown, deletedBy: number | null = null): Promise<void> {
+  const spec = await getSpec(dashboardId);
   const id = assertValidDashboardId(dashboardId);
-  await dashboardRepository.removeWithGrants(id);
+  await dashboardRepository.softDelete({
+    id,
+    title: spec.title || id,
+    companyId: spec.companyId ?? null,
+    spec,
+    deletedBy,
+  });
   invalidateSpecCache(id);
 }
 
@@ -276,7 +296,7 @@ async function createDashboard(actor: Actor, payload: unknown = {}): Promise<Cre
   }
   assertValidDashboardId(id);
 
-  if (await dashboardExists(id)) {
+  if (await dashboardIdTaken(id)) {
     throw fail('CONFLICT', `A dashboard with id "${id}" already exists.`);
   }
 
@@ -337,8 +357,22 @@ async function updateCard(
   return { ...view, accessLevel };
 }
 
-async function removeDashboard(actor: Actor, dashboardId: string): Promise<{ deleted: true; dashboardId: string }> {
-  const spec = await getSpec(dashboardId);
+async function ownerOfAnyDashboard(dashboardId: string): Promise<{ companyId: number | null }> {
+  const id = assertValidDashboardId(dashboardId);
+  const row = await dashboardRepository.findById(id);
+  if (row) return { companyId: row.company_id };
+  const filePath = specPathFor(id);
+  if (filePath) return { companyId: readSpecFile(filePath).companyId ?? null };
+  throw new DashboardNotFoundError(id);
+}
+
+async function removeDashboard(
+  actor: Actor,
+  dashboardId: string,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<{ deleted: true; dashboardId: string; permanent: boolean }> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const spec = permanent ? await ownerOfAnyDashboard(dashboardId) : await getSpec(dashboardId);
 
   if (!actor.isPlatform) {
     if (spec.companyId === null) {
@@ -349,9 +383,14 @@ async function removeDashboard(actor: Actor, dashboardId: string): Promise<{ del
     }
   }
 
-  await deleteDashboard(dashboardId);
-  audit(EVENTS.DASHBOARD_DELETED, actor, { dashboardId, companyId: spec.companyId });
-  return { deleted: true, dashboardId };
+  if (permanent) {
+    await dashboardRepository.purge(assertValidDashboardId(dashboardId));
+    invalidateSpecCache(dashboardId);
+  } else {
+    await deleteDashboard(dashboardId, actor.id);
+  }
+  audit(EVENTS.DASHBOARD_DELETED, actor, { dashboardId, companyId: spec.companyId, soft: !permanent, permanent });
+  return { deleted: true, dashboardId, permanent };
 }
 
 async function describeColumns(dashboardId: unknown): Promise<ColumnCatalogue> {

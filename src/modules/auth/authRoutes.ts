@@ -15,5 +15,8 @@ router.get('/sessions', requireAuth, auth.sessions);
 router.post('/change-password', requireAuth, auth.changePassword);
 router.get('/activation', auth.describeActivation);
 router.post('/activation', auth.activate);
+router.post('/forgot-password', auth.forgotPassword);
+router.get('/reset-password', auth.describePasswordReset);
+router.post('/reset-password', auth.resetPassword);
 
 export = router;

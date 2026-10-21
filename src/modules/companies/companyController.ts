@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag, requireId } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import * as companyService from './companyService';
 import * as accessService from '../access/accessService';
@@ -30,8 +30,9 @@ async function update(req: Request, res: Response): Promise<void> {
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
-  await companyService.deleteCompany(req.actor, companyId(req));
-  ok(res, { deleted: true });
+  const permanent = optionalFlag(req.query.permanent, 'permanent');
+  await companyService.deleteCompany(req.actor, companyId(req), { permanent });
+  ok(res, { deleted: true, permanent });
 }
 
 async function dashboards(req: Request, res: Response): Promise<void> {

@@ -1,9 +1,15 @@
 import config from '../../config';
+import { NOT_DELETED } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 
 const { prisma } = config.database;
 
-const PURPOSE_ACTIVATION = 'activation';
+const TOKEN_PURPOSE = {
+  ACTIVATION: 'activation',
+  PASSWORD_RESET: 'password_reset',
+} as const;
+
+type TokenPurpose = (typeof TOKEN_PURPOSE)[keyof typeof TOKEN_PURPOSE];
 
 async function insertRefresh(
   {
@@ -85,23 +91,25 @@ async function listSessions(userId: number) {
   return groups.map((g) => ({ familyId: g.familyId, lastUsedAt: g._max.issuedAt }));
 }
 
-async function retireActivations(userId: number, tx: Tx = prisma): Promise<void> {
+async function retireTokens(userId: number, purpose: TokenPurpose, tx: Tx = prisma): Promise<void> {
   await tx.userToken.updateMany({
-    where: { userId, purpose: PURPOSE_ACTIVATION, consumedAt: null },
+    where: { userId, purpose, consumedAt: null },
     data: { consumedAt: new Date() },
   });
 }
 
-async function insertActivation(
+async function insertToken(
   {
     id,
     userId,
+    purpose,
     tokenHash,
     expiresAt,
     createdBy,
   }: {
     id: string;
     userId: number;
+    purpose: TokenPurpose;
     tokenHash: string;
     expiresAt: Date;
     createdBy: number | null;
@@ -109,13 +117,17 @@ async function insertActivation(
   tx: Tx = prisma
 ): Promise<void> {
   await tx.userToken.create({
-    data: { id, userId, purpose: PURPOSE_ACTIVATION, tokenHash, expiresAt, createdBy },
+    data: { id, userId, purpose, tokenHash, expiresAt, createdBy },
   });
 }
 
-async function findActivationByHash(tokenHash: string) {
+async function countIssuedSince(userId: number, purpose: TokenPurpose, since: Date): Promise<number> {
+  return prisma.userToken.count({ where: { userId, purpose, createdAt: { gte: since } } });
+}
+
+async function findTokenByHash(tokenHash: string, purpose: TokenPurpose) {
   const row = await prisma.userToken.findFirst({
-    where: { tokenHash, purpose: PURPOSE_ACTIVATION },
+    where: { tokenHash, purpose, user: NOT_DELETED },
     include: { user: { include: { company: { select: { name: true, active: true } } } } },
   });
   if (!row) return null;
@@ -134,7 +146,7 @@ async function findActivationByHash(tokenHash: string) {
   };
 }
 
-async function consumeActivation(tokenId: string, tx: Tx = prisma): Promise<boolean> {
+async function consumeToken(tokenId: string, tx: Tx = prisma): Promise<boolean> {
   const result = await tx.userToken.updateMany({
     where: { id: tokenId, consumedAt: null },
     data: { consumedAt: new Date() },
@@ -142,7 +154,16 @@ async function consumeActivation(tokenId: string, tx: Tx = prisma): Promise<bool
   return result.count > 0;
 }
 
+async function pruneExpiredResets(): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const result = await prisma.userToken.deleteMany({
+    where: { purpose: TOKEN_PURPOSE.PASSWORD_RESET, expiresAt: { lt: cutoff } },
+  });
+  return result.count;
+}
+
 export {
+  TOKEN_PURPOSE,
   insertRefresh,
   markRotated,
   revokeFamily,
@@ -151,8 +172,11 @@ export {
   findRefreshByHash,
   pruneExpiredRefresh,
   listSessions,
-  retireActivations,
-  insertActivation,
-  findActivationByHash,
-  consumeActivation,
+  retireTokens,
+  insertToken,
+  countIssuedSince,
+  findTokenByHash,
+  consumeToken,
+  pruneExpiredResets,
 };
+export type { TokenPurpose };

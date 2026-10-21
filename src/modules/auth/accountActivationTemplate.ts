@@ -1,7 +1,8 @@
 import config from '../../config';
+import { escapeHtml, hours, supportLine } from '../../shared/email/emailTemplate';
+import type { EmailContent } from '../../shared/email/emailTemplate';
 
 const { APPLICATION_URL } = config.auth;
-const { SUPPORT_EMAIL } = config.email;
 
 interface AccountActivationInput {
   displayName?: string | null;
@@ -12,25 +13,6 @@ interface AccountActivationInput {
   ttlSeconds: number;
   invitedBy?: string | null;
 }
-
-interface EmailContent {
-  subject: string;
-  text: string;
-  html: string;
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function hours(seconds: number): string {
-  const h = Math.round(seconds / 3600);
-  return `${h} hour${h === 1 ? '' : 's'}`;
-}
-
-const supportLine = SUPPORT_EMAIL
-  ? `If you need help, contact ${SUPPORT_EMAIL}.`
-  : 'If you need help, contact whoever administers this workspace.';
 
 function accountActivation({
   displayName,
@@ -122,4 +104,4 @@ function accountActivation({
 }
 
 export { accountActivation };
-export type { AccountActivationInput, EmailContent };
+export type { AccountActivationInput };

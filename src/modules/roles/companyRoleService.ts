@@ -2,9 +2,9 @@ import * as companyRoleRepository from './companyRoleRepository';
 import * as roleRepository from './roleRepository';
 import { fail } from '../../shared/errors/AppError';
 import { requireUuid, requireString } from '../../shared/validation/commonValidator';
-import { resolveTargetCompany } from '../auth/authorizationService';
+import { assertPermission, resolveTargetCompany } from '../auth/authorizationService';
 import { requireCompany } from '../companies/companyService';
-import { enabledFor } from '../companies/featureService';
+import { visibleFor } from '../companies/featureService';
 import { defaultsFor } from './builtInRolesService';
 import { parsePermissionIds, describePermission } from './roleService';
 import { audit, EVENTS } from '../audit/auditService';
@@ -21,7 +21,7 @@ import {
   systemRoleId,
   systemRoles,
 } from '../catalogue/catalogueService';
-import { UNIQUE_VIOLATION, FOREIGN_KEY_VIOLATION } from '../../shared/errors/pgErrors';
+import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
 import { sqlState } from '../../shared/db/dbError';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
@@ -117,7 +117,7 @@ function permissionOptionsFor(actor: Actor, features: readonly string[]) {
 
 async function permissionOptions(actor: Actor, requestedCompanyId: unknown) {
   const companyId = await companyFor(actor, requestedCompanyId);
-  const features = await enabledFor(companyId);
+  const features = await visibleFor(companyId);
   return { companyId, features, permissions: permissionOptionsFor(actor, features) };
 }
 
@@ -134,7 +134,7 @@ async function memberRole(companyId: number) {
 async function listRoles(actor: Actor, requestedCompanyId: unknown) {
   const companyId = await companyFor(actor, requestedCompanyId);
   const [features, rows, counts, adminIds, member] = await Promise.all([
-    enabledFor(companyId),
+    visibleFor(companyId),
     companyRoleRepository.listForCompany(companyId),
     companyRoleRepository.builtInCounts(companyId),
     roleRepository.permissionIds(systemRoleId(COMPANY_ADMIN)),
@@ -190,7 +190,7 @@ async function requireEditableBuiltIn(id: unknown, companyId: number) {
 async function saveBuiltInRole(actor: Actor, id: unknown, body: RequestBody) {
   const companyId = await companyFor(actor, body.companyId);
   const current = await requireEditableBuiltIn(id, companyId);
-  const features = await enabledFor(companyId);
+  const features = await visibleFor(companyId);
   const next = parsePermissions(actor, features, body.permissionIds);
 
   const dormant = keysOf(current).filter((p) => !isPermissionEnabled(p, features) && !isAdminOnly(p));
@@ -217,21 +217,23 @@ async function resetBuiltInRole(actor: Actor, id: unknown, requestedCompanyId: u
   return listRoles(actor, companyId);
 }
 
-async function requireRoleInScope(actor: Actor, id: unknown) {
+async function requireRoleInScope(actor: Actor, id: unknown, { includeDeleted = false } = {}) {
   const roleId = requireUuid(id, 'role id');
-  const row = await companyRoleRepository.findInCompany(roleId, actor.isPlatform ? null : actor.companyId);
+  const row = await companyRoleRepository.findInCompany(roleId, actor.isPlatform ? null : actor.companyId, {
+    includeDeleted,
+  });
   if (!row) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
   return row;
 }
 
 async function getRole(actor: Actor, id: unknown) {
   const row = await requireRoleInScope(actor, id);
-  return shapeRole(row, await enabledFor(row.companyId));
+  return shapeRole(row, await visibleFor(row.companyId));
 }
 
 async function createRole(actor: Actor, body: RequestBody) {
   const companyId = await companyFor(actor, body.companyId);
-  const features = await enabledFor(companyId);
+  const features = await visibleFor(companyId);
   const name = parseName(body.name);
   const description = parseDescription(body.description);
   const keys = parsePermissions(actor, features, body.permissionIds ?? []);
@@ -256,7 +258,7 @@ async function createRole(actor: Actor, body: RequestBody) {
 
 async function updateRole(actor: Actor, id: unknown, body: RequestBody) {
   const before = await requireRoleInScope(actor, id);
-  const features = await enabledFor(before.companyId);
+  const features = await visibleFor(before.companyId);
 
   const changes: { name?: string; description?: string | null; permissionIds?: string[] } = {};
   if (body.name !== undefined) changes.name = parseName(body.name);
@@ -285,8 +287,13 @@ async function updateRole(actor: Actor, id: unknown, body: RequestBody) {
   return getRole(actor, before.id);
 }
 
-async function deleteRole(actor: Actor, id: unknown): Promise<void> {
-  const role = await requireRoleInScope(actor, id);
+async function deleteRole(
+  actor: Actor,
+  id: unknown,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<void> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const role = await requireRoleInScope(actor, id, { includeDeleted: permanent });
   const holders = Number(role.userCount || 0);
   if (holders > 0) {
     throw fail(
@@ -294,14 +301,17 @@ async function deleteRole(actor: Actor, id: unknown): Promise<void> {
       `${holders} member${holders === 1 ? ' still holds' : 's still hold'} this role. Give them another role first.`
     );
   }
-  try {
-    await companyRoleRepository.remove(role.id);
-  } catch (err) {
-    if (sqlState(err) === FOREIGN_KEY_VIOLATION)
-      throw fail('CONFLICT', 'A member was just given this role. Try again.');
-    throw err;
-  }
-  audit(EVENTS.ROLE_DELETED, actor, { companyId: role.companyId, roleId: role.id, role: role.name });
+  const done = permanent
+    ? await companyRoleRepository.discard(role.id, await builtInRoleId(USER, role.companyId))
+    : await companyRoleRepository.softDelete(role.id, actor.id);
+  if (!done) throw fail('CONFLICT', 'A member was just given this role. Try again.');
+  audit(EVENTS.ROLE_DELETED, actor, {
+    companyId: role.companyId,
+    roleId: role.id,
+    role: role.name,
+    soft: !permanent,
+    permanent,
+  });
 }
 
 async function builtInRoleId(tier: string, companyId: number | null, conn?: Tx): Promise<string> {

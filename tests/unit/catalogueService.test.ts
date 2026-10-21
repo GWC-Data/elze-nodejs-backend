@@ -132,7 +132,7 @@ describe('a loaded catalogue', () => {
   describe('system roles, connectors and audit events', () => {
     it('finds the system role of each tier', () => {
       expect(catalogue.systemRoleId('COMPANY_ADMIN')).toBe('role-company-admin');
-      expect(catalogue.systemRoleIds()).toHaveLength(3);
+      expect(catalogue.systemRoleIds()).toHaveLength(4);
       expect(() => catalogue.systemRoleId('OWNER')).toThrow('Unknown system role "OWNER".');
     });
 

@@ -1,5 +1,6 @@
 import config from '../../config';
 import type { Prisma } from '../../generated/prisma/client';
+import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 
@@ -7,7 +8,7 @@ const { prisma } = config.database;
 
 const GROUP_INCLUDE = {
   company: { select: { name: true } },
-  _count: { select: { members: true } },
+  _count: { select: { members: { where: { user: NOT_DELETED } } } },
 } as const;
 
 interface GroupView {
@@ -32,8 +33,9 @@ function shape(row: Prisma.GroupGetPayload<{ include: typeof GROUP_INCLUDE }>): 
   };
 }
 
-function scopeWhere(actor: Actor) {
-  return actor.isPlatform ? {} : { companyId: actor.companyId as number };
+function scopeWhere(actor: Actor, { includeDeleted = false }: { includeDeleted?: boolean } = {}) {
+  const live = includeDeleted ? {} : NOT_DELETED;
+  return actor.isPlatform ? live : { companyId: actor.companyId as number, ...live };
 }
 
 async function list(actor: Actor): Promise<GroupView[]> {
@@ -45,21 +47,28 @@ async function list(actor: Actor): Promise<GroupView[]> {
   return rows.map(shape);
 }
 
-async function findInScope(actor: Actor, id: unknown): Promise<GroupView | null> {
+async function findInScope(
+  actor: Actor,
+  id: unknown,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<GroupView | null> {
   const groupId = Number(id);
   if (!Number.isSafeInteger(groupId)) return null;
-  const row = await prisma.group.findFirst({ where: { id: groupId, ...scopeWhere(actor) }, include: GROUP_INCLUDE });
+  const row = await prisma.group.findFirst({
+    where: { id: groupId, ...scopeWhere(actor, { includeDeleted }) },
+    include: GROUP_INCLUDE,
+  });
   return row ? shape(row) : null;
 }
 
 async function memberIds(groupId: number): Promise<number[]> {
-  const rows = await prisma.groupUser.findMany({ where: { groupId }, select: { userId: true } });
+  const rows = await prisma.groupUser.findMany({ where: { groupId, user: NOT_DELETED }, select: { userId: true } });
   return rows.map((r) => r.userId);
 }
 
 async function listMembers(groupId: number) {
   const rows = await prisma.groupUser.findMany({
-    where: { groupId },
+    where: { groupId, user: NOT_DELETED },
     include: { user: { include: { role: { include: { role: { select: { tier: true } } } } } } },
     orderBy: { user: { username: 'asc' } },
   });
@@ -78,7 +87,10 @@ async function clearMembers(tx: Tx, groupId: number): Promise<void> {
 
 async function usersInCompany(tx: Tx, userIds: readonly number[], companyId: number | null): Promise<number[]> {
   if (companyId === null) return [];
-  const rows = await tx.user.findMany({ where: { id: { in: [...userIds] }, companyId }, select: { id: true } });
+  const rows = await tx.user.findMany({
+    where: { id: { in: [...userIds] }, companyId, ...NOT_DELETED },
+    select: { id: true },
+  });
   return rows.map((r) => r.id);
 }
 
@@ -98,8 +110,16 @@ async function updateColumns(tx: Tx, id: number, changes: { name?: string; activ
   await tx.group.update({ where: { id }, data: changes });
 }
 
-async function remove(id: number): Promise<void> {
+async function discard(id: number): Promise<void> {
   await prisma.group.deleteMany({ where: { id } });
+}
+
+async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+  const result = await prisma.group.updateMany({
+    where: { id, ...NOT_DELETED },
+    data: { ...softDeletion(deletedBy), active: false },
+  });
+  return result.count > 0;
 }
 
 export {
@@ -112,6 +132,7 @@ export {
   insertMembers,
   insert,
   updateColumns,
-  remove,
+  softDelete,
+  discard,
 };
 export type { GroupView };

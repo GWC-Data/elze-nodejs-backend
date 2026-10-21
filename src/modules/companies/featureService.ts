@@ -2,18 +2,20 @@ import * as featureRepository from './featureRepository';
 import { fail } from '../../shared/errors/AppError';
 import { audit, EVENTS } from '../audit/auditService';
 import {
-  allFeatures,
   effectiveFeatures,
   featureById,
   featureIdsOf,
   featureKeysOf,
+  isHiddenFeature,
   toggleableFeatureKeys,
+  visibleFeatureKeys,
+  visibleFeatures,
 } from '../catalogue/catalogueService';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
 
 function catalogue() {
-  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({
+  return visibleFeatures().map(({ id, key, label, description, locked, covers }) => ({
     id,
     key,
     label,
@@ -33,15 +35,19 @@ function parseFeatureIds(featureIds: unknown): string[] {
     throw fail('VALIDATION_ERROR', `Unknown feature id(s): ${unknown.join(', ')}`, { featureIds: unknown });
   }
   const toggleable = toggleableFeatureKeys();
-  return featureKeysOf(unique).filter((key) => toggleable.includes(key));
+  return featureKeysOf(unique).filter((key) => toggleable.includes(key) && !isHiddenFeature(key));
 }
 
 async function enabledFor(companyId: number, conn?: Tx): Promise<string[]> {
   return effectiveFeatures(featureKeysOf(await featureRepository.listForCompany(companyId, conn)));
 }
 
+async function visibleFor(companyId: number, conn?: Tx): Promise<string[]> {
+  return visibleFeatureKeys(await enabledFor(companyId, conn));
+}
+
 function describe(enabled: readonly string[]) {
-  return allFeatures().map(({ id, key, label, description, locked, covers }) => ({
+  return visibleFeatures().map(({ id, key, label, description, locked, covers }) => ({
     id,
     key,
     label,
@@ -61,13 +67,13 @@ async function setInitialFeatures(actor: Actor, companyId: number, featureKeys: 
 }
 
 async function replaceCompanyFeatures(actor: Actor, companyId: number, featureIds: unknown) {
-  const next = parseFeatureIds(featureIds);
   const before = await enabledFor(companyId);
+  const next = [...parseFeatureIds(featureIds), ...before.filter((key) => isHiddenFeature(key))];
   await featureRepository.replace(companyId, featureIdsOf(next), actor.id);
   const after = effectiveFeatures(next);
 
-  const enabled = after.filter((key) => !before.includes(key));
-  const disabled = before.filter((key) => !after.includes(key));
+  const enabled = visibleFeatureKeys(after.filter((key) => !before.includes(key)));
+  const disabled = visibleFeatureKeys(before.filter((key) => !after.includes(key)));
   if (enabled.length || disabled.length) {
     audit(EVENTS.COMPANY_FEATURES_UPDATED, actor, {
       companyId,
@@ -80,4 +86,12 @@ async function replaceCompanyFeatures(actor: Actor, companyId: number, featureId
   return { companyId, features: describe(after) };
 }
 
-export { catalogue, parseFeatureIds, enabledFor, companyFeatures, setInitialFeatures, replaceCompanyFeatures };
+export {
+  catalogue,
+  parseFeatureIds,
+  enabledFor,
+  visibleFor,
+  companyFeatures,
+  setInitialFeatures,
+  replaceCompanyFeatures,
+};

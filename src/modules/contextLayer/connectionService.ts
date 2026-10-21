@@ -4,6 +4,7 @@ import * as contextRepository from './contextRepository';
 import { fail } from '../../shared/errors/AppError';
 import { seal, open, hint } from '../../shared/security/secretBox';
 import { requireString } from '../../shared/validation/commonValidator';
+import { assertPermission } from '../auth/authorizationService';
 import { cleanDatasetSelection } from './contextValidator';
 import { shapeConnection, shapeSelected, publishedVersionOption } from './connectionSerializer';
 import type { PublishedVersionOption, SelectedDataset, ShapedConnection } from './connectionSerializer';
@@ -124,9 +125,14 @@ async function listPublishedVersionOptions(actor: Actor): Promise<PublishedVersi
   return rows.map(publishedVersionOption);
 }
 
-async function loadRow(actor: Actor, id: unknown, required: ContextAccessLevel = 'view'): Promise<LoadedConnection> {
+async function loadRow(
+  actor: Actor,
+  id: unknown,
+  required: ContextAccessLevel = 'view',
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<LoadedConnection> {
   assertIdShape(id);
-  const row = await connectionRepository.findWithSecret(actor, id);
+  const row = await connectionRepository.findWithSecret(actor, id, { includeDeleted });
   if (!row) throw fail('RESOURCE_NOT_FOUND', NOT_FOUND);
   return { ...row, access: assertLevel(actor, row, required, NOT_FOUND) };
 }
@@ -317,10 +323,14 @@ async function replaceSelection(actor: Actor, id: unknown, datasets: unknown): P
 
 async function deleteConnection(
   actor: Actor,
-  id: unknown
+  id: unknown,
+  { permanent = false }: { permanent?: boolean } = {}
 ): Promise<{ provider: string; name: string; companyId: number | null }> {
-  const row = await loadRow(actor, id, 'full');
-  await connectionRepository.remove(row.id);
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const row = await loadRow(actor, id, 'full', { includeDeleted: permanent });
+  if (permanent) await connectionRepository.discard(row.id);
+  else if (!(await connectionRepository.softDelete(row.id, actor.id)))
+    throw fail('RESOURCE_NOT_FOUND', 'Connection not found');
   return { provider: row.provider, name: row.name, companyId: row.company_id ?? null };
 }
 

@@ -6,7 +6,7 @@ import { slugify } from '../../shared/text/slugify';
 import { bodyOf, requireString } from '../../shared/validation/commonValidator';
 import { shapeCompany, companyOption } from './companySerializer';
 import { publicUser } from '../users/userSerializer';
-import { assertCanAssignRole } from '../auth/authorizationService';
+import { assertCanAssignRole, assertPermission } from '../auth/authorizationService';
 import { createAccount, prepareInvitation } from '../auth/onboardingService';
 import { sendEmail } from '../../shared/email/emailService';
 import { revokeAllForCompany } from '../auth/tokenService';
@@ -50,6 +50,15 @@ async function requireCompany(actor: Actor, id: number, { counts = false }: { co
   const company = shapeCompany(row);
   if (!company) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
   return company;
+}
+
+async function requireCompanyRow(actor: Actor, id: number, { includeDeleted = false } = {}) {
+  if (!actor.isPlatform && id !== actor.companyId) {
+    throw fail('TENANT_ACCESS_DENIED', 'That company is not yours to view.');
+  }
+  const row = await companyRepository.findRow(id, { includeDeleted });
+  if (!row) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  return row;
 }
 
 async function requireActiveCompany(actor: Actor, id: number, message: string) {
@@ -122,7 +131,7 @@ async function createCompany(
       consequence: 'The company and its administrator were not created.',
     });
   } catch (err) {
-    await companyRepository.remove(company.id);
+    await companyRepository.discard(company.id);
     throw err;
   }
 
@@ -173,14 +182,25 @@ async function updateCompany(actor: Actor, id: number, { name, active }: { name?
   return company;
 }
 
-async function deleteCompany(actor: Actor, id: number): Promise<void> {
-  const company = await requireCompany(actor, id);
+async function deleteCompany(
+  actor: Actor,
+  id: number,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<void> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const company = permanent
+    ? await requireCompanyRow(actor, id, { includeDeleted: true })
+    : await requireCompany(actor, id);
   const n = await userRepository.countByCompany(id);
   if (n > 0) {
     throw fail('CONFLICT', `This company still has ${n} account${n === 1 ? '' : 's'}. Delete them first.`);
   }
-  if (!(await companyRepository.remove(id))) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
-  audit(EVENTS.COMPANY_DELETED, actor, { companyId: id, name: company.name });
+  if (permanent) {
+    await companyRepository.discard(id);
+  } else if (!(await companyRepository.softDelete(id, actor.id))) {
+    throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  }
+  audit(EVENTS.COMPANY_DELETED, actor, { companyId: id, name: company.name, soft: !permanent, permanent });
 }
 
 const COMPANY_SORTS = companyRepository.COMPANY_SORTS;

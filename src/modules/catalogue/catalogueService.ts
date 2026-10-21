@@ -21,6 +21,7 @@ interface FeatureDef {
   label: string;
   description: string;
   locked: boolean;
+  hidden: boolean;
   covers: string[];
   permissions: string[];
 }
@@ -101,6 +102,7 @@ function build(rows: Awaited<ReturnType<typeof catalogueRepository.loadAll>>): C
     label: f.label,
     description: f.description || '',
     locked: f.locked,
+    hidden: f.hidden,
     covers: f.covers,
     permissions: permissions.filter((p) => p.featureId === f.id).map((p) => p.key),
   }));
@@ -271,6 +273,39 @@ function usableFeatures(features: readonly string[], permissions: readonly strin
   return features.filter((feature) => (byKey.get(feature)?.permissions || []).some((p) => permissions.includes(p)));
 }
 
+function isHiddenFeature(key: string): boolean {
+  return Boolean(catalogue().featureByKey.get(key)?.hidden);
+}
+
+function isHiddenPermission(permission: string): boolean {
+  const feature = featureOfPermission(permission);
+  return feature !== null && isHiddenFeature(feature);
+}
+
+function visibleFeatures(): FeatureDef[] {
+  return catalogue().features.filter((f) => !f.hidden);
+}
+
+function visiblePermissions(): PermissionDef[] {
+  return catalogue().permissions.filter((p) => !isHiddenPermission(p.key));
+}
+
+function visibleFeatureKeys(keys: readonly string[]): string[] {
+  return keys.filter((key) => !isHiddenFeature(key));
+}
+
+function visiblePermissionKeys(keys: readonly string[]): string[] {
+  return keys.filter((key) => !isHiddenPermission(key));
+}
+
+function hiddenPermissionKeys(keys: readonly string[]): string[] {
+  return keys.filter((key) => isHiddenPermission(key));
+}
+
+function visiblePermissionIds(ids: readonly string[]): string[] {
+  return permissionIdsOf(visiblePermissionKeys(permissionKeysOf(ids)));
+}
+
 function accessLevelsFor(resource: AccessResource): AccessLevel[] {
   return catalogue().accessLevels.filter((l) => l.resource === resource);
 }
@@ -331,6 +366,16 @@ function auditCategories(): string[] {
   return [...new Set(catalogue().auditEventTypes.flatMap((e) => e.categories))];
 }
 
+function isHiddenAuditCategory(category: string): boolean {
+  return isHiddenFeature(category);
+}
+
+function hiddenAuditEvents(): string[] {
+  return catalogue()
+    .auditEventTypes.filter((e) => e.categories.some(isHiddenAuditCategory))
+    .map((e) => e.key);
+}
+
 function auditActions(): string[] {
   return [
     ...new Set(
@@ -377,6 +422,14 @@ export {
   isPermissionEnabled,
   maskPermissions,
   usableFeatures,
+  isHiddenFeature,
+  isHiddenPermission,
+  visibleFeatures,
+  visiblePermissions,
+  visibleFeatureKeys,
+  visiblePermissionKeys,
+  hiddenPermissionKeys,
+  visiblePermissionIds,
   accessLevelsFor,
   accessLevelKeys,
   accessLevelId,
@@ -389,6 +442,8 @@ export {
   findConnector,
   auditEventLabel,
   auditCategories,
+  isHiddenAuditCategory,
+  hiddenAuditEvents,
   auditActions,
   auditEventsInCategory,
   auditEventsWithAction,

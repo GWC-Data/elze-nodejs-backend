@@ -2,7 +2,7 @@ import * as userPermissionRepository from './userPermissionRepository';
 import * as roleRepository from '../roles/roleRepository';
 import { fail } from '../../shared/errors/AppError';
 import { requireUserInScope, requireManageable } from './userService';
-import { enabledFor } from '../companies/featureService';
+import { visibleFor } from '../companies/featureService';
 import { parsePermissions, permissionOptionsFor } from '../roles/companyRoleService';
 import { audit, EVENTS } from '../audit/auditService';
 import { USER } from '../catalogue/roleTiers';
@@ -18,7 +18,7 @@ function mayEdit(actor: Actor, target: Row): boolean {
 }
 
 async function describe(actor: Actor, target: Row) {
-  const features = target.company_id ? await enabledFor(target.company_id) : [];
+  const features = target.company_id ? await visibleFor(target.company_id) : [];
   const [roleIds, extraIds] = await Promise.all([
     target.role_id ? roleRepository.permissionIds(target.role_id) : Promise.resolve([]),
     userPermissionRepository.permissionIds(target.id),
@@ -49,7 +49,7 @@ async function replaceUserPermissions(actor: Actor, id: number, permissionIds: u
     );
   }
 
-  const features = await enabledFor(target.company_id);
+  const features = await visibleFor(target.company_id);
   const next = parsePermissions(actor, features, permissionIds ?? []);
   const before = permissionKeysOf(await userPermissionRepository.permissionIds(target.id));
   const dormant = before.filter((key) => !isPermissionEnabled(key, features));

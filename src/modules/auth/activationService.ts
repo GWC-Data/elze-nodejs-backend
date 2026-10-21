@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import config from '../../config';
 import * as tokenRepository from './tokenRepository';
+import { TOKEN_PURPOSE } from './tokenRepository';
 import { fail } from '../../shared/errors/AppError';
 import { hashToken, randomToken } from '../../shared/security/hash';
 import { USER_STATUS } from '../../shared/db/statuses';
@@ -13,13 +14,20 @@ async function issueActivationToken(
   issuedBy: number | null | undefined,
   conn?: Tx
 ): Promise<{ token: string; expiresAt: Date }> {
-  await tokenRepository.retireActivations(userId, conn);
+  await tokenRepository.retireTokens(userId, TOKEN_PURPOSE.ACTIVATION, conn);
 
   const raw = randomToken();
   const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_SECONDS * 1000);
 
-  await tokenRepository.insertActivation(
-    { id: crypto.randomUUID(), userId, tokenHash: hashToken(raw), expiresAt, createdBy: issuedBy || null },
+  await tokenRepository.insertToken(
+    {
+      id: crypto.randomUUID(),
+      userId,
+      purpose: TOKEN_PURPOSE.ACTIVATION,
+      tokenHash: hashToken(raw),
+      expiresAt,
+      createdBy: issuedBy || null,
+    },
     conn
   );
 
@@ -35,7 +43,7 @@ async function resolveActivationToken(raw: unknown) {
     throw fail('INVALID_ACTIVATION_TOKEN', 'That activation link is not valid.');
   }
 
-  const row = await tokenRepository.findActivationByHash(hashToken(raw));
+  const row = await tokenRepository.findTokenByHash(hashToken(raw), TOKEN_PURPOSE.ACTIVATION);
 
   const invalid = () =>
     fail(
@@ -57,7 +65,7 @@ async function resolveActivationToken(raw: unknown) {
 }
 
 async function consumeActivationToken(tokenId: string, conn?: Tx): Promise<void> {
-  if (!(await tokenRepository.consumeActivation(tokenId, conn))) {
+  if (!(await tokenRepository.consumeToken(tokenId, conn))) {
     throw fail('INVALID_ACTIVATION_TOKEN', 'That activation link has already been used.');
   }
 }

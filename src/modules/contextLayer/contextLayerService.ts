@@ -5,7 +5,7 @@ import { listedDataset } from './connectionSerializer';
 import type { ListedDataset } from './connectionSerializer';
 import { connectors, findConnector } from '../catalogue/catalogueService';
 import type { Connector } from '../catalogue/catalogueService';
-import { resolveTargetCompany } from '../auth/authorizationService';
+import { assertPermission, resolveTargetCompany } from '../auth/authorizationService';
 import { requireActiveCompany } from '../companies/companyService';
 import * as connections from './connectionService';
 import type { ConnectionRef, ConnectionView, ListedConnection, ProfileOverview } from './connectionService';
@@ -235,17 +235,25 @@ async function createVersion(actor: Actor, id: unknown): Promise<VersionState> {
   return state;
 }
 
-async function deleteVersion(actor: Actor, id: unknown, versionId: string): Promise<{ deleted: DeletedVersion }> {
+async function deleteVersion(
+  actor: Actor,
+  id: unknown,
+  versionId: string,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<{ deleted: DeletedVersion; permanent: boolean }> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
   const connection = await connections.requireConnection(actor, id, 'full');
-  const deleted = await versions.deletePublishedVersion(connection, versionId);
+  const deleted = await versions.deletePublishedVersion(connection, versionId, actor.id, { permanent });
   audit(EVENTS.CONTEXT_VERSION_DELETED, actor, {
     ...onConnection(connection),
     versionId: deleted.id,
     name: deleted.name,
     version: deleted.label,
     objectCount: deleted.objectCount,
+    soft: !permanent,
+    permanent,
   });
-  return { deleted };
+  return { deleted, permanent };
 }
 
 async function trackDraft(actor: Actor, id: unknown, step: unknown): Promise<{ draft: Version | null }> {
@@ -416,15 +424,21 @@ async function selectDatasets(actor: Actor, id: unknown, datasets: unknown): Pro
   return connection;
 }
 
-async function deleteConnection(actor: Actor, id: unknown): Promise<{ deleted: true }> {
-  const removed = await connections.deleteConnection(actor, id);
+async function deleteConnection(
+  actor: Actor,
+  id: unknown,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<{ deleted: true; permanent: boolean }> {
+  const removed = await connections.deleteConnection(actor, id, { permanent });
   audit(EVENTS.CONTEXT_CONNECTION_DELETED, actor, {
     connectionId: id,
     connectionName: removed.name,
     companyId: removed.companyId,
     provider: removed.provider,
+    soft: !permanent,
+    permanent,
   });
-  return { deleted: true };
+  return { deleted: true, permanent };
 }
 
 const listCompanyPublished = publish.listCompanyPublished;

@@ -163,6 +163,7 @@ type AccessLevel = string | null | undefined;
 
 type StoredDashboard = Pick<Dashboard, 'id' | 'title' | 'description' | 'spec'> & {
   company_id: Dashboard['companyId'];
+  deleted: boolean;
 };
 
 type DashboardListRow = Pick<Dashboard, 'id' | 'title' | 'description' | 'companyId' | 'createdBy'>;

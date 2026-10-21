@@ -205,9 +205,14 @@ async function requirePublishedVersion(
   return { ...shaped, datasets };
 }
 
-async function deletePublishedVersion(connection: { id: string }, versionId: string): Promise<DeletedVersion> {
+async function deletePublishedVersion(
+  connection: { id: string },
+  versionId: string,
+  deletedBy: number | null,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<DeletedVersion> {
   return withTransaction(async (conn: Tx) => {
-    const row = await versionRepository.deletePublished(conn, connection.id, versionId);
+    const row = await versionRepository.deletePublished(conn, connection.id, versionId, deletedBy, { permanent });
     if (!row) throw fail('RESOURCE_NOT_FOUND', VERSION_NOT_FOUND);
     return deletedVersion(row);
   });

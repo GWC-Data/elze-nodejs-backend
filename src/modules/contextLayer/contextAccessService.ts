@@ -41,7 +41,7 @@ function strongest(...levels: (string | null)[]): ContextAccessLevel | null {
 function levelOf(actor: Actor, row: AccessColumnsRow): ContextAccessLevel | null {
   if (isContextAdmin(actor)) return 'full';
   if (ownerIdOf(row) === actor.id) return 'full';
-  return strongest(row.granted_level, row.group_level, row.general_access === 'company' ? 'view' : null);
+  return strongest(row.granted_level, row.group_level);
 }
 
 function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessLevel): boolean {
@@ -49,8 +49,7 @@ function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessL
 }
 
 function mayShare(actor: Actor, row: OwnerRow): boolean {
-  const ownerId = ownerIdOf(row);
-  return ownerId === null ? isContextAdmin(actor) : ownerId === actor.id;
+  return isContextAdmin(actor) || ownerIdOf(row) === actor.id;
 }
 
 function accessOf(actor: Actor, row: AccessColumnsRow): ContextAccess | null {
@@ -88,7 +87,10 @@ function assertLevel(
 
 function assertMayShare(actor: Actor, row: OwnerRow): void {
   if (!mayShare(actor, row)) {
-    throw fail('INSUFFICIENT_PERMISSION', 'Only the person who created this context can share it.');
+    throw fail(
+      'INSUFFICIENT_PERMISSION',
+      'Only the person who created this context, or a company admin, can share it.'
+    );
   }
 }
 

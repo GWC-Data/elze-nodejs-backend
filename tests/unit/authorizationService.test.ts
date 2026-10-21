@@ -35,6 +35,7 @@ function userRow(overrides: Record<string, unknown> = {}) {
 }
 
 const platformOwner = () => buildActor(userRow({ id: 1, role: 'SUPER_ADMIN', company_id: null }), []);
+const platformAdmin = () => buildActor(userRow({ id: 3, role: 'PLATFORM_ADMIN', company_id: null }), ['user.read']);
 const companyAdmin = (companyId = 1) =>
   buildActor(
     userRow({ id: 2, role: 'COMPANY_ADMIN', company_id: companyId }),
@@ -143,10 +144,21 @@ describe('dashboard levels', () => {
 
 describe('managing roles and accounts', () => {
   it('keeps the platform role for platform accounts', () => {
-    expect(assertCanAssignRole(platformOwner(), 'SUPER_ADMIN')).toBe('platform');
-    expect(errorCode(() => assertCanAssignRole(companyAdmin(), 'SUPER_ADMIN'))).toBe('INSUFFICIENT_PERMISSION');
+    expect(assertCanAssignRole(platformOwner(), 'PLATFORM_ADMIN')).toBe('platform');
+    expect(errorCode(() => assertCanAssignRole(platformOwner(), 'SUPER_ADMIN'))).toBe('VALIDATION_ERROR');
+    expect(errorCode(() => assertCanAssignRole(companyAdmin(), 'SUPER_ADMIN'))).toBe('VALIDATION_ERROR');
+    expect(errorCode(() => assertCanAssignRole(companyAdmin(), 'PLATFORM_ADMIN'))).toBe('INSUFFICIENT_PERMISSION');
+    expect(errorCode(() => assertCanAssignRole(platformAdmin(), 'PLATFORM_ADMIN'))).toBe('INSUFFICIENT_PERMISSION');
+    expect(assertCanAssignRole(platformAdmin(), 'COMPANY_ADMIN')).toBe('company');
     expect(assertCanAssignRole(companyAdmin(), 'USER')).toBe('company');
     expect(errorCode(() => assertCanAssignRole(companyAdmin(), 'OWNER'))).toBe('VALIDATION_ERROR');
+  });
+
+  it('leaves platform accounts to the platform owner', () => {
+    const target = userRow({ id: 40, role: 'PLATFORM_ADMIN', company_id: null });
+    expect(errorCode(() => assertCanManageUser(platformOwner(), target))).toBeUndefined();
+    expect(errorCode(() => assertCanManageUser(platformAdmin(), target))).toBe('TENANT_ACCESS_DENIED');
+    expect(errorCode(() => assertCanManageUser(platformAdmin(), userRow({ id: 41, company_id: 2 })))).toBeUndefined();
   });
 
   it('lets a company admin manage the users of their own company only', () => {

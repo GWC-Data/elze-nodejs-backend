@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
+import { optionalFlag } from '../../shared/validation/commonValidator';
 import * as contextLayer from './contextLayerService';
 import * as sharing from './contextSharingService';
 import type { RequestBody } from './contextTypes';
@@ -70,7 +71,12 @@ async function createVersion(req: Request, res: Response): Promise<void> {
 }
 
 async function deleteVersion(req: Request, res: Response): Promise<void> {
-  ok(res, await contextLayer.deleteVersion(req.actor, req.params.id as string, req.params.versionId as string));
+  ok(
+    res,
+    await contextLayer.deleteVersion(req.actor, req.params.id as string, req.params.versionId as string, {
+      permanent: optionalFlag(req.query.permanent, 'permanent'),
+    })
+  );
 }
 
 async function trackDraft(req: Request, res: Response): Promise<void> {
@@ -146,7 +152,12 @@ async function selectDatasets(req: Request, res: Response): Promise<void> {
 }
 
 async function deleteConnection(req: Request, res: Response): Promise<void> {
-  ok(res, await contextLayer.deleteConnection(req.actor, req.params.id as string));
+  ok(
+    res,
+    await contextLayer.deleteConnection(req.actor, req.params.id as string, {
+      permanent: optionalFlag(req.query.permanent, 'permanent'),
+    })
+  );
 }
 
 async function access(req: Request, res: Response): Promise<void> {

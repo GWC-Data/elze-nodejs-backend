@@ -8,6 +8,7 @@ router.use(...authenticated);
 
 router.get('/permissions', requirePermission('role.read'), role.permissions);
 router.get('/', requirePermission('role.read'), role.list);
+router.get('/assignable', requirePermission('user.create'), role.assignable);
 router.get('/:id/permissions', requirePermission('role.read'), role.rolePermissions);
 router.put('/:id/permissions', requirePermission('role.update'), role.replacePermissions);
 

@@ -4,6 +4,7 @@ import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepositor
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
+import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
 import type { Actor } from '../../shared/types/actor';
 import type { ConnectionStatus, ContextStep } from '../../generated/prisma/enums';
 
@@ -91,7 +92,8 @@ async function listDrafts(
     companyScope(actor, 'c.company_id'),
     visibleClause(actor, seeAll),
     Prisma.sql`(d.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM context_layer_versions p
-                                        WHERE p.connection_id = c.id AND p.status = 'published'))`,
+                                        WHERE p.connection_id = c.id AND p.status = 'published'
+                                          AND p.deleted_at IS NULL))`,
   ];
   if (search) {
     const pattern = likePattern(search);
@@ -122,7 +124,7 @@ async function listPublished(actor: Actor, seeAll: boolean): Promise<PublishedCo
        FROM connections c
       WHERE ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
         AND EXISTS (SELECT 1 FROM context_layer_versions v
-                     WHERE v.connection_id = c.id AND v.status = 'published')
+                     WHERE v.connection_id = c.id AND v.status = 'published' AND v.deleted_at IS NULL)
       ORDER BY c.name, c.id`
   );
 }
@@ -134,18 +136,24 @@ async function listPublishedVersions(actor: Actor, seeAll: boolean): Promise<Pub
             v.version = MAX(v.version) OVER (PARTITION BY v.connection_id, v.name) AS live
        FROM context_layer_versions v
        JOIN connections c ON c.id = v.connection_id
-      WHERE v.status = 'published' AND ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+      WHERE v.status = 'published' AND v.deleted_at IS NULL
+        AND ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
       ORDER BY v.name, c.name, v.connection_id, v.version DESC`
   );
 }
 
-async function findWithSecret(actor: Actor, id: string): Promise<ConnectionSecretRow | null> {
+async function findWithSecret(
+  actor: Actor,
+  id: string,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<ConnectionSecretRow | null> {
+  const live = includeDeleted ? Prisma.sql`TRUE` : Prisma.sql`c.deleted_at IS NULL`;
   const rows = await orNotFound(
     rawRows<ConnectionSecretRow>(
       prisma,
       Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)}, c.secret
          FROM connections c
-        WHERE c.id = ${id}::uuid AND ${companyScope(actor, 'c.company_id')}`
+        WHERE c.id = ${id}::uuid AND ${live} AND ${companyScope(actor, 'c.company_id')}`
     ),
     NOT_FOUND
   );
@@ -158,7 +166,7 @@ async function findId(actor: Actor, id: string): Promise<ConnectionIdRow | null>
       prisma,
       Prisma.sql`SELECT c.id, c.name, c.company_id, ${accessColumns(actor)}
          FROM connections c
-        WHERE c.id = ${id}::uuid AND ${companyScope(actor, 'c.company_id')}`
+        WHERE c.id = ${id}::uuid AND c.deleted_at IS NULL AND ${companyScope(actor, 'c.company_id')}`
     ),
     NOT_FOUND
   );
@@ -244,8 +252,13 @@ async function replaceSelection(
   });
 }
 
-async function remove(id: string): Promise<void> {
+async function discard(id: string): Promise<void> {
   await prisma.connection.deleteMany({ where: { id } });
+}
+
+async function softDelete(id: string, deletedBy: number | null): Promise<boolean> {
+  const result = await prisma.connection.updateMany({ where: { id, ...NOT_DELETED }, data: softDeletion(deletedBy) });
+  return result.count > 0;
 }
 
 export {
@@ -259,7 +272,8 @@ export {
   insert,
   markStatus,
   replaceSelection,
-  remove,
+  softDelete,
+  discard,
 };
 export type {
   ConnectionRow,

@@ -1,7 +1,6 @@
 import * as companyRepository from './companyRepository';
 import { fail } from '../../shared/errors/AppError';
 import { requireCompany } from './companyService';
-import { countAccessibleDashboards } from '../access/accessService';
 import { factTotals } from '../contextLayer/connectionService';
 import type { Actor } from '../../shared/types/actor';
 
@@ -18,12 +17,8 @@ async function company(actor: Actor) {
 
 async function overview(actor: Actor) {
   const companyId = tenantId(actor);
-  const [numeric, dashboardsGranted, facts] = await Promise.all([
-    companyRepository.workspaceOverview(companyId),
-    countAccessibleDashboards(actor),
-    factTotals(actor),
-  ]);
-  return { ...numeric, dashboardsGranted, ...facts };
+  const [numeric, facts] = await Promise.all([companyRepository.workspaceOverview(companyId), factTotals(actor)]);
+  return { ...numeric, ...facts };
 }
 
 export { company, overview };

@@ -217,6 +217,7 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
       'context.publish',
       'context.delete',
       'context.manage_all',
+      'delete.permanent',
     ],
     features: [],
   } as unknown as Actor;
@@ -389,9 +390,10 @@ async function cleanup(): Promise<void> {
 
   const asOtherAdmin = await service.requireConnection(otherAdminA, connectionId);
   check('another company admin has full access', asOtherAdmin.access.level === 'full');
-  check('but may not share it', asOtherAdmin.access.canShare === false);
+  check('and may share it too', asOtherAdmin.access.canShare === true);
   const adminShares = await codeOf(() => sharing.shareWithUser(otherAdminA, connectionId, memberA.id, level('view')));
-  check('a non-owner admin sharing is refused', adminShares === 'INSUFFICIENT_PERMISSION', adminShares);
+  check('a company admin shares a context someone else created', adminShares === null, adminShares);
+  await sharing.unshareWithUser(otherAdminA, connectionId, memberA.id);
 
   const people = await sharing.shareablePeople(adminA, connectionId);
   check(
@@ -436,6 +438,9 @@ async function cleanup(): Promise<void> {
   );
   const editorDeletes = await codeOf(() => service.requireConnection(memberA, connectionId, 'full'));
   check('edit still cannot delete', editorDeletes === 'INSUFFICIENT_PERMISSION', editorDeletes);
+  await sharing.shareWithUser(adminA, connectionId, memberA.id, level('full'));
+  const fullShares = await codeOf(() => sharing.shareWithUser(memberA, connectionId, otherAdminA.id, level('view')));
+  check('even full access does not let a member share it', fullShares === 'INSUFFICIENT_PERMISSION', fullShares);
 
   const toOwner = await codeOf(() => sharing.shareWithUser(adminA, connectionId, adminA.id, level('view')));
   check('the owner cannot be given a level', toOwner === 'VALIDATION_ERROR', toOwner);
@@ -451,17 +456,15 @@ async function cleanup(): Promise<void> {
   const removed = await codeOf(() => service.requireConnection(memberA, connectionId));
   check('and they lose sight of it again', removed === 'RESOURCE_NOT_FOUND', removed);
 
-  shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'company' });
-  check('general access can open it to the company', shared.generalAccess === 'company');
-  const asCompany = await service.requireConnection(memberA, connectionId);
-  check('then everyone in the company can view it', asCompany.access.level === 'view');
-  const companyEdits = await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'));
-  check('but not edit it', companyEdits === 'INSUFFICIENT_PERMISSION', companyEdits);
+  const toCompany = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'company' }));
+  check('a context can no longer be opened to the whole company', toCompany === 'VALIDATION_ERROR', toCompany);
+  const stillHidden = await codeOf(() => service.requireConnection(memberA, connectionId));
+  check('so other members still cannot see it', stillHidden === 'RESOURCE_NOT_FOUND', stillHidden);
   const badGeneral = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'public' }));
   check('an unknown general access is refused', badGeneral === 'VALIDATION_ERROR', badGeneral);
   shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'restricted' });
   check(
-    'and it can be restricted again',
+    'restricted is still accepted',
     shared.generalAccess === 'restricted' && (await service.listConnections(memberA)).length === 0
   );
 
@@ -1145,15 +1148,86 @@ async function cleanup(): Promise<void> {
   const history = await publish.listPublications(connectionId);
   check('every version is listed, newest first', history.length === 3, String(history.length));
 
+  section('Deleting one version');
+
+  await contextLayer.deleteVersion(adminA, connectionId, v2.id);
+  const afterVersionDelete = await publish.listPublications(connectionId);
+  check(
+    'a deleted version leaves the history',
+    afterVersionDelete.length === 2 && !afterVersionDelete.some((v) => v.id === v2.id),
+    String(afterVersionDelete.length)
+  );
+  const keptVersion = await db.query(`SELECT deleted_at, deleted_by FROM ${CT.versions} WHERE id = ?::uuid`, [v2.id]);
+  check(
+    'but its row stays, marked with who deleted it',
+    keptVersion.rows.length === 1 &&
+      keptVersion.rows[0].deleted_at !== null &&
+      keptVersion.rows[0].deleted_by === adminA.id,
+    JSON.stringify(keptVersion.rows)
+  );
+  const versionTwice = await codeOf(() => contextLayer.deleteVersion(adminA, connectionId, v2.id));
+  check('deleting it again is a 404', versionTwice === 'RESOURCE_NOT_FOUND', versionTwice);
+  const v3 = await publish.publishContext(adminA, connectionRow, { name: 'Revenue' });
+  check('its version number is not reused', v3.version === 'v3', v3.version);
+  const memberVersionPurge = await codeOf(() =>
+    contextLayer.deleteVersion(memberA, connectionId, v2.id, { permanent: true })
+  );
+  check(
+    'a member cannot remove a version for good',
+    memberVersionPurge === 'INSUFFICIENT_PERMISSION',
+    memberVersionPurge
+  );
+  await contextLayer.deleteVersion(adminA, connectionId, v2.id, { permanent: true });
+  const purgedVersion = await db.query(`SELECT 1 FROM ${CT.versions} WHERE id = ?::uuid`, [v2.id]);
+  check('an admin removes a deleted version for good', purgedVersion.rows.length === 0);
+
   section('Deleting');
 
   await service.deleteConnection(adminA, connectionId);
   check('the connection is gone', (await service.listConnections(adminA)).length === 0);
+  const deletedOpen = await codeOf(() => service.requireConnection(adminA, connectionId));
+  check('and cannot be opened', deletedOpen === 'RESOURCE_NOT_FOUND', deletedOpen);
+  const deletedGate = await codeOf(() =>
+    agentGate.checkAgentRequest(adminA, `/svc/adk/contexts/${connectionId}/description-editor/sessions`, 'GET')
+  );
+  check('the agent gate refuses it', deletedGate === 'RESOURCE_NOT_FOUND', deletedGate);
 
-  const orphans = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.datasets} WHERE connection_id = ?`, [
+  const keptConnection = await db.query(`SELECT deleted_at, deleted_by FROM ${CT.connections} WHERE id = ?::uuid`, [
     connectionId,
   ]);
-  check('its dataset selection went with it', orphans.rows[0].n === 0, String(orphans.rows[0].n));
+  check(
+    'its row stays, marked with who deleted it',
+    keptConnection.rows.length === 1 &&
+      keptConnection.rows[0].deleted_at !== null &&
+      keptConnection.rows[0].deleted_by === adminA.id,
+    JSON.stringify(keptConnection.rows)
+  );
+  const kept = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.datasets} WHERE connection_id = ?`, [connectionId]);
+  check('its dataset selection stays with it', kept.rows[0].n > 0, String(kept.rows[0].n));
+  const keptVersions = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.versions} WHERE connection_id = ?`, [
+    connectionId,
+  ]);
+  check('and so do its versions', keptVersions.rows[0].n > 0, String(keptVersions.rows[0].n));
+  const connectionTwice = await codeOf(() => service.deleteConnection(adminA, connectionId));
+  check('deleting it again is a 404', connectionTwice === 'RESOURCE_NOT_FOUND', connectionTwice);
+  const memberContextPurge = await codeOf(() => service.deleteConnection(memberA, connectionId, { permanent: true }));
+  check(
+    'a member cannot remove a context for good',
+    memberContextPurge === 'INSUFFICIENT_PERMISSION',
+    memberContextPurge
+  );
+  await service.deleteConnection(adminA, connectionId, { permanent: true });
+  const purgedConnection = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.connections} WHERE id = ?::uuid`, [
+    connectionId,
+  ]);
+  const purgedDatasets = await db.query(`SELECT COUNT(*)::int AS n FROM ${CT.datasets} WHERE connection_id = ?`, [
+    connectionId,
+  ]);
+  check(
+    'an admin removes a deleted context for good, with everything under it',
+    purgedConnection.rows[0].n === 0 && purgedDatasets.rows[0].n === 0,
+    `${purgedConnection.rows[0].n} ${purgedDatasets.rows[0].n}`
+  );
 
   await cleanup();
 

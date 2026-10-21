@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
 import { elapsed } from '../../shared/http/requestTimerMiddleware';
+import { optionalFlag } from '../../shared/validation/commonValidator';
 import { parseFilters, requireCardUpdate } from './dashboardValidator';
 import * as dashboardService from './dashboardService';
 
@@ -24,7 +25,9 @@ async function updateCard(req: Request, res: Response): Promise<void> {
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
-  const result = await dashboardService.removeDashboard(req.actor, req.params.dashboardId as string);
+  const result = await dashboardService.removeDashboard(req.actor, req.params.dashboardId as string, {
+    permanent: optionalFlag(req.query.permanent, 'permanent'),
+  });
   console.log(`[api] DELETE /api/dashboard/${req.params.dashboardId} ${elapsed(res)}ms`);
   ok(res, result);
 }

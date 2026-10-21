@@ -121,8 +121,7 @@ async function runTests(): Promise<void> {
     [systemRoleId(COMPANY_ADMIN), systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
   );
 
-  await registry.deleteDashboard(dashA_Id).catch(() => {});
-  await registry.deleteDashboard(dashB_Id).catch(() => {});
+  await db.query('DELETE FROM dashboards WHERE id IN (?, ?)', [dashA_Id, dashB_Id]);
 
   await registry.saveSpec(
     dashA_Id,

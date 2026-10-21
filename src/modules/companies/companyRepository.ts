@@ -2,10 +2,11 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { pagedRows, numericRow, rawRows } from '../../shared/db/baseRepository';
 import { likePattern, orderBy } from '../../shared/db/listQuery';
+import { NOT_DELETED, notDeleted, notDeletedRef, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { ListWindow } from '../../shared/db/baseRepository';
 
-const { prisma } = config.database;
+const { prisma, withTransaction } = config.database;
 
 interface CompanyFilter {
   companyId?: number;
@@ -41,9 +42,11 @@ const COUNTED_FROM = Prisma.sql`
     FROM companies c
     LEFT JOIN (SELECT company_id, COUNT(*)::int AS n,
                       (COUNT(*) FILTER (WHERE status = 'pending'))::int AS pending
-                 FROM users GROUP BY company_id) uc ON uc.company_id = c.id
-    LEFT JOIN (SELECT company_id, COUNT(*)::int AS n
-                 FROM access_control.company_dashboards GROUP BY company_id) dc ON dc.company_id = c.id`;
+                 FROM users WHERE deleted_at IS NULL GROUP BY company_id) uc ON uc.company_id = c.id
+    LEFT JOIN (SELECT cd.company_id, COUNT(*)::int AS n
+                 FROM access_control.company_dashboards cd
+                WHERE ${notDeletedRef('dashboards', 'cd.dashboard_id')}
+                GROUP BY cd.company_id) dc ON dc.company_id = c.id`;
 
 const COUNTED_COLUMNS = Prisma.sql`c.id, c.name, c.slug, c.active, c.created_at,
          COALESCE(uc.n, 0) AS "userCount", COALESCE(dc.n, 0) AS "dashboardCount",
@@ -58,14 +61,14 @@ const COMPANY_SORTS: Record<string, string> = {
 };
 
 function whereOf(filter: CompanyFilter): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [];
+  const conditions: Prisma.Sql[] = [notDeleted('c')];
   if (filter.companyId !== undefined) conditions.push(Prisma.sql`c.id = ${filter.companyId}`);
   if (filter.active !== undefined) conditions.push(Prisma.sql`c.active = ${filter.active}`);
   if (filter.search) {
     const pattern = likePattern(filter.search);
     conditions.push(Prisma.sql`(c.name ILIKE ${pattern} OR c.slug ILIKE ${pattern})`);
   }
-  return conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
+  return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 }
 
 async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row: CompanyListRow) => R) {
@@ -83,10 +86,10 @@ async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row:
 }
 
 async function listOptions(companyId: number | null): Promise<CompanyOptionRow[]> {
-  const where = companyId === null ? Prisma.empty : Prisma.sql`WHERE id = ${companyId}`;
+  const only = companyId === null ? Prisma.empty : Prisma.sql`AND id = ${companyId}`;
   return rawRows<CompanyOptionRow>(
     prisma,
-    Prisma.sql`SELECT id, name, active FROM companies ${where} ORDER BY lower(name), id`
+    Prisma.sql`SELECT id, name, active FROM companies WHERE deleted_at IS NULL ${only} ORDER BY lower(name), id`
   );
 }
 
@@ -95,7 +98,7 @@ async function findWithCounts(id: number): Promise<CompanyCountsRow | null> {
     prisma,
     Prisma.sql`SELECT ${COUNTED_COLUMNS}, COALESCE(uc.pending, 0) AS "pendingCount"
        ${COUNTED_FROM}
-      WHERE c.id = ${id}`
+      WHERE c.id = ${id} AND ${notDeleted('c')}`
   );
   return rows[0] || null;
 }
@@ -110,8 +113,11 @@ function asRow(company: { id: number; name: string; slug: string; active: boolea
   };
 }
 
-async function findRow(id: number): Promise<CompanyRow | null> {
-  const company = await prisma.company.findUnique({ where: { id } });
+async function findRow(
+  id: number,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<CompanyRow | null> {
+  const company = await prisma.company.findFirst({ where: { id, ...(includeDeleted ? {} : NOT_DELETED) } });
   return company ? asRow(company) : null;
 }
 
@@ -126,39 +132,48 @@ async function updateColumns(id: number, changes: { name?: string; active?: bool
   await prisma.company.update({ where: { id }, data: changes });
 }
 
-async function remove(id: number): Promise<boolean> {
-  const result = await prisma.company.deleteMany({ where: { id } });
-  return result.count > 0;
+async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+  const deletion = softDeletion(deletedBy);
+  return withTransaction(async (tx) => {
+    const result = await tx.company.updateMany({ where: { id, ...NOT_DELETED }, data: { ...deletion, active: false } });
+    if (!result.count) return false;
+    await tx.group.updateMany({ where: { companyId: id, ...NOT_DELETED }, data: { ...deletion, active: false } });
+    await tx.role.updateMany({ where: { companyId: id, ...NOT_DELETED }, data: deletion });
+    await tx.dashboard.updateMany({ where: { companyId: id, ...NOT_DELETED }, data: deletion });
+    await tx.connection.updateMany({ where: { companyId: id, ...NOT_DELETED }, data: deletion });
+    return true;
+  });
+}
+
+async function discard(id: number): Promise<void> {
+  await prisma.company.deleteMany({ where: { id } });
 }
 
 async function platformOverview(): Promise<Record<string, number>> {
-  const [companies, companiesActive, users, usersActive, usersPending, companyAdmins, groups, assignments] =
-    await Promise.all([
-      prisma.company.count(),
-      prisma.company.count({ where: { active: true } }),
-      prisma.user.count({ where: { companyId: { not: null } } }),
-      prisma.user.count({ where: { companyId: { not: null }, status: 'active' } }),
-      prisma.user.count({ where: { companyId: { not: null }, status: 'pending' } }),
-      prisma.userRole.count({ where: { role: { tier: 'COMPANY_ADMIN' } } }),
-      prisma.group.count(),
-      prisma.companyDashboard.count(),
-    ]);
-  return { companies, companiesActive, users, usersActive, usersPending, companyAdmins, groups, assignments };
+  const [companies, companiesActive, users, usersActive, usersPending, companyAdmins, groups] = await Promise.all([
+    prisma.company.count({ where: NOT_DELETED }),
+    prisma.company.count({ where: { active: true, ...NOT_DELETED } }),
+    prisma.user.count({ where: { companyId: { not: null }, ...NOT_DELETED } }),
+    prisma.user.count({ where: { companyId: { not: null }, status: 'active', ...NOT_DELETED } }),
+    prisma.user.count({ where: { companyId: { not: null }, status: 'pending', ...NOT_DELETED } }),
+    prisma.userRole.count({ where: { role: { tier: 'COMPANY_ADMIN' }, user: NOT_DELETED } }),
+    prisma.group.count({ where: NOT_DELETED }),
+  ]);
+  return { companies, companiesActive, users, usersActive, usersPending, companyAdmins, groups };
 }
 
 async function workspaceOverview(companyId: number | null): Promise<Record<string, number>> {
   if (companyId === null) {
-    return numericRow({ users: 0, usersActive: 0, usersPending: 0, groups: 0, groupsActive: 0, dashboards: 0 });
+    return numericRow({ users: 0, usersActive: 0, usersPending: 0, groups: 0, groupsActive: 0 });
   }
-  const [users, usersActive, usersPending, groups, groupsActive, dashboards] = await Promise.all([
-    prisma.user.count({ where: { companyId } }),
-    prisma.user.count({ where: { companyId, status: 'active' } }),
-    prisma.user.count({ where: { companyId, status: 'pending' } }),
-    prisma.group.count({ where: { companyId } }),
-    prisma.group.count({ where: { companyId, active: true } }),
-    prisma.companyDashboard.count({ where: { companyId } }),
+  const [users, usersActive, usersPending, groups, groupsActive] = await Promise.all([
+    prisma.user.count({ where: { companyId, ...NOT_DELETED } }),
+    prisma.user.count({ where: { companyId, status: 'active', ...NOT_DELETED } }),
+    prisma.user.count({ where: { companyId, status: 'pending', ...NOT_DELETED } }),
+    prisma.group.count({ where: { companyId, ...NOT_DELETED } }),
+    prisma.group.count({ where: { companyId, active: true, ...NOT_DELETED } }),
   ]);
-  return { users, usersActive, usersPending, groups, groupsActive, dashboards };
+  return { users, usersActive, usersPending, groups, groupsActive };
 }
 
 export {
@@ -169,7 +184,8 @@ export {
   findRow,
   insert,
   updateColumns,
-  remove,
+  softDelete,
+  discard,
   platformOverview,
   workspaceOverview,
 };

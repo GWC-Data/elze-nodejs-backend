@@ -87,7 +87,7 @@ const SNAPSHOT_FACTS = `
          COALESCE((e->>'edited')::boolean, FALSE) AS snapshot_edited
     FROM ${CT.versions} v
    CROSS JOIN LATERAL jsonb_array_elements(v.snapshot) e
-   WHERE v.id = ?::uuid AND v.connection_id = ?::uuid AND v.status = 'published'`;
+   WHERE v.id = ?::uuid AND v.connection_id = ?::uuid AND v.status = 'published' AND v.deleted_at IS NULL`;
 
 function asMissingStore(err: unknown): never {
   if (err && sqlState(err) === UNDEFINED_TABLE) {

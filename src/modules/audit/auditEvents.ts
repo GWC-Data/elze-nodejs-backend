@@ -8,6 +8,8 @@ const EVENTS = {
   REFRESH_REUSE_DETECTED: 'refresh_reuse_detected',
   PASSWORD_CHANGED: 'password_changed',
   ACCOUNT_ACTIVATED: 'account_activated',
+  PASSWORD_RESET_REQUESTED: 'password_reset_requested',
+  PASSWORD_RESET: 'password_reset',
 
   COMPANY_CREATED: 'company_created',
   COMPANY_UPDATED: 'company_updated',

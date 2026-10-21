@@ -7,6 +7,10 @@ function permissions(_req: Request, res: Response): void {
   ok(res, roleService.permissionCatalogue());
 }
 
+function assignable(req: Request, res: Response): void {
+  ok(res, roleService.assignableRoles(req.actor, req.query.companyId));
+}
+
 async function list(_req: Request, res: Response): Promise<void> {
   ok(res, await roleService.listRoles());
 }
@@ -19,4 +23,4 @@ async function replacePermissions(req: Request, res: Response): Promise<void> {
   ok(res, await roleService.replaceRolePermissions(req.actor, req.params.id as string, bodyOf(req.body).permissionIds));
 }
 
-export { permissions, list, rolePermissions, replacePermissions };
+export { permissions, list, assignable, rolePermissions, replacePermissions };

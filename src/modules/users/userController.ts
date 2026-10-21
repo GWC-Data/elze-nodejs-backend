@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag, requireId } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import { publicUser } from './userSerializer';
 import * as userService from './userService';
@@ -55,8 +55,9 @@ async function reissueActivation(req: Request, res: Response): Promise<void> {
 }
 
 async function remove(req: Request, res: Response): Promise<void> {
-  await userService.deleteUser(req.actor, userId(req));
-  ok(res, { deleted: true });
+  const permanent = optionalFlag(req.query.permanent, 'permanent');
+  await userService.deleteUser(req.actor, userId(req), { permanent });
+  ok(res, { deleted: true, permanent });
 }
 
 async function access(req: Request, res: Response): Promise<void> {

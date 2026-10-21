@@ -11,11 +11,13 @@ datasource db {
 
 model Company {
   id        Int      @id @default(autoincrement())
-  name      String   @unique(map: "uq_companies_name") @db.VarChar(150)
-  slug      String   @unique(map: "uq_companies_slug") @db.VarChar(64)
-  active    Boolean  @default(true)
-  createdBy Int?     @map("created_by")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  name      String    @db.VarChar(150)
+  slug      String    @db.VarChar(64)
+  active    Boolean   @default(true)
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy Int?      @map("deleted_by")
 
   users                User[]
   groups               Group[]
@@ -34,14 +36,16 @@ model Company {
 model User {
   id                 Int        @id @default(autoincrement())
   companyId          Int?       @map("company_id")
-  username           String     @unique(map: "uq_users_username") @db.VarChar(50)
-  email              String     @unique(map: "uq_users_email") @db.VarChar(190)
+  username           String     @db.VarChar(50)
+  email              String     @db.VarChar(190)
   displayName        String?    @map("display_name") @db.VarChar(120)
   passwordHash       String?    @map("password_hash") @db.VarChar(100)
   status             UserStatus @default(pending)
   mustChangePassword Boolean    @default(false) @map("must_change_password")
   lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(6)
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt          DateTime?  @map("deleted_at") @db.Timestamptz(6)
+  deletedBy          Int?       @map("deleted_by")
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -84,8 +88,10 @@ model Group {
   companyId Int      @map("company_id")
   name      String   @db.VarChar(100)
   active    Boolean  @default(true)
-  creatorId Int?     @map("creator_id")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  creatorId Int?      @map("creator_id")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy Int?      @map("deleted_by")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator User?   @relation(fields: [creatorId], references: [id], onUpdate: NoAction)
@@ -94,7 +100,6 @@ model Group {
   dashboardAccess DashboardGroupAccess[]
   contextAccess   ContextGroupAccess[]
 
-  @@unique([companyId, name], map: "uq_groups_company_name")
   @@index([creatorId], map: "idx_groups_creator")
   @@map("groups")
   @@schema("public")
@@ -121,8 +126,10 @@ model Dashboard {
   companyId   Int?     @map("company_id")
   createdBy   Int?     @map("created_by")
   spec        Json
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy   Int?      @map("deleted_by")
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator User?    @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -248,7 +255,9 @@ model Connection {
   lastVerifiedAt DateTime?        @map("last_verified_at") @db.Timestamptz(6)
   createdBy      Int?             @map("created_by")
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  generalAccess  GeneralAccess    @default(company) @map("general_access")
+  generalAccess  GeneralAccess    @default(restricted) @map("general_access")
+  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  deletedBy      Int?             @map("deleted_by")
 
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator   User?     @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -261,7 +270,6 @@ model Connection {
   userAccess  ContextUserAccess[]
   groupAccess ContextGroupAccess[]
 
-  @@unique([companyId, provider, name], map: "uq_context_connections_name")
   @@index([companyId], map: "idx_context_connections_company")
   @@map("connections")
   @@schema("public")
@@ -309,6 +317,8 @@ model ContextLayerVersion {
   publishedAt          DateTime?     @map("published_at") @db.Timestamptz(6)
   datasets             Json          @default("[]")
   extractionDatasetIds Json?         @map("extraction_dataset_ids")
+  deletedAt            DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  deletedBy            Int?          @map("deleted_by")
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -364,6 +374,7 @@ model Feature {
   label       String   @db.VarChar(120)
   description String?
   locked      Boolean  @default(false)
+  hidden      Boolean  @default(false)
   covers      String[] @default([])
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -424,6 +435,8 @@ model Role {
   updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   modifiedBy  Int?      @map("modified_by")
   modifiedAt  DateTime? @map("modified_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy   Int?      @map("deleted_by")
 
   company  Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_roles_company_id")
   creator  User?    @relation("RoleCreator", fields: [createdBy], references: [id], onUpdate: NoAction, map: "fk_roles_created_by")
@@ -432,7 +445,6 @@ model Role {
   permissions RolePermissions?
   holders     UserRole[]
 
-  @@unique([companyId, name], map: "uq_roles_company_name")
   @@index([companyId], map: "idx_roles_company_id")
   @@map("roles")
   @@schema("access_control")
@@ -695,6 +707,7 @@ enum RoleKind {
 
 enum RoleTier {
   SUPER_ADMIN
+  PLATFORM_ADMIN
   COMPANY_ADMIN
   USER
 

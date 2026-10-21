@@ -14,6 +14,7 @@ import {
 const pids = (...keys: string[]) => permissionIdsOf(keys);
 const keysIn = (ids: unknown) => permissionKeysOf(Array.isArray(ids) ? ids : []);
 const { APPLICATION_URL } = config.auth;
+const { prisma } = config.database;
 
 interface CallOptions {
   noAuth?: boolean;
@@ -108,6 +109,24 @@ function latestEmail(toAddress: string): string | null {
 function activationTokenFrom(email: string | null): string | null {
   const m = /\/activate\?token=([A-Za-z0-9_-]+)/.exec(email || '');
   return m ? m[1] : null;
+}
+
+function resetTokenFrom(email: string | null): string | null {
+  const m = /\/reset-password\?token=([A-Za-z0-9_-]+)/.exec(email || '');
+  return m ? m[1] : null;
+}
+
+function mailCount(toAddress: string): number {
+  return sink!.messages.filter((m) => (m.headers.to || '').includes(toAddress)).length;
+}
+
+async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (mailCount(toAddress) > after) return latestEmail(toAddress);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
 }
 
 (async () => {
@@ -349,7 +368,7 @@ function activationTokenFrom(email: string | null): string | null {
   });
   check(
     'cannot create a SUPER_ADMIN',
-    r.status === 403 && r.body?.error?.code === 'INSUFFICIENT_PERMISSION',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
     JSON.stringify(r.body)
   );
 
@@ -580,13 +599,14 @@ function activationTokenFrom(email: string | null): string | null {
 
   r = await owner.call('POST', '/api/platform/companies', {
     name: 'Gamma Labs',
-    featureIds: featureIdsOf(['agents']),
+    featureIds: featureIdsOf(['data_analyst', 'agents']),
     admin: { username: 'gamma.admin', email: 'gamma.admin@example.com' },
   });
   const companyC = r.body?.data?.id;
   check(
-    'a company can be created with chosen features',
-    r.status === 201 && JSON.stringify(r.body?.data?.features) === JSON.stringify(['metadata_lakehouse', 'agents']),
+    'a company can be created with chosen features, hidden ones left out',
+    r.status === 201 &&
+      JSON.stringify(r.body?.data?.features) === JSON.stringify(['metadata_lakehouse', 'data_analyst']),
     JSON.stringify(r.body?.data)
   );
 
@@ -604,19 +624,34 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaAdmin.call('PUT', `/api/platform/companies/${companyA}/features`, { featureIds: [] });
   check('a company admin cannot change features', r.status === 403, JSON.stringify(r.body));
 
-  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, {
-    featureIds: featureIdsOf(['data_analyst', 'agents']),
-  });
+  r = await owner.call('GET', '/api/platform/features');
   check(
-    'the platform owner switches Dashboards off',
-    r.status === 200 && !(r.body?.data?.features || []).find((f: any) => f.key === 'dashboards')?.enabled,
+    'the feature list leaves out hidden features',
+    r.status === 200 &&
+      JSON.stringify((r.body?.data || []).map((f: any) => f.key)) ===
+        JSON.stringify(['metadata_lakehouse', 'data_analyst']),
+    JSON.stringify(r.body?.data)
+  );
+
+  r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, { featureIds: [] });
+  check(
+    'the platform owner switches the data analyst off',
+    r.status === 200 &&
+      !(r.body?.data?.features || []).find((f: any) => f.key === 'data_analyst')?.enabled &&
+      !(r.body?.data?.features || []).some((f: any) => f.key === 'dashboards' || f.key === 'agents'),
     JSON.stringify(r.body)
   );
 
+  r = await alphaAdmin.call('GET', '/api/auth/me');
+  check(
+    'a disabled feature is masked on the next request',
+    r.status === 200 && !(r.body?.data?.user?.permissions || []).includes('analyst.use'),
+    JSON.stringify(r.body?.data?.user)
+  );
   r = await alphaUser.call('GET', '/api/dashboard/default');
   check(
-    'a disabled feature is refused on the next request',
-    r.status === 403 && r.body?.error?.code === 'FEATURE_NOT_ENABLED',
+    'saving the visible features keeps the hidden ones as they were',
+    r.status === 200,
     `${r.status} ${JSON.stringify(r.body?.error)}`
   );
 
@@ -624,38 +659,50 @@ function activationTokenFrom(email: string | null): string | null {
   check(
     'the session reports the features and masks the permissions',
     r.status === 200 &&
-      !(r.body?.data?.user?.features || []).includes('dashboards') &&
+      !(r.body?.data?.user?.features || []).includes('data_analyst') &&
       (r.body?.data?.user?.features || []).includes('metadata_lakehouse') &&
-      !(r.body?.data?.user?.permissions || []).includes('dashboard.read') &&
+      !(r.body?.data?.user?.permissions || []).includes('analyst.use') &&
       (r.body?.data?.user?.permissions || []).includes('user.read'),
     JSON.stringify(r.body?.data?.user)
   );
+  check(
+    'and never mentions dashboards or agents',
+    r.body?.data?.dashboards === undefined &&
+      !/"(dashboard|data|access|scope|agent)\.|"dashboards"|"agents"/.test(JSON.stringify(r.body?.data?.user || {})),
+    JSON.stringify(r.body?.data)
+  );
 
   r = await owner.call('PUT', `/api/platform/companies/${companyA}/features`, {
-    featureIds: featureIdsOf(['data_analyst', 'agents', 'dashboards']),
+    featureIds: featureIdsOf(['data_analyst']),
   });
   check('switching it back on is accepted', r.status === 200, JSON.stringify(r.body));
-  r = await alphaUser.call('GET', '/api/dashboard/default');
+  r = await alphaAdmin.call('GET', '/api/auth/me');
   check(
     'switching it back on restores access exactly',
-    r.status === 200,
-    `${r.status} ${JSON.stringify(r.body?.error)}`
+    r.status === 200 && (r.body?.data?.user?.permissions || []).includes('analyst.use'),
+    JSON.stringify(r.body?.data?.user?.permissions)
   );
 
   section('Company roles: created by the company admin');
 
   r = await alphaAdmin.call('POST', '/api/roles', {
     name: 'Analyst',
-    permissionIds: pids('dashboard.update', 'agent.create'),
+    permissionIds: pids('playbook.create', 'context.update'),
   });
   const analystRoleId = r.body?.data?.id;
   check('a company admin creates a role', r.status === 201, JSON.stringify(r.body));
   check(
     'Create/Edit imply View',
-    ['dashboard.read', 'dashboard.update', 'agent.read', 'agent.create'].every((p) =>
+    ['playbook.read', 'playbook.create', 'context.read', 'context.update'].every((p) =>
       keysIn(r.body?.data?.permissionIds).includes(p)
     ),
     JSON.stringify(r.body?.data)
+  );
+  r = await alphaAdmin.call('POST', '/api/roles', { name: 'Hidden', permissionIds: pids('agent.read') });
+  check(
+    'a hidden feature cannot be given to a role',
+    r.status === 403 && r.body?.error?.code === 'FEATURE_NOT_ENABLED',
+    JSON.stringify(r.body)
   );
 
   r = await alphaAdmin.call('POST', '/api/roles', { name: 'Analyst', permissionIds: [] });
@@ -691,10 +738,8 @@ function activationTokenFrom(email: string | null): string | null {
   check(
     'the role grid leaves out features the company lacks',
     r.status === 200 &&
-      !(r.body?.data?.permissions || []).some((p: any) =>
-        /^(dashboard|data|access|scope|analyst|playbook)\./.test(p.key)
-      ) &&
-      (r.body?.data?.permissions || []).some((p: any) => p.key === 'agent.read'),
+      !(r.body?.data?.permissions || []).some((p: any) => /^(dashboard|data|access|scope|agent)\./.test(p.key)) &&
+      (r.body?.data?.permissions || []).some((p: any) => p.key === 'analyst.use'),
     JSON.stringify((r.body?.data?.permissions || []).map((p: any) => p.key))
   );
 
@@ -708,7 +753,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/auth/me');
   check(
     'a member is only told about features it can use',
-    r.status === 200 && JSON.stringify(r.body?.data?.user?.features) === JSON.stringify(['dashboards']),
+    r.status === 200 && !(r.body?.data?.user?.features || []).some((f: string) => f === 'dashboards' || f === 'agents'),
     JSON.stringify(r.body?.data?.user?.features)
   );
 
@@ -746,17 +791,12 @@ function activationTokenFrom(email: string | null): string | null {
   check(
     "the member now holds exactly the role's permissions",
     r.status === 200 &&
-      (r.body?.data?.user?.permissions || []).includes('agent.create') &&
+      (r.body?.data?.user?.permissions || []).includes('playbook.create') &&
       !(r.body?.data?.user?.permissions || []).includes('analyst.use'),
     JSON.stringify(r.body?.data?.user?.permissions)
   );
 
-  r = await alphaUser.call(
-    'GET',
-    '/api/gate/agents',
-    undefined,
-    gate('/svc/adk/contexts/no-such-connection/playbook-builder/sessions', 'POST')
-  );
+  r = await alphaUser.call('GET', '/api/gate/agents', undefined, gate(analystChat, 'POST'));
   check('the agent gate refuses an action the role lacks', r.status === 403, String(r.status));
   r = await alphaUser.call('GET', '/api/gate/agents', undefined, { noAuth: true, ...gate(analystChat, 'GET') });
   check('the agent gate refuses an anonymous call with 401', r.status === 401, String(r.status));
@@ -804,7 +844,9 @@ function activationTokenFrom(email: string | null): string | null {
   );
   r = await alphaAdmin.call('PUT', `/api/roles/built-in/${systemRoleId('COMPANY_ADMIN')}`, { permissionIds: [] });
   check('the company admin role cannot be changed by a company', r.status === 400, JSON.stringify(r.body));
-  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${alphaMemberRoleId}`, { permissionIds: pids('agent.read') });
+  r = await alphaAdmin.call('PUT', `/api/roles/built-in/${alphaMemberRoleId}`, {
+    permissionIds: pids('playbook.read'),
+  });
   check(
     'a company admin tailors the Member role',
     r.status === 200 && r.body?.data?.builtIn?.find((b: any) => b.name === 'USER')?.customized === true,
@@ -813,7 +855,7 @@ function activationTokenFrom(email: string | null): string | null {
   r = await alphaUser.call('GET', '/api/auth/me');
   check(
     "members follow their company's Member role",
-    r.status === 200 && JSON.stringify(r.body?.data?.user?.permissions) === JSON.stringify(['agent.read']),
+    r.status === 200 && JSON.stringify(r.body?.data?.user?.permissions) === JSON.stringify(['playbook.read']),
     JSON.stringify(r.body?.data?.user?.permissions)
   );
   r = await betaAdmin.call('GET', '/api/roles');
@@ -981,8 +1023,13 @@ function activationTokenFrom(email: string | null): string | null {
     JSON.stringify(selfItems.find((i) => i.actorId !== alphaUserId && i.detail?.userId !== alphaUserId))
   );
   check(
-    'including a grant made to them by their administrator',
-    selfItems.some((i) => i.event === 'access_granted' && i.actor === 'alpha.admin')
+    'including a change made to their account by their administrator',
+    selfItems.some((i) => i.actor === 'alpha.admin' && i.detail?.userId === alphaUserId)
+  );
+  check(
+    'but no dashboard events, which are hidden',
+    !selfItems.some((i) => /^(dashboard_|access_granted|access_revoked)/.test(i.event)),
+    JSON.stringify(selfItems.map((i) => i.event))
   );
 
   section('Token lifecycle');
@@ -1088,6 +1135,498 @@ function activationTokenFrom(email: string | null): string | null {
   );
 
   await owner.call('PATCH', `/api/platform/companies/${companyA}`, { active: true });
+
+  section('Soft delete');
+
+  const alphaBack = client('alphaBack');
+  r = await alphaBack.call('POST', '/api/auth/login', { identifier: 'alpha.admin', password: 'AlphaAdmin1!' });
+  check('company A admin signs back in', r.status === 200, JSON.stringify(r.body));
+  const alphaAdminId = r.body?.data?.user?.id;
+
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.gone',
+    email: 'alpha.gone@example.com',
+    role: 'USER',
+  });
+  check('an admin creates an account to delete', r.status === 201, JSON.stringify(r.body));
+  const goneId = r.body?.data?.id;
+  const gone = client('gone');
+  r = await gone.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('alpha.gone@example.com')),
+    password: 'GoneUser1!',
+  });
+  check('the account to delete activates', r.status === 200, JSON.stringify(r.body));
+
+  r = await alphaBack.call('DELETE', `/api/users/${goneId}`);
+  check('the admin deletes the account', r.status === 200, JSON.stringify(r.body));
+  r = await alphaBack.call('GET', `/api/users/${goneId}`);
+  check('a deleted account is a 404', r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
+  r = await alphaBack.call('GET', '/api/users?search=alpha.gone');
+  check(
+    'a deleted account is not listed',
+    r.status === 200 && (r.body?.data?.items || []).length === 0,
+    JSON.stringify(r.body?.data)
+  );
+  r = await alphaBack.call('DELETE', `/api/users/${goneId}`);
+  check('deleting an account again is a 404', r.status === 404, `${r.status}`);
+  r = await gone.call('GET', '/api/auth/me');
+  check('a deleted account loses its open session', r.status === 401, `${r.status} ${JSON.stringify(r.body)}`);
+  r = await client('goneLogin').call('POST', '/api/auth/login', { identifier: 'alpha.gone', password: 'GoneUser1!' });
+  check(
+    'a deleted account cannot sign in',
+    r.status === 401 && r.body?.error?.code === 'INVALID_CREDENTIALS',
+    JSON.stringify(r.body)
+  );
+  const goneRow = await prisma.user.findUnique({
+    where: { id: goneId },
+    select: { deletedAt: true, deletedBy: true, status: true },
+  });
+  check(
+    'the deleted account stays in the database, marked with who deleted it',
+    Boolean(goneRow?.deletedAt) && goneRow?.deletedBy === alphaAdminId && goneRow?.status === 'disabled',
+    JSON.stringify(goneRow)
+  );
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.gone',
+    email: 'alpha.gone@example.com',
+    role: 'USER',
+  });
+  check('a deleted account frees its username and email', r.status === 201, JSON.stringify(r.body));
+
+  r = await alphaBack.call('POST', '/api/groups', { name: 'Short lived' });
+  check('an admin creates a group to delete', r.status === 201, JSON.stringify(r.body));
+  const shortGroupId = r.body?.data?.id;
+  r = await alphaBack.call('DELETE', `/api/groups/${shortGroupId}`);
+  check('the admin deletes the group', r.status === 200, JSON.stringify(r.body));
+  r = await alphaBack.call('GET', `/api/groups/${shortGroupId}`);
+  check('a deleted group is a 404', r.status === 404, `${r.status}`);
+  const groupRow = await prisma.group.findUnique({
+    where: { id: shortGroupId },
+    select: { deletedAt: true, deletedBy: true, active: true },
+  });
+  check(
+    'the deleted group stays in the database, inactive',
+    Boolean(groupRow?.deletedAt) && groupRow?.deletedBy === alphaAdminId && groupRow?.active === false,
+    JSON.stringify(groupRow)
+  );
+  r = await alphaBack.call('POST', '/api/groups', { name: 'Short lived' });
+  check('a deleted group frees its name', r.status === 201, JSON.stringify(r.body));
+
+  r = await alphaBack.call('POST', '/api/roles', { name: 'Short lived role', permissionIds: pids('playbook.read') });
+  check('an admin creates a role to delete', r.status === 201, JSON.stringify(r.body));
+  const shortRoleId = r.body?.data?.id;
+  r = await alphaBack.call('DELETE', `/api/roles/${shortRoleId}`);
+  check('the admin deletes the role', r.status === 200, JSON.stringify(r.body));
+  r = await alphaBack.call('GET', `/api/roles/${shortRoleId}`);
+  check('a deleted role is a 404', r.status === 404, `${r.status}`);
+  r = await alphaBack.call('PATCH', `/api/users/${alphaUserId}`, { customRoleId: shortRoleId });
+  check('a deleted role cannot be given to anyone', r.status === 404, `${r.status} ${JSON.stringify(r.body)}`);
+  const roleRow = await prisma.role.findUnique({
+    where: { id: shortRoleId },
+    select: { deletedAt: true, deletedBy: true },
+  });
+  check(
+    'the deleted role stays in the database',
+    Boolean(roleRow?.deletedAt) && roleRow?.deletedBy === alphaAdminId,
+    JSON.stringify(roleRow)
+  );
+  r = await alphaBack.call('POST', '/api/roles', { name: 'Short lived role', permissionIds: [] });
+  check('a deleted role frees its name', r.status === 201, JSON.stringify(r.body));
+
+  r = await owner.call('POST', '/api/platform/companies', {
+    name: 'Short Lived Ltd',
+    admin: { username: 'short.admin', email: 'short.admin@example.com' },
+  });
+  check('owner creates a company to delete', r.status === 201, JSON.stringify(r.body));
+  const shortCompanyId = r.body?.data?.id;
+  r = await owner.call('DELETE', `/api/platform/companies/${shortCompanyId}`);
+  check(
+    'a company with accounts cannot be deleted',
+    r.status === 409 && r.body?.error?.code === 'CONFLICT',
+    JSON.stringify(r.body)
+  );
+  r = await owner.call('GET', '/api/platform/users?search=short.admin');
+  const shortAdminId = (r.body?.data?.items || [])[0]?.id;
+  r = await owner.call('DELETE', `/api/platform/users/${shortAdminId}`);
+  check('owner deletes its administrator', r.status === 200, JSON.stringify(r.body));
+  r = await owner.call('DELETE', `/api/platform/companies/${shortCompanyId}`);
+  check('a company whose accounts are all deleted can be deleted', r.status === 200, JSON.stringify(r.body));
+  r = await owner.call('GET', `/api/platform/companies/${shortCompanyId}`);
+  check('a deleted company is a 404', r.status === 404, `${r.status}`);
+  r = await owner.call('GET', '/api/platform/companies?search=Short%20Lived');
+  check(
+    'a deleted company is not listed',
+    r.status === 200 && (r.body?.data?.items || []).length === 0,
+    JSON.stringify(r.body?.data)
+  );
+  const companyRow = await prisma.company.findUnique({
+    where: { id: shortCompanyId },
+    select: { deletedAt: true, active: true },
+  });
+  check(
+    'the deleted company stays in the database',
+    Boolean(companyRow?.deletedAt) && companyRow?.active === false,
+    JSON.stringify(companyRow)
+  );
+  r = await owner.call('POST', '/api/platform/companies', {
+    name: 'Short Lived Ltd',
+    admin: { username: 'short.admin', email: 'short.admin@example.com' },
+  });
+  check('a deleted company frees its name and its admin’s username', r.status === 201, JSON.stringify(r.body));
+
+  section('Permanent delete');
+
+  r = await alphaBack.call('GET', '/api/auth/me');
+  check(
+    'a company admin may delete permanently',
+    (r.body?.data?.user?.permissions || []).includes('delete.permanent'),
+    JSON.stringify(r.body?.data?.user?.permissions)
+  );
+  r = await alphaBack.call('DELETE', `/api/users/${goneId}?permanent=maybe`);
+  check(
+    'an unclear permanent flag is refused',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
+    JSON.stringify(r.body)
+  );
+  r = await alphaBack.call('DELETE', `/api/users/${goneId}?permanent=true`);
+  check(
+    'an admin removes an already deleted account for good',
+    r.status === 200 && r.body?.data?.permanent === true,
+    JSON.stringify(r.body)
+  );
+  check('its row is gone from the database', (await prisma.user.findUnique({ where: { id: goneId } })) === null);
+
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.purge',
+    email: 'alpha.purge@example.com',
+    role: 'USER',
+  });
+  const purgeId = r.body?.data?.id;
+  r = await alphaBack.call('DELETE', `/api/users/${purgeId}?permanent=true`);
+  check(
+    'an admin removes a live account for good',
+    r.status === 200 && (await prisma.user.findUnique({ where: { id: purgeId } })) === null,
+    JSON.stringify(r.body)
+  );
+
+  r = await alphaBack.call('DELETE', `/api/groups/${shortGroupId}?permanent=true`);
+  check(
+    'a deleted group can be removed for good',
+    r.status === 200 && (await prisma.group.findUnique({ where: { id: shortGroupId } })) === null,
+    JSON.stringify(r.body)
+  );
+  r = await alphaBack.call('DELETE', `/api/roles/${shortRoleId}?permanent=true`);
+  check(
+    'a deleted role can be removed for good',
+    r.status === 200 && (await prisma.role.findUnique({ where: { id: shortRoleId } })) === null,
+    JSON.stringify(r.body)
+  );
+  r = await owner.call('DELETE', `/api/platform/companies/${shortCompanyId}?permanent=true`);
+  check(
+    'a deleted company can be removed for good',
+    r.status === 200 && (await prisma.company.findUnique({ where: { id: shortCompanyId } })) === null,
+    JSON.stringify(r.body)
+  );
+
+  section('Platform admins');
+
+  r = await owner.call('GET', `/api/platform/roles/assignable?companyId=${companyA}`);
+  check(
+    'a company account is only offered company roles',
+    r.status === 200 &&
+      JSON.stringify((r.body?.data?.roles || []).map((x: any) => x.role)) === JSON.stringify(['COMPANY_ADMIN', 'USER']),
+    JSON.stringify(r.body?.data)
+  );
+  r = await owner.call('GET', '/api/platform/roles/assignable');
+  check(
+    'a platform account is only offered Platform admin',
+    r.status === 200 &&
+      JSON.stringify((r.body?.data?.roles || []).map((x: any) => x.role)) === JSON.stringify(['PLATFORM_ADMIN']),
+    JSON.stringify(r.body?.data)
+  );
+
+  r = await owner.call('POST', '/api/platform/users', {
+    username: 'second.owner',
+    email: 'second.owner@example.com',
+    role: 'SUPER_ADMIN',
+  });
+  check(
+    'there is only one platform owner',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
+    JSON.stringify(r.body)
+  );
+
+  r = await owner.call('POST', '/api/platform/users', {
+    username: 'platform.helper',
+    email: 'platform.helper@example.com',
+    role: 'PLATFORM_ADMIN',
+  });
+  check(
+    'the owner creates a platform admin',
+    r.status === 201 && r.body?.data?.role === 'PLATFORM_ADMIN' && r.body?.data?.companyId === null,
+    JSON.stringify(r.body)
+  );
+  const helper = client('helper');
+  r = await helper.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('platform.helper@example.com')),
+    password: 'Helper123!',
+  });
+  check('the platform admin activates', r.status === 200, JSON.stringify(r.body));
+  const helperId = r.body?.data?.user?.id;
+
+  r = await owner.call('POST', '/api/platform/users', {
+    username: 'platform.other',
+    email: 'platform.other@example.com',
+    role: 'PLATFORM_ADMIN',
+  });
+  const otherHelperId = r.body?.data?.id;
+
+  r = await helper.call('GET', '/api/platform/companies');
+  check(
+    'a platform admin manages companies',
+    r.status === 200 && (r.body?.data?.items || []).length > 0,
+    JSON.stringify(r.body?.error)
+  );
+  r = await helper.call('GET', '/api/platform/users?pageSize=100');
+  check(
+    'a platform admin does not see platform accounts',
+    r.status === 200 &&
+      (r.body?.data?.items || []).length > 0 &&
+      (r.body?.data?.items || []).every((u: any) => u.role !== 'SUPER_ADMIN' && u.role !== 'PLATFORM_ADMIN'),
+    JSON.stringify((r.body?.data?.items || []).map((u: any) => u.role))
+  );
+  r = await helper.call('GET', `/api/platform/users/${ownerId}`);
+  check('nor can it open the owner', r.status === 404, `${r.status}`);
+  r = await helper.call('DELETE', `/api/platform/users/${otherHelperId}`);
+  check('nor delete another platform admin', r.status === 404, `${r.status}`);
+  r = await helper.call('POST', '/api/platform/users', {
+    username: 'helper.two',
+    email: 'helper.two@example.com',
+    role: 'PLATFORM_ADMIN',
+  });
+  check(
+    'a platform admin cannot create platform admins',
+    r.status === 403 && r.body?.error?.code === 'INSUFFICIENT_PERMISSION',
+    JSON.stringify(r.body)
+  );
+  r = await helper.call('GET', '/api/platform/roles/assignable');
+  check('and is offered no platform role', r.status === 200 && (r.body?.data?.roles || []).length === 0);
+  r = await helper.call('PUT', `/api/platform/roles/${systemRoleId('USER')}/permissions`, { permissionIds: [] });
+  check('a platform admin cannot change the built-in role defaults', r.status === 403, `${r.status}`);
+
+  r = await helper.call('GET', '/api/audit?pageSize=100');
+  check(
+    'a platform admin does not see the trail of other platform accounts',
+    r.status === 200 && !(r.body?.data?.items || []).some((i: any) => i.detail?.userId === otherHelperId),
+    JSON.stringify(r.body?.error)
+  );
+  r = await owner.call('GET', '/api/audit?pageSize=100');
+  check(
+    'the owner does',
+    (r.body?.data?.items || []).some((i: any) => i.detail?.userId === otherHelperId),
+    `${r.status}`
+  );
+  r = await owner.call('GET', '/api/platform/users?search=platform.');
+  check(
+    'the owner sees the platform admins',
+    r.status === 200 &&
+      [helperId, otherHelperId].every((id) => (r.body?.data?.items || []).some((u: any) => u.id === id)),
+    JSON.stringify(r.body?.data?.items)
+  );
+  r = await owner.call('DELETE', `/api/platform/users/${otherHelperId}`);
+  check('the owner deletes a platform admin', r.status === 200, JSON.stringify(r.body));
+
+  section('Hidden features stay out of responses');
+
+  r = await owner.call('GET', '/api/platform/roles/permissions');
+  check(
+    'the built-in role grid leaves out hidden permissions',
+    r.status === 200 &&
+      !(r.body?.data || []).some((p: any) => /^(dashboard|data|access|scope|agent)\./.test(p.key)) &&
+      (r.body?.data || []).some((p: any) => p.key === 'delete.permanent'),
+    JSON.stringify((r.body?.data || []).map((p: any) => p.key))
+  );
+  r = await owner.call('GET', '/api/platform/overview');
+  check(
+    'the platform overview has no dashboard counts',
+    r.status === 200 && r.body?.data?.dashboards === undefined && r.body?.data?.assignments === undefined,
+    JSON.stringify(r.body?.data)
+  );
+  r = await owner.call('GET', '/api/platform/companies');
+  check(
+    'company rows have no dashboard count',
+    r.status === 200 && (r.body?.data?.items || []).every((c: any) => c.dashboardCount === undefined),
+    JSON.stringify(r.body?.data?.items?.[0])
+  );
+  r = await alphaBack.call('GET', '/api/workspace/overview');
+  check(
+    'the workspace overview has no dashboard counts',
+    r.status === 200 && r.body?.data?.dashboards === undefined && r.body?.data?.dashboardsGranted === undefined,
+    JSON.stringify(r.body?.data)
+  );
+  r = await owner.call('GET', '/api/audit?category=dashboards');
+  check(
+    'the hidden audit category answers nothing',
+    r.status === 200 && (r.body?.data?.items || []).length === 0,
+    JSON.stringify(r.body)
+  );
+
+  section('Forgot password');
+
+  r = await owner.call('POST', '/api/platform/users', {
+    companyId: companyA,
+    username: 'alpha.reset',
+    email: 'alpha.reset@example.com',
+    role: 'USER',
+  });
+  check('owner creates an account to reset', r.status === 201, JSON.stringify(r.body));
+  const resetUser = client('resetUser');
+  r = await resetUser.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('alpha.reset@example.com')),
+    password: 'ResetMe1!',
+  });
+  check('the account to reset activates', r.status === 200, JSON.stringify(r.body));
+
+  r = await owner.call('POST', '/api/platform/users', {
+    companyId: companyA,
+    username: 'alpha.pending',
+    email: 'alpha.pending@example.com',
+    role: 'USER',
+  });
+  check('owner creates an account that stays pending', r.status === 201, JSON.stringify(r.body));
+  const pendingMails = mailCount('alpha.pending@example.com');
+
+  const forgetful = client('forgetful');
+  r = await forgetful.call('POST', '/api/auth/forgot-password', {});
+  check(
+    'forgot password needs a username or email',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
+    JSON.stringify(r.body)
+  );
+
+  let resetMails = mailCount('alpha.reset@example.com');
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.reset@example.com' });
+  check(
+    'forgot password is accepted',
+    r.status === 200 && typeof r.body?.data?.message === 'string',
+    JSON.stringify(r.body)
+  );
+  const acceptedMessage = r.body?.data?.message;
+  const firstMail = await nextEmail('alpha.reset@example.com', resetMails);
+  const firstReset = resetTokenFrom(firstMail);
+  check('a reset link is emailed', Boolean(firstReset), firstMail ?? 'no email arrived');
+
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'nobody.here' });
+  check(
+    'an unknown account gets the same answer',
+    r.status === 200 && r.body?.data?.message === acceptedMessage,
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.pending' });
+  check(
+    'a pending account gets the same answer',
+    r.status === 200 && r.body?.data?.message === acceptedMessage,
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('GET', '/api/auth/reset-password?token=not-a-real-token');
+  check(
+    'an unknown reset link is refused',
+    r.status === 400 && r.body?.error?.code === 'INVALID_RESET_TOKEN',
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('GET', `/api/auth/reset-password?token=${encodeURIComponent(firstReset!)}`);
+  check(
+    'the reset link describes the account',
+    r.status === 200 && r.body?.data?.username === 'alpha.reset',
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('POST', '/api/auth/reset-password', { token: firstReset, password: 'short' });
+  check(
+    'a weak new password is refused',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
+    JSON.stringify(r.body)
+  );
+
+  resetMails = mailCount('alpha.reset@example.com');
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.reset@example.com' });
+  check('a second request is accepted', r.status === 200, JSON.stringify(r.body));
+  const secondReset = resetTokenFrom(await nextEmail('alpha.reset@example.com', resetMails));
+  check('a second reset link is emailed', Boolean(secondReset) && secondReset !== firstReset);
+
+  r = await forgetful.call('POST', '/api/auth/reset-password', { token: firstReset, password: 'ResetDone1!' });
+  check(
+    'a newer link replaces the earlier one',
+    r.status === 400 && r.body?.error?.code === 'INVALID_RESET_TOKEN',
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('POST', '/api/auth/reset-password', { token: secondReset, password: 'ResetDone1!' });
+  check(
+    'the reset sets the password and signs in',
+    r.status === 200 && r.body?.data?.state === 'AUTHENTICATED' && forgetful.cookies.has('da_access'),
+    JSON.stringify(r.body)
+  );
+
+  r = await forgetful.call('POST', '/api/auth/reset-password', { token: secondReset, password: 'ResetAgain1!' });
+  check(
+    'a reset link is single use',
+    r.status === 400 && r.body?.error?.code === 'INVALID_RESET_TOKEN',
+    JSON.stringify(r.body)
+  );
+
+  r = await resetUser.call('POST', '/api/auth/refresh');
+  check('the reset ends earlier sessions', r.status === 401, `${r.status} ${JSON.stringify(r.body)}`);
+
+  const relogin = client('relogin');
+  r = await relogin.call('POST', '/api/auth/login', { identifier: 'alpha.reset', password: 'ResetMe1!' });
+  check(
+    'the old password stops working',
+    r.status === 401 && r.body?.error?.code === 'INVALID_CREDENTIALS',
+    JSON.stringify(r.body)
+  );
+  r = await relogin.call('POST', '/api/auth/login', { identifier: 'alpha.reset', password: 'ResetDone1!' });
+  check('the new password signs in', r.status === 200, JSON.stringify(r.body));
+
+  resetMails = mailCount('alpha.reset@example.com');
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.reset@example.com' });
+  check('a third request in the hour is accepted', r.status === 200, JSON.stringify(r.body));
+  check('a third reset link is emailed', Boolean(await nextEmail('alpha.reset@example.com', resetMails)));
+
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.reset@example.com' });
+  check(
+    'a fourth request in the hour is refused with a message',
+    r.status === 429 && r.body?.error?.code === 'RATE_LIMITED' && /minute/.test(r.body?.error?.message || ''),
+    JSON.stringify(r.body)
+  );
+
+  await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'nobody.here' });
+  await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'nobody.here' });
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'nobody.here' });
+  check(
+    'the limit applies to unknown accounts too',
+    r.status === 429 && r.body?.error?.code === 'RATE_LIMITED',
+    JSON.stringify(r.body)
+  );
+
+  resetMails = mailCount('alpha.reset@example.com');
+  r = await forgetful.call('POST', '/api/auth/forgot-password', { identifier: 'alpha.reset' });
+  check('asking by username after the limit is still answered', r.status === 200, JSON.stringify(r.body));
+  check(
+    'an account is sent at most three links an hour',
+    (await nextEmail('alpha.reset@example.com', resetMails, 1500)) === null
+  );
+  check('a pending account is sent no reset link', mailCount('alpha.pending@example.com') === pendingMails);
+
+  r = await owner.call('GET', '/api/audit?event=password_reset');
+  check(
+    'the reset is in the audit trail',
+    r.status === 200 && (r.body?.data?.items || []).length >= 1,
+    `${r.status} ${JSON.stringify(r.body)}`
+  );
 
   section('Unauthenticated and malformed requests');
 

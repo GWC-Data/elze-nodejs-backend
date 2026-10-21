@@ -89,6 +89,12 @@ function describeContextLevels(): ContextLevel[] {
 
 function requireGeneralAccess(value: unknown): GeneralAccess {
   const general = String(value || '') as GeneralAccess;
+  if (String(value) === 'company') {
+    throw fail(
+      'VALIDATION_ERROR',
+      'A context can no longer be opened to the whole company. Share it with people or groups instead.'
+    );
+  }
   if (!GENERAL_ACCESS.includes(general)) {
     throw fail('VALIDATION_ERROR', `General access must be one of: ${GENERAL_ACCESS.join(', ')}.`);
   }

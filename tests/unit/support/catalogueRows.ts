@@ -1,5 +1,5 @@
 import { EVENTS } from '../../../src/modules/audit/auditEvents';
-import { COMPANY_ADMIN, SUPER_ADMIN, USER } from '../../../src/modules/catalogue/roleTiers';
+import { COMPANY_ADMIN, PLATFORM_ADMIN, SUPER_ADMIN, USER } from '../../../src/modules/catalogue/roleTiers';
 
 const FEATURE = {
   lakehouse: 'feature-lakehouse',
@@ -28,15 +28,25 @@ function catalogueRows() {
         label: 'Lakehouse',
         description: null,
         locked: true,
+        hidden: false,
         covers: ['dashboards'],
       },
-      { id: FEATURE.agents, key: 'agents', label: 'Agents', description: 'AI agents', locked: false, covers: [] },
+      {
+        id: FEATURE.agents,
+        key: 'agents',
+        label: 'Agents',
+        description: 'AI agents',
+        locked: false,
+        hidden: false,
+        covers: [],
+      },
       {
         id: FEATURE.context,
         key: 'context_layer',
         label: 'Context layer',
         description: null,
         locked: false,
+        hidden: false,
         covers: [],
       },
     ],
@@ -58,6 +68,7 @@ function catalogueRows() {
     ],
     systemRoles: [
       { id: 'role-super', tier: SUPER_ADMIN, name: 'Platform owner', description: null },
+      { id: 'role-platform-admin', tier: PLATFORM_ADMIN, name: 'Platform admin', description: null },
       { id: 'role-company-admin', tier: COMPANY_ADMIN, name: 'Company administrator', description: null },
       { id: 'role-user', tier: USER, name: 'User', description: 'Everyone else' },
     ],

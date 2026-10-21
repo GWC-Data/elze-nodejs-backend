@@ -69,7 +69,7 @@ const MCP_TOOLS = [
 
 type ContextAccessLevel = 'view' | 'edit' | 'full';
 
-const GENERAL_ACCESS = ['restricted', 'company'] as const;
+const GENERAL_ACCESS = ['restricted'] as const;
 type GeneralAccess = (typeof GENERAL_ACCESS)[number];
 
 export {

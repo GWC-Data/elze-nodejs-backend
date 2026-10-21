@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { rawRows } from '../../shared/db/baseRepository';
+import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 
 const { prisma, withTransaction } = config.database;
@@ -29,7 +30,9 @@ const ROLE_COLUMNS = Prisma.sql`r.id, r.company_id AS "companyId", r.kind, r.tie
                       (SELECT mu.username FROM users mu WHERE mu.id = r.modified_by) AS "modifiedBy",
                       COALESCE((SELECT rp.permission_ids FROM access_control.role_permissions rp WHERE rp.role_id = r.id), '{}')
                         AS "permissionIds",
-                      (SELECT COUNT(*) FROM access_control.user_roles ur WHERE ur.role_id = r.id) AS "userCount"`;
+                      (SELECT COUNT(*) FROM access_control.user_roles ur
+                         JOIN users hu ON hu.id = ur.user_id AND hu.deleted_at IS NULL
+                        WHERE ur.role_id = r.id) AS "userCount"`;
 
 async function writePermissions(tx: Tx, roleId: string, ids: readonly string[], actorId: number | null) {
   await tx.rolePermissions.upsert({
@@ -43,7 +46,7 @@ async function listForCompany(companyId: number): Promise<CompanyRoleRow[]> {
   return rawRows<CompanyRoleRow>(
     prisma,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
-      WHERE r.company_id = ${companyId} AND r.kind = 'custom'
+      WHERE r.company_id = ${companyId} AND r.kind = 'custom' AND r.deleted_at IS NULL
       ORDER BY lower(r.name), r.created_at`
   );
 }
@@ -55,18 +58,23 @@ async function builtInCounts(companyId: number): Promise<Record<string, number>>
        FROM users u
        JOIN access_control.user_roles ur ON ur.user_id = u.id
        JOIN access_control.roles r ON r.id = ur.role_id
-      WHERE u.company_id = ${companyId} AND r.kind <> 'custom'
+      WHERE u.company_id = ${companyId} AND u.deleted_at IS NULL AND r.kind <> 'custom'
       GROUP BY r.tier`
   );
   return Object.fromEntries(rows.map((r) => [r.tier, Number(r.n)]));
 }
 
-async function findInCompany(id: string, companyId: number | null): Promise<CompanyRoleRow | null> {
+async function findInCompany(
+  id: string,
+  companyId: number | null,
+  { includeDeleted = false }: { includeDeleted?: boolean } = {}
+): Promise<CompanyRoleRow | null> {
   const company = companyId === null ? Prisma.empty : Prisma.sql`AND r.company_id = ${companyId}`;
+  const live = includeDeleted ? Prisma.empty : Prisma.sql`AND r.deleted_at IS NULL`;
   const rows = await rawRows<CompanyRoleRow>(
     prisma,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
-      WHERE r.id = ${id}::uuid AND r.kind = 'custom' ${company}`
+      WHERE r.id = ${id}::uuid AND r.kind = 'custom' ${live} ${company}`
   );
   return rows[0] || null;
 }
@@ -104,7 +112,7 @@ async function update(
   await withTransaction(async (tx) => {
     const now = new Date();
     await tx.role.updateMany({
-      where: { id },
+      where: { id, ...NOT_DELETED },
       data: {
         updatedAt: now,
         modifiedAt: now,
@@ -178,15 +186,27 @@ async function syncUnmodifiedCompanyDefaults(permissionIds: readonly string[]): 
     await tx.$executeRaw`
       INSERT INTO access_control.role_permissions AS rp (role_id, permission_ids)
       SELECT r.id, ${[...permissionIds]}::uuid[] FROM access_control.roles r
-       WHERE r.kind = 'company_default' AND r.tier = 'USER' AND r.modified_at IS NULL
+       WHERE r.kind = 'company_default' AND r.tier = 'USER' AND r.modified_at IS NULL AND r.deleted_at IS NULL
       ON CONFLICT (role_id) DO UPDATE SET permission_ids = EXCLUDED.permission_ids, updated_at = now()
         WHERE NOT (rp.permission_ids @> EXCLUDED.permission_ids AND rp.permission_ids <@ EXCLUDED.permission_ids)`;
-    return tx.role.count({ where: { kind: 'company_default', tier: 'USER', modifiedAt: null } });
+    return tx.role.count({ where: { kind: 'company_default', tier: 'USER', modifiedAt: null, ...NOT_DELETED } });
   });
 }
 
-async function remove(id: string): Promise<boolean> {
-  const result = await prisma.role.deleteMany({ where: { id, kind: 'custom' } });
+async function discard(id: string, fallbackRoleId: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    if (await tx.userRole.count({ where: { roleId: id, user: NOT_DELETED } })) return false;
+    await tx.userRole.updateMany({ where: { roleId: id }, data: { roleId: fallbackRoleId } });
+    const result = await tx.role.deleteMany({ where: { id, kind: 'custom' } });
+    return result.count > 0;
+  });
+}
+
+async function softDelete(id: string, deletedBy: number | null): Promise<boolean> {
+  const result = await prisma.role.updateMany({
+    where: { id, kind: 'custom', ...NOT_DELETED, holders: { none: { user: NOT_DELETED } } },
+    data: softDeletion(deletedBy),
+  });
   return result.count > 0;
 }
 
@@ -197,7 +217,8 @@ export {
   findInCompany,
   insert,
   update,
-  remove,
+  softDelete,
+  discard,
   findCompanyDefault,
   seedCompanyDefault,
   saveCompanyDefault,

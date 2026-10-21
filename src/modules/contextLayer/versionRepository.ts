@@ -5,6 +5,7 @@ import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepositor
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
+import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ContextStep, VersionStatus } from '../../generated/prisma/enums';
@@ -163,7 +164,7 @@ function extractionRow(v: ExtractionFields): ExtractionRow {
 
 async function listForConnection(connectionId: string): Promise<VersionRow[]> {
   const versions = await prisma.contextLayerVersion.findMany({
-    where: { connectionId },
+    where: { connectionId, ...NOT_DELETED },
     select: VERSION_FIELDS,
     orderBy: [{ createdAt: 'desc' }, { version: 'desc' }],
   });
@@ -195,7 +196,7 @@ async function lockDraft(tx: Tx, connectionId: string): Promise<DraftRow | null>
 
 async function latestPublishedName(tx: Tx, connectionId: string): Promise<{ id: string; name: string } | null> {
   return tx.contextLayerVersion.findFirst({
-    where: { connectionId, status: 'published' },
+    where: { connectionId, status: 'published', ...NOT_DELETED },
     orderBy: { publishedAt: 'desc' },
     select: { id: true, name: true },
   });
@@ -316,7 +317,7 @@ async function markPublished(
 
 async function latestPublished(connectionId: string): Promise<VersionRow | null> {
   const version = await prisma.contextLayerVersion.findFirst({
-    where: { connectionId, status: 'published' },
+    where: { connectionId, status: 'published', ...NOT_DELETED },
     orderBy: { publishedAt: 'desc' },
     select: VERSION_FIELDS,
   });
@@ -326,7 +327,7 @@ async function latestPublished(connectionId: string): Promise<VersionRow | null>
 async function findPublished(connectionId: string, versionId: string): Promise<PublishedVersionRow | null> {
   const version = await orNotFound(
     prisma.contextLayerVersion.findFirst({
-      where: { id: versionId, connectionId, status: 'published' },
+      where: { id: versionId, connectionId, status: 'published', ...NOT_DELETED },
       select: { ...VERSION_FIELDS, datasets: true },
     }),
     VERSION_NOT_FOUND
@@ -334,20 +335,29 @@ async function findPublished(connectionId: string, versionId: string): Promise<P
   return version ? { ...versionRow(version), datasets: version.datasets } : null;
 }
 
-async function deletePublished(tx: Tx, connectionId: string, versionId: string): Promise<DeletedVersionRow | null> {
-  try {
-    const deleted = await orNotFound(
-      tx.contextLayerVersion.delete({
-        where: { id: versionId, connectionId, status: 'published' },
-        select: { id: true, name: true, version: true, objectCount: true },
-      }),
-      VERSION_NOT_FOUND
-    );
-    return { id: deleted.id, name: deleted.name, version: deleted.version, object_count: deleted.objectCount };
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') return null;
-    throw err;
-  }
+async function deletePublished(
+  tx: Tx,
+  connectionId: string,
+  versionId: string,
+  deletedBy: number | null,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<DeletedVersionRow | null> {
+  const found = await orNotFound(
+    tx.contextLayerVersion.findFirst({
+      where: { id: versionId, connectionId, status: 'published', ...(permanent ? {} : NOT_DELETED) },
+      select: { id: true, name: true, version: true, objectCount: true },
+    }),
+    VERSION_NOT_FOUND
+  );
+  if (!found) return null;
+  const result = permanent
+    ? await tx.contextLayerVersion.deleteMany({ where: { id: found.id } })
+    : await tx.contextLayerVersion.updateMany({
+        where: { id: found.id, ...NOT_DELETED },
+        data: softDeletion(deletedBy),
+      });
+  if (!result.count) return null;
+  return { id: found.id, name: found.name, version: found.version, object_count: found.objectCount };
 }
 
 async function currentDraft(connectionId: string): Promise<VersionRow | null> {
@@ -360,7 +370,7 @@ async function currentDraft(connectionId: string): Promise<VersionRow | null> {
 
 async function latestExtraction(connectionId: string): Promise<ExtractionRow | null> {
   const version = await prisma.contextLayerVersion.findFirst({
-    where: { connectionId, extractionReport: { not: null } },
+    where: { connectionId, extractionReport: { not: null }, ...NOT_DELETED },
     orderBy: { extractedAt: 'desc' },
     select: EXTRACTION_FIELDS,
   });
@@ -369,7 +379,7 @@ async function latestExtraction(connectionId: string): Promise<ExtractionRow | n
 
 async function versionExtraction(connectionId: string, versionId: string): Promise<ExtractionRow | null> {
   const version = await prisma.contextLayerVersion.findFirst({
-    where: { id: versionId, connectionId, extractionReport: { not: null } },
+    where: { id: versionId, connectionId, extractionReport: { not: null }, ...NOT_DELETED },
     select: EXTRACTION_FIELDS,
   });
   return version ? extractionRow(version) : null;
@@ -381,7 +391,7 @@ async function statusHeadlines(connectionIds: readonly string[]): Promise<Status
     Prisma.sql`SELECT DISTINCT ON (connection_id, status)
             connection_id, name, version, status, published_at, updated_at
        FROM context_layer_versions
-      WHERE connection_id = ANY(${[...connectionIds]}::uuid[])
+      WHERE connection_id = ANY(${[...connectionIds]}::uuid[]) AND deleted_at IS NULL
       ORDER BY connection_id, status, COALESCE(published_at, updated_at) DESC`
   );
 }
@@ -392,7 +402,7 @@ async function listCompanyPublished(
   search?: string | null
 ): Promise<CompanyPublishedRow[]> {
   const conditions = [
-    Prisma.sql`v.status = 'published'`,
+    Prisma.sql`v.status = 'published' AND v.deleted_at IS NULL`,
     companyScope(actor, 'c.company_id'),
     visibleClause(actor, seeAll),
   ];

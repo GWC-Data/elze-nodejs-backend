@@ -1,6 +1,5 @@
 import config from '../../config';
 import * as companyRepository from './companyRepository';
-import { countDashboards } from '../dashboards/dashboardService';
 import { describeTransport } from '../../shared/email/emailService';
 import { factTotals } from '../contextLayer/connectionService';
 import type { Actor } from '../../shared/types/actor';
@@ -20,15 +19,10 @@ const {
 } = config.auth;
 
 async function overview(actor: Actor) {
-  const [numeric, dashboards, facts] = await Promise.all([
-    companyRepository.platformOverview(),
-    countDashboards(),
-    factTotals(actor),
-  ]);
+  const [numeric, facts] = await Promise.all([companyRepository.platformOverview(), factTotals(actor)]);
   return {
     ...numeric,
     companiesInactive: numeric.companies - numeric.companiesActive,
-    dashboards,
     ...facts,
   };
 }
@@ -55,7 +49,6 @@ async function settings() {
     },
     engine: {
       queryConcurrency: QUERY_CONCURRENCY,
-      dashboardCount: await countDashboards(),
     },
     email: describeTransport(),
   };

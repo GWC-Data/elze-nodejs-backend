@@ -76,14 +76,14 @@ async function createAndInvite(actor: Actor, fields: NewAccountFields) {
   try {
     invitation = await prepareInvitation(actor, user);
   } catch (err) {
-    await userRepository.remove(user.id);
+    await userRepository.discard(user.id);
     throw err;
   }
 
   try {
     await sendEmail(invitation, { consequence: 'The account was not created.' });
   } catch (err) {
-    await userRepository.remove(user.id);
+    await userRepository.discard(user.id);
     throw err;
   }
 
