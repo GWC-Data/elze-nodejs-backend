@@ -1,6 +1,6 @@
 interface PublicUser {
-  id: number;
-  companyId: number | null;
+  id: string;
+  companyId: string | null;
   companyName: string | null;
   username: string;
   email: string;

@@ -1,6 +1,6 @@
 import * as roleRepository from './roleRepository';
 import { fail, present } from '../../shared/errors/AppError';
-import { requireId, requireUuid } from '../../shared/validation/commonValidator';
+import { requireUuid } from '../../shared/validation/commonValidator';
 import { assertRolePermissionsAllowed, isPlatformOwner } from '../auth/authorizationService';
 import { followDefaults } from './builtInRolesService';
 import { audit, EVENTS } from '../audit/auditService';
@@ -45,7 +45,7 @@ function describePermission(key: string) {
   };
 }
 
-function assertRoleCompanyPairing(roleName: string, companyId: number | null | undefined) {
+function assertRoleCompanyPairing(roleName: string, companyId: string | null | undefined) {
   const scope = scopeOfTier(roleName);
   if (!scope) throw fail('VALIDATION_ERROR', `Unknown role: "${roleName}"`);
 
@@ -76,7 +76,7 @@ async function listRoles() {
 
 function assignableRoles(actor: Actor, requestedCompanyId: unknown) {
   const forCompany = requestedCompanyId !== undefined && requestedCompanyId !== null && requestedCompanyId !== '';
-  const companyId = forCompany ? requireId(requestedCompanyId, 'companyId') : null;
+  const companyId = forCompany ? requireUuid(requestedCompanyId, 'companyId') : null;
   const tiers: string[] = forCompany ? [COMPANY_ADMIN, USER] : isPlatformOwner(actor) ? [PLATFORM_ADMIN] : [];
   return {
     companyId,

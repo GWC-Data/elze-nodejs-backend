@@ -1,13 +1,5 @@
 import { fail } from '../errors/AppError';
 
-function requireId(value: unknown, label = 'id'): number {
-  const id = Number(value);
-  if (!Number.isInteger(id) || id <= 0) {
-    throw fail('VALIDATION_ERROR', `${label} must be a positive integer`);
-  }
-  return id;
-}
-
 function requireString(
   value: unknown,
   label: string,
@@ -20,6 +12,10 @@ function requireString(
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value.trim());
+}
 
 function requireUuid(value: unknown, label = 'id'): string {
   const id = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -44,4 +40,4 @@ function bodyOf(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-export { requireId, requireUuid, requireString, requireArray, optionalFlag, bodyOf };
+export { requireUuid, isUuid, requireString, requireArray, optionalFlag, bodyOf };

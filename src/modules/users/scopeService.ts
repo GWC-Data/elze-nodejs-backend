@@ -23,7 +23,7 @@ async function scopeOptions() {
   return { enforced: ENFORCED, dimensions: out };
 }
 
-async function getUserScopes(userId: number): Promise<UserScopes> {
+async function getUserScopes(userId: string): Promise<UserScopes> {
   if (!userId) return {};
   const scopes: UserScopes = {};
   for (const row of await scopeRepository.userScopeRows(userId)) {
@@ -33,11 +33,11 @@ async function getUserScopes(userId: number): Promise<UserScopes> {
   return scopes;
 }
 
-async function describeUserScopes(user: { id: number }) {
+async function describeUserScopes(user: { id: string }) {
   return { userId: user.id, scopes: await getUserScopes(user.id), enforced: ENFORCED };
 }
 
-async function replaceUserScopes(actor: Actor, user: { id: number; username: string }, requested: unknown) {
+async function replaceUserScopes(actor: Actor, user: { id: string; username: string }, requested: unknown) {
   const dimensions = new Map<string, ScopeDimension>(
     (await scopeRepository.listDimensions()).map((d) => [d.dimension, d])
   );

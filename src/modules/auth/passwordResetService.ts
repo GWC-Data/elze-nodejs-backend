@@ -44,14 +44,14 @@ async function recordResetRequest(identifier: string): Promise<void> {
   });
 }
 
-async function hasResetAllowance(userId: number): Promise<boolean> {
+async function hasResetAllowance(userId: string): Promise<boolean> {
   const since = new Date(Date.now() - PASSWORD_RESET_WINDOW_SECONDS * 1000);
   return (
     (await tokenRepository.countIssuedSince(userId, TOKEN_PURPOSE.PASSWORD_RESET, since)) < PASSWORD_RESET_MAX_REQUESTS
   );
 }
 
-async function issueResetToken(userId: number): Promise<{ token: string; expiresAt: Date }> {
+async function issueResetToken(userId: string): Promise<{ token: string; expiresAt: Date }> {
   const raw = randomToken();
   const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_SECONDS * 1000);
 
@@ -110,7 +110,7 @@ async function consumeResetToken(tokenId: string, conn?: Tx): Promise<void> {
   }
 }
 
-async function retireResetTokens(userId: number, conn?: Tx): Promise<void> {
+async function retireResetTokens(userId: string, conn?: Tx): Promise<void> {
   await tokenRepository.retireTokens(userId, TOKEN_PURPOSE.PASSWORD_RESET, conn);
 }
 

@@ -2,7 +2,7 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { pagedRows, companyScope, rawRows } from '../../shared/db/baseRepository';
 import { likePattern, orderBy } from '../../shared/db/listQuery';
-import { NOT_DELETED, notDeleted, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, notDeleted, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ListWindow } from '../../shared/db/baseRepository';
@@ -11,7 +11,7 @@ import type { UserStatus } from '../../generated/prisma/enums';
 const { prisma, withTransaction } = config.database;
 
 interface UserFilter {
-  companyId?: number;
+  companyId?: string;
   companyAccountsOnly?: boolean;
   role?: string;
   status?: string;
@@ -19,8 +19,8 @@ interface UserFilter {
 }
 
 interface UserRow {
-  id: number;
-  company_id: number | null;
+  id: string;
+  company_id: string | null;
   username: string;
   email: string;
   display_name: string | null;
@@ -54,7 +54,7 @@ interface ActorRow extends UserWithCompanyRow {
 }
 
 interface UserListRow {
-  id: number;
+  id: string;
   username: string;
   email: string;
   display_name: string | null;
@@ -98,12 +98,12 @@ async function findByIdentifier(value: string): Promise<LoginUserRow | null> {
   return rows[0] || null;
 }
 
-async function findCredentialsById(id: number) {
+async function findCredentialsById(id: string) {
   const user = await prisma.user.findFirst({ where: { id, ...NOT_DELETED }, select: { passwordHash: true } });
   return user ? { password_hash: user.passwordHash } : null;
 }
 
-async function findActorRow(id: number): Promise<ActorRow | null> {
+async function findActorRow(id: string): Promise<ActorRow | null> {
   const rows = await rawRows<ActorRow>(
     prisma,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.active AS "companyActive", c.name AS "companyName",
@@ -120,26 +120,26 @@ async function findActorRow(id: number): Promise<ActorRow | null> {
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id} AND ${notDeleted('u')}`
+      WHERE u.id = ${id}::uuid AND ${notDeleted('u')}`
   );
   return rows[0] || null;
 }
 
-async function findById(id: number, tx: Tx = prisma): Promise<UserWithCompanyRow | null> {
+async function findById(id: string, tx: Tx = prisma): Promise<UserWithCompanyRow | null> {
   const rows = await rawRows<UserWithCompanyRow>(
     tx,
     Prisma.sql`SELECT ${USER_COLUMNS}, c.active AS "companyActive", c.name AS "companyName"
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id} AND ${notDeleted('u')}`
+      WHERE u.id = ${id}::uuid AND ${notDeleted('u')}`
   );
   return rows[0] || null;
 }
 
 async function findInScope(
   actor: Actor,
-  id: number,
+  id: string,
   { includeDeleted = false }: { includeDeleted?: boolean } = {}
 ): Promise<UserInScopeRow | null> {
   const live = includeDeleted ? Prisma.sql`TRUE` : notDeleted('u');
@@ -149,14 +149,14 @@ async function findInScope(
        FROM users u
        LEFT JOIN companies c ON c.id = u.company_id
        ${ROLE_JOIN}
-      WHERE u.id = ${id} AND ${live} AND ${companyScope(actor, 'u.company_id')}`
+      WHERE u.id = ${id}::uuid AND ${live} AND ${companyScope(actor, 'u.company_id')}`
   );
   return rows[0] || null;
 }
 
 function whereOf(filter: UserFilter): Prisma.Sql {
   const conditions: Prisma.Sql[] = [notDeleted('u')];
-  if (filter.companyId !== undefined) conditions.push(Prisma.sql`u.company_id = ${filter.companyId}`);
+  if (filter.companyId !== undefined) conditions.push(Prisma.sql`u.company_id = ${filter.companyId}::uuid`);
   if (filter.companyAccountsOnly) conditions.push(Prisma.sql`u.company_id IS NOT NULL`);
   if (filter.role) conditions.push(Prisma.sql`r.tier = ${filter.role}`);
   if (filter.status) conditions.push(Prisma.sql`u.status = ${filter.status}`);
@@ -192,7 +192,7 @@ async function listOptions(actor: Actor, { companyAccountsOnly = false }: { comp
     ? companyAccountsOnly
       ? { companyId: { not: null } }
       : {}
-    : { companyId: actor.companyId as number };
+    : { companyId: actor.companyId as string };
   return prisma.user.findMany({
     where: { status: 'active', ...NOT_DELETED, ...scope },
     select: { id: true, username: true, email: true },
@@ -209,15 +209,15 @@ async function insert(
     roleId,
     assignedBy = null,
   }: {
-    companyId: number | null;
+    companyId: string | null;
     username: string;
     email: string;
     displayName: string | null;
     roleId: string;
-    assignedBy?: number | null;
+    assignedBy?: string | null;
   },
   tx?: Tx
-): Promise<number> {
+): Promise<string> {
   const work = async (client: Tx) => {
     const user = await client.user.create({
       data: {
@@ -237,7 +237,7 @@ async function insert(
   return tx ? work(tx) : withTransaction(work);
 }
 
-async function setRole(userId: number, roleId: string, assignedBy: number | null): Promise<void> {
+async function setRole(userId: string, roleId: string, assignedBy: string | null): Promise<void> {
   await prisma.userRole.upsert({
     where: { userId },
     create: { userId, roleId, assignedBy },
@@ -245,30 +245,30 @@ async function setRole(userId: number, roleId: string, assignedBy: number | null
   });
 }
 
-async function updateColumns(id: number, changes: { displayName?: string | null; status?: UserStatus }): Promise<void> {
+async function updateColumns(id: string, changes: { displayName?: string | null; status?: UserStatus }): Promise<void> {
   if (!Object.keys(changes).length) return;
   await prisma.user.updateMany({ where: { id, ...NOT_DELETED }, data: changes });
 }
 
-async function setActivePassword(tx: Tx, userId: number, passwordHash: string): Promise<void> {
+async function setActivePassword(tx: Tx, userId: string, passwordHash: string): Promise<void> {
   await tx.user.updateMany({
     where: { id: userId },
     data: { passwordHash, status: 'active', mustChangePassword: false },
   });
 }
 
-async function clearCredential(tx: Tx, userId: number): Promise<void> {
+async function clearCredential(tx: Tx, userId: string): Promise<void> {
   await tx.user.updateMany({
     where: { id: userId },
     data: { status: 'pending', passwordHash: null, mustChangePassword: false },
   });
 }
 
-async function recordLogin(userId: number): Promise<void> {
+async function recordLogin(userId: string): Promise<void> {
   await prisma.user.updateMany({ where: { id: userId }, data: { lastLoginAt: new Date() } });
 }
 
-async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+async function softDelete(id: string, deletedBy: string | null): Promise<boolean> {
   const result = await prisma.user.updateMany({
     where: { id, ...NOT_DELETED },
     data: { ...softDeletion(deletedBy), status: 'disabled' },
@@ -276,11 +276,16 @@ async function softDelete(id: number, deletedBy: number | null): Promise<boolean
   return result.count > 0;
 }
 
-async function discard(id: number): Promise<void> {
+async function discard(id: string): Promise<void> {
   await prisma.user.deleteMany({ where: { id } });
 }
 
-async function countByCompany(companyId: number): Promise<number> {
+async function restore(id: string, status: UserStatus): Promise<boolean> {
+  const result = await prisma.user.updateMany({ where: { id, ...DELETED }, data: { ...RESTORED, status } });
+  return result.count > 0;
+}
+
+async function countByCompany(companyId: string): Promise<number> {
   return prisma.user.count({ where: { companyId, ...NOT_DELETED } });
 }
 
@@ -301,6 +306,7 @@ export {
   recordLogin,
   softDelete,
   discard,
+  restore,
   countByCompany,
 };
 export type { UserFilter, UserRow, UserInScopeRow, UserWithCompanyRow, LoginUserRow, ActorRow, UserListRow };

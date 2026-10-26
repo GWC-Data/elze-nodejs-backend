@@ -14,11 +14,13 @@ const EVENTS = {
   COMPANY_CREATED: 'company_created',
   COMPANY_UPDATED: 'company_updated',
   COMPANY_DELETED: 'company_deleted',
+  COMPANY_RESTORED: 'company_restored',
   COMPANY_FEATURES_UPDATED: 'company_features_updated',
 
   USER_CREATED: 'user_created',
   USER_UPDATED: 'user_updated',
   USER_DELETED: 'user_deleted',
+  USER_RESTORED: 'user_restored',
   USER_ACTIVATED: 'user_activated',
   USER_DEACTIVATED: 'user_deactivated',
   USER_ACTIVATION_RESENT: 'user_activation_resent',
@@ -29,10 +31,12 @@ const EVENTS = {
   ROLE_CREATED: 'role_created',
   ROLE_UPDATED: 'role_updated',
   ROLE_DELETED: 'role_deleted',
+  ROLE_RESTORED: 'role_restored',
 
   GROUP_CREATED: 'group_created',
   GROUP_UPDATED: 'group_updated',
   GROUP_DELETED: 'group_deleted',
+  GROUP_RESTORED: 'group_restored',
 
   DASHBOARD_CREATED: 'dashboard_created',
   DASHBOARD_ASSIGNED: 'dashboard_assigned',
@@ -45,6 +49,7 @@ const EVENTS = {
 
   CONTEXT_CONNECTION_CREATED: 'context_connection_created',
   CONTEXT_CONNECTION_DELETED: 'context_connection_deleted',
+  CONTEXT_CONNECTION_RESTORED: 'context_connection_restored',
   CONTEXT_VERSION_CREATED: 'context_version_created',
   CONTEXT_PROFILE_SAVED: 'context_profile_saved',
   CONTEXT_FACT_UPDATED: 'context_fact_updated',
@@ -52,6 +57,7 @@ const EVENTS = {
   CONTEXT_REVIEW_DECIDED: 'context_review_decided',
   CONTEXT_PUBLISHED: 'context_published',
   CONTEXT_VERSION_DELETED: 'context_version_deleted',
+  CONTEXT_VERSION_RESTORED: 'context_version_restored',
   CONTEXT_EXTRACTION_RUN: 'context_extraction_run',
   CONTEXT_ACCESS_GRANTED: 'context_access_granted',
   CONTEXT_ACCESS_UPDATED: 'context_access_updated',

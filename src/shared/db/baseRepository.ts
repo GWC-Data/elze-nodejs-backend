@@ -61,7 +61,7 @@ async function orNotFound<T>(work: Promise<T>, message: string): Promise<T> {
 
 function companyScope(actor: Pick<Actor, 'isPlatform' | 'companyId'>, column: string): Prisma.Sql {
   if (actor.isPlatform) return Prisma.sql`TRUE`;
-  return Prisma.sql`${Prisma.raw(column)} = ${actor.companyId}`;
+  return Prisma.sql`${Prisma.raw(column)} = ${actor.companyId}::uuid`;
 }
 
 function numericRow(row: Row): Record<string, number> {

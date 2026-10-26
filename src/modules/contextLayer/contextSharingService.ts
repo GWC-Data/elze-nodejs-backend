@@ -1,6 +1,6 @@
 import * as contextAccessRepository from './contextAccessRepository';
 import { fail } from '../../shared/errors/AppError';
-import { requireId } from '../../shared/validation/commonValidator';
+import { requireUuid } from '../../shared/validation/commonValidator';
 import { GENERAL_ACCESS } from './contextConstants';
 import type { ContextAccessLevel, GeneralAccess } from './contextConstants';
 import { accessLevelsFor, accessLevelId } from '../catalogue/catalogueService';
@@ -16,29 +16,29 @@ import type { RequestBody } from './contextTypes';
 type Connection = ConnectionRef;
 
 interface PersonSource {
-  user_id?: number;
-  id?: number;
+  user_id?: string;
+  id?: string;
   username: string;
   email: string;
   display_name: string | null;
 }
 
 interface GroupSource {
-  group_id?: number;
-  id?: number;
+  group_id?: string;
+  id?: string;
   name: string;
   member_count?: number;
 }
 
 interface SharedPerson {
-  userId: number;
+  userId: string;
   username: string;
   email: string;
   displayName: string | null;
 }
 
 interface SharedGroup {
-  groupId: number;
+  groupId: string;
   name: string;
   memberCount: number;
 }
@@ -62,7 +62,7 @@ interface ContextSharing {
 
 function shapePerson(row: PersonSource): SharedPerson {
   return {
-    userId: Number(row.user_id ?? row.id),
+    userId: String(row.user_id ?? row.id),
     username: row.username,
     email: row.email,
     displayName: row.display_name || null,
@@ -89,12 +89,6 @@ function describeContextLevels(): ContextLevel[] {
 
 function requireGeneralAccess(value: unknown): GeneralAccess {
   const general = String(value || '') as GeneralAccess;
-  if (String(value) === 'company') {
-    throw fail(
-      'VALIDATION_ERROR',
-      'A context can no longer be opened to the whole company. Share it with people or groups instead.'
-    );
-  }
   if (!GENERAL_ACCESS.includes(general)) {
     throw fail('VALIDATION_ERROR', `General access must be one of: ${GENERAL_ACCESS.join(', ')}.`);
   }
@@ -103,7 +97,7 @@ function requireGeneralAccess(value: unknown): GeneralAccess {
 
 function shapeGroup(row: GroupSource): SharedGroup {
   return {
-    groupId: Number(row.group_id ?? row.id),
+    groupId: String(row.group_id ?? row.id),
     name: row.name,
     memberCount: Number(row.member_count ?? 0),
   };
@@ -156,7 +150,7 @@ async function shareWithUser(
 ): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
-  const userId = requireId(rawUserId, 'user id');
+  const userId = requireUuid(rawUserId, 'user id');
   const level = requireContextLevel(body.levelId);
 
   if (userId === connection.access.owner?.id) {
@@ -180,7 +174,7 @@ async function shareWithUser(
 async function unshareWithUser(actor: Actor, id: unknown, rawUserId: unknown): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
-  const userId = requireId(rawUserId, 'user id');
+  const userId = requireUuid(rawUserId, 'user id');
 
   const previous = await contextAccessRepository.findGrant(connection.id, userId);
   if (await contextAccessRepository.deleteGrant(connection.id, userId)) {
@@ -204,7 +198,7 @@ async function shareWithGroup(
 ): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
-  const groupId = requireId(rawGroupId, 'group id');
+  const groupId = requireUuid(rawGroupId, 'group id');
   const level = requireContextLevel(body.levelId);
 
   const group = await contextAccessRepository.findActiveCompanyGroup(connection.companyId, groupId);
@@ -226,7 +220,7 @@ async function shareWithGroup(
 async function unshareWithGroup(actor: Actor, id: unknown, rawGroupId: unknown): Promise<ContextSharing> {
   const connection = await connections.requireConnectionId(actor, id);
   assertMayShare(actor, connection.row);
-  const groupId = requireId(rawGroupId, 'group id');
+  const groupId = requireUuid(rawGroupId, 'group id');
 
   const previous = await contextAccessRepository.findGroupGrant(connection.id, groupId);
   if (await contextAccessRepository.deleteGroupGrant(connection.id, groupId)) {

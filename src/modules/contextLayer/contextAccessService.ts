@@ -10,7 +10,7 @@ type OwnerRow = Pick<AccessColumnsRow, 'created_by'>;
 
 interface ContextAccess {
   level: ContextAccessLevel;
-  owner: { id: number; name: string | null } | null;
+  owner: { id: string; name: string | null } | null;
   isOwner: boolean;
   canShare: boolean;
   generalAccess: GeneralAccess;
@@ -20,8 +20,8 @@ function isContextAdmin(actor: Actor): boolean {
   return actor.isPlatform || can(actor, 'context.manage_all');
 }
 
-function ownerIdOf(row: OwnerRow): number | null {
-  return row.created_by === null || row.created_by === undefined ? null : Number(row.created_by);
+function ownerIdOf(row: OwnerRow): string | null {
+  return row.created_by ?? null;
 }
 
 function isContextLevel(level: string | null, known: readonly string[]): level is ContextAccessLevel {
@@ -41,7 +41,7 @@ function strongest(...levels: (string | null)[]): ContextAccessLevel | null {
 function levelOf(actor: Actor, row: AccessColumnsRow): ContextAccessLevel | null {
   if (isContextAdmin(actor)) return 'full';
   if (ownerIdOf(row) === actor.id) return 'full';
-  return strongest(row.granted_level, row.group_level);
+  return strongest(row.granted_level, row.group_level, row.general_access === 'company' ? 'view' : null);
 }
 
 function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessLevel): boolean {

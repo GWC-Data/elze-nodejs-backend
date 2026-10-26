@@ -43,7 +43,7 @@ type LoadedConnection = ConnectionSecretRow & { access: ContextAccess };
 interface ConnectionRef {
   id: string;
   name: string;
-  companyId: number;
+  companyId: string;
   access: ContextAccess;
   row: ConnectionIdRow;
 }
@@ -151,7 +151,7 @@ async function requireConnectionId(
   const row = await connectionRepository.findId(actor, id);
   if (!row) throw fail('RESOURCE_NOT_FOUND', NOT_FOUND);
   const access = assertLevel(actor, row, required, NOT_FOUND);
-  return { id: row.id, name: row.name, companyId: Number(row.company_id), access, row };
+  return { id: row.id, name: row.name, companyId: row.company_id, access, row };
 }
 
 async function requireConnection(
@@ -242,7 +242,7 @@ async function tableProfile(actor: Actor, id: unknown, tableId: unknown): Promis
 
 async function createConnection(
   actor: Actor,
-  companyId: number,
+  companyId: string,
   {
     provider,
     name,
@@ -325,12 +325,28 @@ async function deleteConnection(
   actor: Actor,
   id: unknown,
   { permanent = false }: { permanent?: boolean } = {}
-): Promise<{ provider: string; name: string; companyId: number | null }> {
+): Promise<{ provider: string; name: string; companyId: string | null }> {
   if (permanent) assertPermission(actor, 'delete.permanent');
   const row = await loadRow(actor, id, 'full', { includeDeleted: permanent });
   if (permanent) await connectionRepository.discard(row.id);
   else if (!(await connectionRepository.softDelete(row.id, actor.id)))
     throw fail('RESOURCE_NOT_FOUND', 'Connection not found');
+  return { provider: row.provider, name: row.name, companyId: row.company_id ?? null };
+}
+
+async function restoreConnection(
+  actor: Actor,
+  id: unknown
+): Promise<{ provider: string; name: string; companyId: string | null }> {
+  const row = await loadRow(actor, id, 'full', { includeDeleted: true });
+  try {
+    if (!(await connectionRepository.restore(row.id))) throw fail('RESOURCE_NOT_FOUND', 'Connection not found');
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail('CONFLICT', `This company now has another ${row.provider} connection called "${row.name}".`);
+    }
+    throw err;
+  }
   return { provider: row.provider, name: row.name, companyId: row.company_id ?? null };
 }
 
@@ -390,5 +406,6 @@ export {
   verifyConnection,
   replaceSelection,
   deleteConnection,
+  restoreConnection,
 };
 export type { WarehouseProvider, ConnectionView, ListedConnection, ConnectionRef, DraftSummary, ProfileOverview };

@@ -38,11 +38,11 @@ function parseFeatureIds(featureIds: unknown): string[] {
   return featureKeysOf(unique).filter((key) => toggleable.includes(key) && !isHiddenFeature(key));
 }
 
-async function enabledFor(companyId: number, conn?: Tx): Promise<string[]> {
+async function enabledFor(companyId: string, conn?: Tx): Promise<string[]> {
   return effectiveFeatures(featureKeysOf(await featureRepository.listForCompany(companyId, conn)));
 }
 
-async function visibleFor(companyId: number, conn?: Tx): Promise<string[]> {
+async function visibleFor(companyId: string, conn?: Tx): Promise<string[]> {
   return visibleFeatureKeys(await enabledFor(companyId, conn));
 }
 
@@ -58,15 +58,15 @@ function describe(enabled: readonly string[]) {
   }));
 }
 
-async function companyFeatures(companyId: number) {
+async function companyFeatures(companyId: string) {
   return { companyId, features: describe(await enabledFor(companyId)) };
 }
 
-async function setInitialFeatures(actor: Actor, companyId: number, featureKeys: readonly string[], conn: Tx) {
+async function setInitialFeatures(actor: Actor, companyId: string, featureKeys: readonly string[], conn: Tx) {
   await featureRepository.replace(companyId, featureIdsOf(featureKeys), actor.id, conn);
 }
 
-async function replaceCompanyFeatures(actor: Actor, companyId: number, featureIds: unknown) {
+async function replaceCompanyFeatures(actor: Actor, companyId: string, featureIds: unknown) {
   const before = await enabledFor(companyId);
   const next = [...parseFeatureIds(featureIds), ...before.filter((key) => isHiddenFeature(key))];
   await featureRepository.replace(companyId, featureIdsOf(next), actor.id);

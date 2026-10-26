@@ -1,6 +1,7 @@
 import config from '../../config';
 import type { Prisma } from '../../generated/prisma/client';
-import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/softDelete';
+import { isUuid } from '../../shared/validation/commonValidator';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 
@@ -12,8 +13,8 @@ const GROUP_INCLUDE = {
 } as const;
 
 interface GroupView {
-  id: number;
-  companyId: number;
+  id: string;
+  companyId: string;
   companyName: string;
   name: string;
   active: boolean;
@@ -35,7 +36,7 @@ function shape(row: Prisma.GroupGetPayload<{ include: typeof GROUP_INCLUDE }>): 
 
 function scopeWhere(actor: Actor, { includeDeleted = false }: { includeDeleted?: boolean } = {}) {
   const live = includeDeleted ? {} : NOT_DELETED;
-  return actor.isPlatform ? live : { companyId: actor.companyId as number, ...live };
+  return actor.isPlatform ? live : { companyId: actor.companyId as string, ...live };
 }
 
 async function list(actor: Actor): Promise<GroupView[]> {
@@ -52,21 +53,20 @@ async function findInScope(
   id: unknown,
   { includeDeleted = false }: { includeDeleted?: boolean } = {}
 ): Promise<GroupView | null> {
-  const groupId = Number(id);
-  if (!Number.isSafeInteger(groupId)) return null;
+  if (!isUuid(id)) return null;
   const row = await prisma.group.findFirst({
-    where: { id: groupId, ...scopeWhere(actor, { includeDeleted }) },
+    where: { id: id.toLowerCase(), ...scopeWhere(actor, { includeDeleted }) },
     include: GROUP_INCLUDE,
   });
   return row ? shape(row) : null;
 }
 
-async function memberIds(groupId: number): Promise<number[]> {
+async function memberIds(groupId: string): Promise<string[]> {
   const rows = await prisma.groupUser.findMany({ where: { groupId, user: NOT_DELETED }, select: { userId: true } });
   return rows.map((r) => r.userId);
 }
 
-async function listMembers(groupId: number) {
+async function listMembers(groupId: string) {
   const rows = await prisma.groupUser.findMany({
     where: { groupId, user: NOT_DELETED },
     include: { user: { include: { role: { include: { role: { select: { tier: true } } } } } } },
@@ -81,11 +81,11 @@ async function listMembers(groupId: number) {
   }));
 }
 
-async function clearMembers(tx: Tx, groupId: number): Promise<void> {
+async function clearMembers(tx: Tx, groupId: string): Promise<void> {
   await tx.groupUser.deleteMany({ where: { groupId } });
 }
 
-async function usersInCompany(tx: Tx, userIds: readonly number[], companyId: number | null): Promise<number[]> {
+async function usersInCompany(tx: Tx, userIds: readonly string[], companyId: string | null): Promise<string[]> {
   if (companyId === null) return [];
   const rows = await tx.user.findMany({
     where: { id: { in: [...userIds] }, companyId, ...NOT_DELETED },
@@ -94,31 +94,36 @@ async function usersInCompany(tx: Tx, userIds: readonly number[], companyId: num
   return rows.map((r) => r.id);
 }
 
-async function insertMembers(tx: Tx, groupId: number, userIds: readonly number[]): Promise<void> {
+async function insertMembers(tx: Tx, groupId: string, userIds: readonly string[]): Promise<void> {
   await tx.groupUser.createMany({ data: userIds.map((userId) => ({ groupId, userId })) });
 }
 
 async function insert(
   tx: Tx,
-  { companyId, name, active, creatorId }: { companyId: number; name: string; active: boolean; creatorId: number | null }
-): Promise<number> {
+  { companyId, name, active, creatorId }: { companyId: string; name: string; active: boolean; creatorId: string | null }
+): Promise<string> {
   const row = await tx.group.create({ data: { companyId, name, active, creatorId }, select: { id: true } });
   return row.id;
 }
 
-async function updateColumns(tx: Tx, id: number, changes: { name?: string; active?: boolean }): Promise<void> {
+async function updateColumns(tx: Tx, id: string, changes: { name?: string; active?: boolean }): Promise<void> {
   await tx.group.update({ where: { id }, data: changes });
 }
 
-async function discard(id: number): Promise<void> {
+async function discard(id: string): Promise<void> {
   await prisma.group.deleteMany({ where: { id } });
 }
 
-async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+async function softDelete(id: string, deletedBy: string | null): Promise<boolean> {
   const result = await prisma.group.updateMany({
     where: { id, ...NOT_DELETED },
     data: { ...softDeletion(deletedBy), active: false },
   });
+  return result.count > 0;
+}
+
+async function restore(id: string): Promise<boolean> {
+  const result = await prisma.group.updateMany({ where: { id, ...DELETED }, data: RESTORED });
   return result.count > 0;
 }
 
@@ -134,5 +139,6 @@ export {
   updateColumns,
   softDelete,
   discard,
+  restore,
 };
 export type { GroupView };

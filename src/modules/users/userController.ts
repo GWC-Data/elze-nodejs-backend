@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, optionalFlag, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag, requireUuid } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import { publicUser } from './userSerializer';
 import * as userService from './userService';
@@ -8,7 +8,7 @@ import * as scopeService from './scopeService';
 import * as accessService from '../access/accessService';
 import * as userPermissionService from './userPermissionService';
 
-const userId = (req: Request) => requireId(req.params.id, 'user id');
+const userId = (req: Request) => requireUuid(req.params.id, 'user id');
 
 async function options(req: Request, res: Response): Promise<void> {
   ok(res, await userService.listUserOptions(req.actor));

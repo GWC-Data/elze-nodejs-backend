@@ -1,10 +1,10 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, requireUuid } from '../../shared/validation/commonValidator';
 import * as accessService from './accessService';
 
-const userId = (req: Request) => requireId(req.params.userId, 'user id');
-const groupId = (req: Request) => requireId(req.params.groupId, 'group id');
+const userId = (req: Request) => requireUuid(req.params.userId, 'user id');
+const groupId = (req: Request) => requireUuid(req.params.groupId, 'group id');
 const levelId = (req: Request) => bodyOf(req.body).levelId;
 
 function levels(_req: Request, res: Response): void {

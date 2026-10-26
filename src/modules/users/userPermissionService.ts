@@ -33,11 +33,11 @@ async function describe(actor: Actor, target: Row) {
   };
 }
 
-async function describeUserPermissions(actor: Actor, id: number) {
+async function describeUserPermissions(actor: Actor, id: string) {
   return describe(actor, await requireUserInScope(actor, id));
 }
 
-async function replaceUserPermissions(actor: Actor, id: number, permissionIds: unknown) {
+async function replaceUserPermissions(actor: Actor, id: string, permissionIds: unknown) {
   const target = await requireManageable(actor, id);
   if (!target.company_id) {
     throw fail('VALIDATION_ERROR', 'A platform account already holds every permission.');

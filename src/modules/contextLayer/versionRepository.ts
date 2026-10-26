@@ -5,7 +5,7 @@ import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepositor
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
-import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ContextStep, VersionStatus } from '../../generated/prisma/enums';
@@ -33,10 +33,10 @@ interface VersionRow {
   extracted_at: Date | null;
   object_count: number;
   stats: Prisma.JsonValue;
-  created_by: number | null;
+  created_by: string | null;
   created_at: Date;
   updated_at: Date;
-  published_by: number | null;
+  published_by: string | null;
   published_at: Date | null;
 }
 
@@ -45,7 +45,7 @@ interface PublishedVersionRow extends VersionRow {
 }
 
 interface DraftRow extends PublishedVersionRow {
-  company_id: number;
+  company_id: string;
   extraction_report: string | null;
   extraction_dataset_ids: Prisma.JsonValue;
   snapshot: Prisma.JsonValue;
@@ -86,7 +86,7 @@ interface CompanyPublishedRow extends AccessColumnsRow {
   connection_name: string;
   provider: string;
   host: string;
-  company_id: number;
+  company_id: string;
   company_name: string | null;
   published_by: string | null;
 }
@@ -215,13 +215,13 @@ async function insertDraft(
     createdBy,
   }: {
     connectionId: string;
-    companyId: number | null;
+    companyId: string | null;
     name: string;
     version: number;
     step: ContextStep | null;
     datasetIds: readonly string[];
     basedOnId: string | null;
-    createdBy: number | null;
+    createdBy: string | null;
   }
 ): Promise<DraftRow> {
   const [row] = await rawRows<DraftRow>(
@@ -229,8 +229,8 @@ async function insertDraft(
     Prisma.sql`INSERT INTO context_layer_versions
        (id, connection_id, company_id, name, version, status, current_step,
         dataset_ids, based_on_id, created_by)
-     VALUES (${crypto.randomUUID()}::uuid, ${connectionId}::uuid, ${companyId}, ${name}, ${version}, 'draft', ${step},
-             ${JSON.stringify(datasetIds)}::jsonb, ${basedOnId}::uuid, ${createdBy}::int)
+     VALUES (${crypto.randomUUID()}::uuid, ${connectionId}::uuid, ${companyId}::uuid, ${name}, ${version}, 'draft', ${step},
+             ${JSON.stringify(datasetIds)}::jsonb, ${basedOnId}::uuid, ${createdBy}::uuid)
      RETURNING *`
   );
   return row;
@@ -296,7 +296,7 @@ async function markPublished(
     stats: unknown;
     notifyTeam: unknown;
     datasets: readonly { id: string }[];
-    publishedBy: number | null;
+    publishedBy: string | null;
   }
 ): Promise<VersionRow | undefined> {
   const datasetIds = datasets.length ? JSON.stringify(datasets.map((d) => d.id)) : null;
@@ -308,7 +308,7 @@ async function markPublished(
             object_count = ${snapshot.length}, stats = ${JSON.stringify(stats)}::jsonb,
             snapshot = ${JSON.stringify(snapshot)}::jsonb, notify_team = ${Boolean(notifyTeam)},
             datasets = ${JSON.stringify(datasets)}::jsonb, dataset_ids = COALESCE(${datasetIds}::jsonb, dataset_ids),
-            published_by = ${publishedBy}::int, published_at = now(), updated_at = now()
+            published_by = ${publishedBy}::uuid, published_at = now(), updated_at = now()
       WHERE id = ${draftId}::uuid
       RETURNING ${COLUMNS}`
   );
@@ -339,7 +339,7 @@ async function deletePublished(
   tx: Tx,
   connectionId: string,
   versionId: string,
-  deletedBy: number | null,
+  deletedBy: string | null,
   { permanent = false }: { permanent?: boolean } = {}
 ): Promise<DeletedVersionRow | null> {
   const found = await orNotFound(
@@ -356,6 +356,20 @@ async function deletePublished(
         where: { id: found.id, ...NOT_DELETED },
         data: softDeletion(deletedBy),
       });
+  if (!result.count) return null;
+  return { id: found.id, name: found.name, version: found.version, object_count: found.objectCount };
+}
+
+async function restorePublished(connectionId: string, versionId: string): Promise<DeletedVersionRow | null> {
+  const found = await orNotFound(
+    prisma.contextLayerVersion.findFirst({
+      where: { id: versionId, connectionId, status: 'published', ...DELETED },
+      select: { id: true, name: true, version: true, objectCount: true },
+    }),
+    VERSION_NOT_FOUND
+  );
+  if (!found) return null;
+  const result = await prisma.contextLayerVersion.updateMany({ where: { id: found.id, ...DELETED }, data: RESTORED });
   if (!result.count) return null;
   return { id: found.id, name: found.name, version: found.version, object_count: found.objectCount };
 }
@@ -438,6 +452,7 @@ export {
   latestPublished,
   findPublished,
   deletePublished,
+  restorePublished,
   currentDraft,
   latestExtraction,
   versionExtraction,

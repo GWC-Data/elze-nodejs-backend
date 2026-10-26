@@ -21,7 +21,7 @@ import type { DatasetFields, JsonValue, RequestQuery } from './contextTypes';
 interface PublishTarget {
   id: string;
   name: string;
-  companyId: number;
+  companyId: string;
   selectedDatasets?: readonly SelectedDataset[];
 }
 
@@ -39,7 +39,7 @@ interface PublishSummary {
     name: string;
     label: string;
     publishedAt: Date | null;
-    publishedBy: number | null;
+    publishedBy: string | null;
     objectCount: number;
   } | null;
   suggestedName: string;
@@ -59,7 +59,7 @@ interface Publication {
   sessionId: string | null;
   objectCount: number;
   stats: JsonValue;
-  publishedBy: number | null;
+  publishedBy: string | null;
   publishedAt: Date | null;
 }
 
@@ -78,7 +78,7 @@ interface PublishedContext {
   connectionName: string;
   provider: string;
   host: string;
-  companyId: number | null;
+  companyId: string | null;
   companyName: string | null;
   name: string;
   access: ContextAccess | null;
@@ -264,7 +264,7 @@ async function listCompanyPublished(
         connectionName: row.connection_name,
         provider: row.provider,
         host: row.host,
-        companyId: row.company_id === null ? null : Number(row.company_id),
+        companyId: row.company_id ?? null,
         companyName: row.company_name || null,
         name: row.name,
         access: accessOf(actor, row),

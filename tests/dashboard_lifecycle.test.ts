@@ -91,10 +91,11 @@ async function runTests(): Promise<void> {
   console.log('  ✓ default dashboard is present as platform template (companyId === null)');
 
   console.log('\n[4] Creating Multi-Tenant Test Dashboards:');
-  const compA_Id = 9991;
-  const compB_Id = 9992;
-  const userA_Id = 8881;
-  const userB_Id = 8882;
+  const compA_Id = '00000000-0000-4000-8000-000000009991';
+  const compB_Id = '00000000-0000-4000-8000-000000009992';
+  const userA_Id = '00000000-0000-4000-8000-000000008881';
+  const userB_Id = '00000000-0000-4000-8000-000000008882';
+  const userUserA_Id = '00000000-0000-4000-8000-000000008883';
 
   const dashA_Id = 'test-dash-corp-a';
   const dashB_Id = 'test-dash-corp-b';
@@ -102,23 +103,25 @@ async function runTests(): Promise<void> {
   await db.query(
     `INSERT INTO companies (id, name, slug)
      VALUES
-       (9991, 'Test Corp A', 'test-corp-a'),
-       (9992, 'Test Corp B', 'test-corp-b')
-     ON CONFLICT (id) DO NOTHING`
+       (?, 'Test Corp A', 'test-corp-a'),
+       (?, 'Test Corp B', 'test-corp-b')
+     ON CONFLICT (id) DO NOTHING`,
+    [compA_Id, compB_Id]
   );
   await db.query(
     `INSERT INTO users (id, company_id, username, email, status)
      VALUES
-       (8881, 9991, 'testuser_a', 'user_a@test.com', 'active'),
-       (8882, 9992, 'testuser_b', 'user_b@test.com', 'active'),
-       (8883, 9991, 'testuser_user_a', 'user_user_a@test.com', 'active')
-     ON CONFLICT (id) DO NOTHING`
+       (?, ?, 'testuser_a', 'user_a@test.com', 'active'),
+       (?, ?, 'testuser_b', 'user_b@test.com', 'active'),
+       (?, ?, 'testuser_user_a', 'user_user_a@test.com', 'active')
+     ON CONFLICT (id) DO NOTHING`,
+    [userA_Id, compA_Id, userB_Id, compB_Id, userUserA_Id, compA_Id]
   );
   await db.query(
     `INSERT INTO access_control.user_roles (user_id, role_id)
-     VALUES (8881, ?), (8882, ?), (8883, ?)
+     VALUES (?, ?), (?, ?), (?, ?)
      ON CONFLICT (user_id) DO NOTHING`,
-    [systemRoleId(COMPANY_ADMIN), systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
+    [userA_Id, systemRoleId(COMPANY_ADMIN), userB_Id, systemRoleId(COMPANY_ADMIN), userUserA_Id, systemRoleId(USER)]
   );
 
   await db.query('DELETE FROM dashboards WHERE id IN (?, ?)', [dashA_Id, dashB_Id]);
@@ -170,7 +173,7 @@ async function runTests(): Promise<void> {
   } as unknown as Actor;
 
   const mockCompanyUser = {
-    id: 8883,
+    id: userUserA_Id,
     companyId: compA_Id,
     role: USER,
     isPlatform: false,
@@ -193,8 +196,8 @@ async function runTests(): Promise<void> {
   await registry.deleteDashboard(dashB_Id);
   console.log('  ✓ Cleaned up test dashboards');
 
-  await db.query(`DELETE FROM users WHERE id IN (8881, 8882, 8883)`);
-  await db.query(`DELETE FROM companies WHERE id IN (9991, 9992)`);
+  await db.query('DELETE FROM users WHERE id IN (?, ?, ?)', [userA_Id, userB_Id, userUserA_Id]);
+  await db.query('DELETE FROM companies WHERE id IN (?, ?)', [compA_Id, compB_Id]);
   console.log('  ✓ Cleaned up test users and companies');
 
   console.log('\n=== All Multi-Tenant Dashboard Architecture Tests PASSED! ===');

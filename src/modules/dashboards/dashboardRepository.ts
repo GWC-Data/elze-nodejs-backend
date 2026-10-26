@@ -57,7 +57,7 @@ async function rowState(id: string): Promise<'live' | 'deleted' | null> {
   return row.deletedAt ? 'deleted' : 'live';
 }
 
-async function list(companyId?: number | null): Promise<DashboardListRow[]> {
+async function list(companyId?: string | null): Promise<DashboardListRow[]> {
   const where =
     companyId === undefined
       ? NOT_DELETED
@@ -82,8 +82,8 @@ async function upsert({
   id: string;
   title: string;
   description?: string | null;
-  companyId: number | null;
-  userId: number | null;
+  companyId: string | null;
+  userId: string | null;
   spec: unknown;
 }): Promise<void> {
   const json = spec as Prisma.InputJsonValue;
@@ -125,9 +125,9 @@ async function softDelete({
 }: {
   id: string;
   title: string;
-  companyId: number | null;
+  companyId: string | null;
   spec: unknown;
-  deletedBy: number | null;
+  deletedBy: string | null;
 }): Promise<void> {
   const deletion = softDeletion(deletedBy);
   await prisma.dashboard.upsert({

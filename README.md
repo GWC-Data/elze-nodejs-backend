@@ -304,7 +304,21 @@ role's or context's name, can be used again. Dashboard ids and version numbers a
 Still removed for good: shares, grants, dashboard assignments and group memberships (links,
 whose history is in the audit trail), extra permissions and data scopes when they are replaced,
 expired tokens and login attempts, and the half-created records a failed onboarding email rolls
-back. There is no endpoint yet to restore a record.
+back.
+
+**Deleted items.** `GET /api/deleted-items` lists the soft-deleted accounts, groups, custom roles,
+companies, contexts and published context versions the caller may see, newest first, with
+`deletedAt` and `deletedBy` (who deleted it). `POST /api/deleted-items/:type/:id/restore` puts
+one back where it was deleted from; `DELETE /api/deleted-items/:type/:id` removes it for good.
+All three need `delete.permanent` (company admins, platform admins, the platform owner) plus the
+permission that deletes that kind of record. A company admin sees their own company; platform
+accounts see every company and deleted companies, and only the platform owner sees deleted
+platform accounts. What was deleted together with a company (and its deleted accounts) is listed
+only once the company is recovered; versions of a deleted context come back with the context.
+Recovered records come back switched off where they have a switch: an account deactivated (or
+invited, if it never chose a password), a group paused, a company suspended. A recovered company
+brings back the groups, roles, dashboards and contexts deleted with it. Recovering answers 409
+`CONFLICT` when the name, username or email has since been taken.
 
 **Permanent delete.** Every record delete above takes `?permanent=true` to remove the record
 from the database for good, with what depends on it, instead of keeping it as deleted; it also
@@ -553,9 +567,10 @@ A context is visible to its creator, to holders of `context.manage_all` (company
 default) and to the people and groups it is shared with, at view, edit or full. Its creator and
 company admins (any `context.manage_all` holder, and platform accounts) can share it with any
 active person or group of its company - a company admin also shares the contexts members
-created; a member never shares a context someone else created, whatever their level. It can no
-longer be opened to the whole company: `general_access` is always `restricted`, and
-`PUT …/access/general` refuses `company`.
+created; a member never shares a context someone else created, whatever their level. The same
+people can open it to the whole company with `PUT …/access/general` `{ "generalAccess": "company" }`:
+everyone in its company then sees it at view, and edit or full still need a person or group
+grant. A new context starts `restricted`.
 
 `docs/context-layer.md` is worth reading before touching it: it stores a third-party credential **reversibly**, which is the one place
 in this application that is true, and it calls Domo endpoints that are not part
@@ -606,6 +621,17 @@ crash naming the variable. There are no fallback secrets — a default one is
 indistinguishable at runtime from a correctly configured deployment, and forges every token
 in the system.
 
+**One web app origin.** `APPLICATION_URL` is also the only browser origin the API serves
+(`src/shared/http/originMiddleware.ts`): a request whose `Origin` header - or, without one, the
+origin of its `Referer` - differs in scheme, host or port is refused with 403
+`ORIGIN_NOT_ALLOWED`. `localhost` and `127.0.0.1` count as different origins. Behind a proxy (the
+Next.js `/api` rewrite, nginx) the browser's headers are passed through, so `APPLICATION_URL` is
+the address in the browser's address bar, not the proxy's target. Requests carrying neither header
+(curl, health probes, server-to-server calls) pass and `/api/health` is never checked: this keeps a
+misconfigured or foreign web app out, it does not stop scripts, which still need a session and the
+CSRF token. Outside production the backend's own address is accepted too, for Swagger at
+`/api/docs`.
+
 #### The catalogue lives in the database
 
 Permissions, features, access levels, the three system roles and their default
@@ -651,6 +677,8 @@ database was renamed.
 | `9_02_platform_admin_tier` | the `PLATFORM_ADMIN` value of `role_tier` (its own migration: a new enum value cannot be used in the transaction that adds it) |
 | `9_03_platform_admin_role` | the Platform admin system role, one platform owner (extra `SUPER_ADMIN` holders become platform admins, then a unique index), the user-role trigger and `user_resource_access` view taught about platform admins |
 | `9_04_hidden_features` | `features.hidden`, set for Dashboards and Agents; `dashboard.assign` joins the Dashboards feature |
+| `9_05_restore_audit_events` | the `*_restored` audit event types written when a deleted item is recovered |
+| `9_06_uuid_ids` | `companies.id`, `users.id` and `groups.id`, and the 53 columns that point at them, become UUIDs (`gen_random_uuid()` for new rows). Existing rows get a fresh UUID and every reference follows it; references to rows already purged become NULL, including `userId` / `groupId` / `companyId` inside `audit_logs.detail` and `companyId` in `dashboards.spec`. Foreign keys and the five views are saved from the live database and recreated unchanged; foreign keys from other schemas (`legacy_rbac`) are dropped. `audit_logs.id` stays a BIGINT |
 
 Prisma applies migrations in **folder-name order**, compared as text: `10_…` would run right
 after `1_…`. That is why the migrations after `8_soft_delete` are numbered `9_01_`, `9_02_`, …;

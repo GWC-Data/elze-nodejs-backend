@@ -44,27 +44,27 @@ interface UserScopeRow {
   value: string;
 }
 
-async function userScopeRows(userId: number): Promise<UserScopeRow[]> {
+async function userScopeRows(userId: string): Promise<UserScopeRow[]> {
   return rawRows<UserScopeRow>(
     prisma,
     Prisma.sql`SELECT d.key AS dimension, v.value
        FROM access_control.user_data_scopes s
        CROSS JOIN LATERAL jsonb_each(s.scopes) AS d
        CROSS JOIN LATERAL jsonb_array_elements_text(d.value) AS v(value)
-      WHERE s.user_id = ${userId}
+      WHERE s.user_id = ${userId}::uuid
       ORDER BY d.key, v.value`
   );
 }
 
 async function replaceUserScopes(
-  userId: number,
+  userId: string,
   scopes: Record<string, readonly string[]>,
-  actorId: number | null = null
+  actorId: string | null = null
 ): Promise<void> {
   await withTransaction(async (tx) => {
     const [current] = await rawRows<{ scopes: Record<string, string[]> }>(
       tx,
-      Prisma.sql`SELECT scopes FROM access_control.user_data_scopes WHERE user_id = ${userId} FOR UPDATE`
+      Prisma.sql`SELECT scopes FROM access_control.user_data_scopes WHERE user_id = ${userId}::uuid FOR UPDATE`
     );
     const next: Record<string, string[]> = { ...(current?.scopes || {}) };
     for (const [dimension, values] of Object.entries(scopes)) {

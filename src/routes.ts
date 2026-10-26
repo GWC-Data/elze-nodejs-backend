@@ -1,6 +1,7 @@
 import express from 'express';
 import config from './config';
 import { requestTimer } from './shared/http/requestTimerMiddleware';
+import { requireApplicationOrigin } from './shared/http/originMiddleware';
 import { notFound, errorHandler } from './shared/http/errorMiddleware';
 import { health } from './modules/system/healthController';
 import authRoutes from './modules/auth/authRoutes';
@@ -15,6 +16,7 @@ import dashboardRoutes from './modules/dashboards/dashboardRoutes';
 import auditRoutes from './modules/audit/auditRoutes';
 import companyRoleRoutes from './modules/roles/companyRoleRoutes';
 import gateRoutes from './modules/contextLayer/gateRoutes';
+import deletedItemRoutes from './modules/deletedItems/deletedItemRoutes';
 import docsRoutes from './modules/system/docsRoutes';
 
 const { IS_PRODUCTION } = config.env;
@@ -24,6 +26,8 @@ const router = express.Router();
 router.use(requestTimer);
 
 router.get('/health', health);
+
+router.use(requireApplicationOrigin);
 
 if (!IS_PRODUCTION) router.use('/docs', docsRoutes);
 
@@ -37,6 +41,7 @@ router.use('/access', accessRoutes);
 router.use('/audit', auditRoutes);
 router.use('/roles', companyRoleRoutes);
 router.use('/gate', gateRoutes);
+router.use('/deleted-items', deletedItemRoutes);
 
 router.use('/context', contextRoutes);
 

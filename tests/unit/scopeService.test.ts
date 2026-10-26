@@ -11,8 +11,10 @@ vi.mock('../../src/modules/users/scopeRepository', () => ({
 }));
 vi.mock('../../src/modules/audit/auditService', () => ({ audit: vi.fn(), EVENTS: { USER_SCOPE_UPDATED: 'x' } }));
 
-const actor: any = { id: 1, username: 'owner' };
-const user = { id: 42, username: 'ada' };
+const OWNER_ID = '00000000-0000-4000-8000-000000000001';
+const USER_ID = '00000000-0000-4000-8000-000000000042';
+const actor: any = { id: OWNER_ID, username: 'owner' };
+const user = { id: USER_ID, username: 'ada' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -29,8 +31,8 @@ beforeEach(() => {
 describe('replaceUserScopes', () => {
   it('stores each value once and answers with what is stored, not with the request', async () => {
     const result = await replaceUserScopes(actor, user, { theater: ['AMC', 'Regal', 'AMC'] });
-    expect(scopeRepository.replaceUserScopes).toHaveBeenCalledWith(42, { theater: ['AMC', 'Regal'] }, 1);
-    expect(result).toEqual({ userId: 42, scopes: { theater: ['AMC', 'Regal'] }, enforced: false });
+    expect(scopeRepository.replaceUserScopes).toHaveBeenCalledWith(USER_ID, { theater: ['AMC', 'Regal'] }, OWNER_ID);
+    expect(result).toEqual({ userId: USER_ID, scopes: { theater: ['AMC', 'Regal'] }, enforced: false });
   });
 
   it('refuses a dimension that does not exist without storing anything', async () => {

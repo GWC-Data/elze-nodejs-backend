@@ -22,7 +22,7 @@ function expiryDate(seconds: number): Date {
 }
 
 async function issueRefreshToken(
-  userId: number,
+  userId: string,
   { familyId, replaces, notAfter }: { familyId?: string; replaces?: string; notAfter?: Date } = {},
   conn?: Tx
 ): Promise<IssuedRefreshToken> {

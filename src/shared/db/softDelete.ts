@@ -1,6 +1,8 @@
 import { Prisma } from '../../generated/prisma/client';
 
 const NOT_DELETED = { deletedAt: null } as const;
+const DELETED = { deletedAt: { not: null } } as const;
+const RESTORED = { deletedAt: null, deletedBy: null } as const;
 
 function notDeleted(alias: string): Prisma.Sql {
   return Prisma.raw(`${alias}.deleted_at IS NULL`);
@@ -12,8 +14,8 @@ function notDeletedRef(table: string, idColumn: string): Prisma.Sql {
   );
 }
 
-function softDeletion(actorId: number | null | undefined): { deletedAt: Date; deletedBy: number | null } {
+function softDeletion(actorId: string | null | undefined): { deletedAt: Date; deletedBy: string | null } {
   return { deletedAt: new Date(), deletedBy: actorId ?? null };
 }
 
-export { NOT_DELETED, notDeleted, notDeletedRef, softDeletion };
+export { NOT_DELETED, DELETED, RESTORED, notDeleted, notDeletedRef, softDeletion };

@@ -9,11 +9,11 @@ const { prisma } = config.database;
 
 interface AuditRecord {
   event: string;
-  actorId: number | null;
+  actorId: string | null;
   actor: string | null;
-  actorCompanyId: number | null;
-  companyId: number | null;
-  targetUserId: number | null;
+  actorCompanyId: string | null;
+  companyId: string | null;
+  targetUserId: string | null;
   detail: Record<string, unknown>;
 }
 
@@ -21,19 +21,19 @@ interface AuditLogRow {
   id: number;
   ts: Date;
   event: string;
-  actor_id: number | null;
+  actor_id: string | null;
   actor: string | null;
-  actor_company_id: number | null;
-  company_id: number | null;
-  target_user_id: number | null;
+  actor_company_id: string | null;
+  company_id: string | null;
+  target_user_id: string | null;
   detail: Prisma.JsonValue;
   company_name: string | null;
 }
 
 type AuditScope =
-  | { kind: 'all'; hidePlatformTargetsExcept?: number }
-  | { kind: 'company'; companyId: number }
-  | { kind: 'self'; userId: number };
+  | { kind: 'all'; hidePlatformTargetsExcept?: string }
+  | { kind: 'company'; companyId: string }
+  | { kind: 'self'; userId: string };
 
 interface AuditFilter {
   scope: AuditScope;
@@ -68,11 +68,13 @@ function whereFor(filter: AuditFilter): Prisma.Sql {
   const conditions: Prisma.Sql[] = [];
   const { scope } = filter;
   if (scope.kind === 'company') {
-    conditions.push(Prisma.sql`(a.company_id = ${scope.companyId} OR a.actor_company_id = ${scope.companyId})`);
+    conditions.push(
+      Prisma.sql`(a.company_id = ${scope.companyId}::uuid OR a.actor_company_id = ${scope.companyId}::uuid)`
+    );
   } else if (scope.kind === 'self') {
-    conditions.push(Prisma.sql`(a.actor_id = ${scope.userId} OR a.target_user_id = ${scope.userId})`);
+    conditions.push(Prisma.sql`(a.actor_id = ${scope.userId}::uuid OR a.target_user_id = ${scope.userId}::uuid)`);
   } else if (scope.hidePlatformTargetsExcept !== undefined) {
-    conditions.push(Prisma.sql`(a.target_user_id IS NULL OR a.target_user_id = ${scope.hidePlatformTargetsExcept}
+    conditions.push(Prisma.sql`(a.target_user_id IS NULL OR a.target_user_id = ${scope.hidePlatformTargetsExcept}::uuid
       OR NOT EXISTS (SELECT 1 FROM access_control.user_roles pur
                        JOIN access_control.roles pr ON pr.id = pur.role_id AND pr.kind = 'system'
                         AND pr.tier IN ('SUPER_ADMIN', 'PLATFORM_ADMIN')

@@ -17,10 +17,10 @@ interface Version {
   extractedAt: Date | null;
   objectCount: number;
   stats: JsonValue;
-  createdBy: number | null;
+  createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
-  publishedBy: number | null;
+  publishedBy: string | null;
   publishedAt: Date | null;
 }
 

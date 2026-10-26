@@ -1,12 +1,12 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, optionalFlag, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag, requireUuid } from '../../shared/validation/commonValidator';
 import { parseListQuery } from '../../shared/validation/listValidator';
 import * as companyService from './companyService';
 import * as accessService from '../access/accessService';
 import * as featureService from './featureService';
 
-const companyId = (req: Request) => requireId(req.params.id, 'company id');
+const companyId = (req: Request) => requireUuid(req.params.id, 'company id');
 
 async function list(req: Request, res: Response): Promise<void> {
   const query = parseListQuery(req.query, companyService.COMPANY_SORTS, { sort: 'name', pageSize: 15 });

@@ -368,7 +368,7 @@ async function writeDecision(
       sqlOf(
         `INSERT INTO ${REVIEWS}
            (object_id, connection_id, status, reviewed_by, reviewed_at)
-         VALUES (?::uuid, ?::uuid, ?, ?, now())
+         VALUES (?::uuid, ?::uuid, ?, ?::uuid, now())
          ON CONFLICT (object_id) DO UPDATE SET
            status = EXCLUDED.status,
            reviewed_by = EXCLUDED.reviewed_by,
@@ -407,7 +407,7 @@ async function markEdited(actor: Actor, connectionId: string, objectId: string, 
     sqlOf(
       `INSERT INTO ${REVIEWS}
          (object_id, connection_id, status, edited, reviewed_by, reviewed_at)
-       VALUES (?::uuid, ?::uuid, ?, TRUE, ?, now())
+       VALUES (?::uuid, ?::uuid, ?, TRUE, ?::uuid, now())
        ON CONFLICT (object_id) DO UPDATE SET edited = TRUE`,
       [objectId, connectionId, status, actor.id]
     )
@@ -456,7 +456,7 @@ async function writeBulkDecision(
     await tx.$executeRaw(
       sqlOf(
         `INSERT INTO ${REVIEWS} (object_id, connection_id, status, reviewed_by, reviewed_at)
-         SELECT id, ?::uuid, ?, ?, now() FROM unnest(?::uuid[]) AS id
+         SELECT id, ?::uuid, ?, ?::uuid, now() FROM unnest(?::uuid[]) AS id
          ON CONFLICT (object_id) DO UPDATE SET
            status = EXCLUDED.status,
            reviewed_by = EXCLUDED.reviewed_by,

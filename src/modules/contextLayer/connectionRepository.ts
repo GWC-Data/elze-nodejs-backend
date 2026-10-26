@@ -4,7 +4,7 @@ import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepositor
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
-import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/softDelete';
 import type { Actor } from '../../shared/types/actor';
 import type { ConnectionStatus, ContextStep } from '../../generated/prisma/enums';
 
@@ -12,7 +12,7 @@ const { prisma, withTransaction } = config.database;
 
 interface ConnectionRow extends AccessColumnsRow {
   id: string;
-  company_id: number;
+  company_id: string;
   provider: string;
   name: string;
   host: string;
@@ -41,7 +41,7 @@ interface ConnectionSecretRow extends ConnectionRow {
 interface ConnectionIdRow extends AccessColumnsRow {
   id: string;
   name: string;
-  company_id: number;
+  company_id: string;
 }
 
 interface PublishedConnectionRow {
@@ -198,13 +198,13 @@ async function insert({
   createdBy,
 }: {
   id: string;
-  companyId: number;
+  companyId: string;
   provider: string;
   name: string;
   host: string;
   secret: string;
   secretHint: string;
-  createdBy: number | null;
+  createdBy: string | null;
 }): Promise<void> {
   await prisma.connection.create({
     data: {
@@ -233,7 +233,7 @@ async function markStatus(id: string, status: ConnectionStatus, lastError: strin
 async function replaceSelection(
   connectionId: string,
   datasets: readonly { id: string; name?: string | null; rowCount?: number | null; columnCount?: number | null }[],
-  selectedBy: number | null
+  selectedBy: string | null
 ): Promise<void> {
   await withTransaction(async (tx) => {
     await tx.dataset.deleteMany({ where: { connectionId } });
@@ -256,8 +256,13 @@ async function discard(id: string): Promise<void> {
   await prisma.connection.deleteMany({ where: { id } });
 }
 
-async function softDelete(id: string, deletedBy: number | null): Promise<boolean> {
+async function softDelete(id: string, deletedBy: string | null): Promise<boolean> {
   const result = await prisma.connection.updateMany({ where: { id, ...NOT_DELETED }, data: softDeletion(deletedBy) });
+  return result.count > 0;
+}
+
+async function restore(id: string): Promise<boolean> {
+  const result = await prisma.connection.updateMany({ where: { id, ...DELETED }, data: RESTORED });
   return result.count > 0;
 }
 
@@ -274,6 +279,7 @@ export {
   replaceSelection,
   softDelete,
   discard,
+  restore,
 };
 export type {
   ConnectionRow,

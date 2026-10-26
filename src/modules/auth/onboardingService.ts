@@ -15,7 +15,7 @@ import type { UserInScopeRow } from '../users/userRepository';
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
 interface NewAccountFields {
-  companyId?: number | null;
+  companyId?: string | null;
   username: unknown;
   email: unknown;
   displayName?: unknown;

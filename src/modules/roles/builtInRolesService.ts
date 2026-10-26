@@ -21,7 +21,7 @@ async function defaultIdsFor(roleName: string): Promise<string[]> {
   return permissionIdsOf(await defaultsFor(roleName));
 }
 
-async function seedForCompany(companyId: number, conn: Tx): Promise<void> {
+async function seedForCompany(companyId: string, conn: Tx): Promise<void> {
   await companyRoleRepository.seedCompanyDefault(companyId, await defaultIdsFor(USER), conn);
 }
 

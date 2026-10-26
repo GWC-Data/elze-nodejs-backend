@@ -7,7 +7,7 @@ import * as queryRepository from '../queryEngine/queryRepository';
 import { fail, DashboardNotFoundError } from '../../shared/errors/AppError';
 import { dashboardSlugify } from '../../shared/text/slugify';
 import { assertValidDashboardId } from './dashboardValidator';
-import { requireString } from '../../shared/validation/commonValidator';
+import { requireString, requireUuid } from '../../shared/validation/commonValidator';
 import { normalizeSpec, flattenCard, cardKind, isList, isRecord } from './cardModel';
 import { columnCatalogue, hydratedView } from './dashboardSerializer';
 import { hydrateDashboard } from '../queryEngine/queryEngineService';
@@ -156,7 +156,7 @@ async function dashboardIdTaken(dashboardId: string): Promise<boolean> {
   return dashboardRepository.fileExists(registryPathFor(dashboardId));
 }
 
-async function listDashboards(companyId: number | null | undefined = undefined): Promise<DashboardEntry[]> {
+async function listDashboards(companyId: string | null | undefined = undefined): Promise<DashboardEntry[]> {
   const entries: DashboardEntry[] = [];
   const seen = new Set<string>();
 
@@ -216,7 +216,7 @@ async function saveSpec(
     userId = null,
     title = null,
     description = null,
-  }: { companyId?: number | null; userId?: number | null; title?: string | null; description?: string | null } = {}
+  }: { companyId?: string | null; userId?: string | null; title?: string | null; description?: string | null } = {}
 ): Promise<string> {
   const id = assertValidDashboardId(dashboardId);
   const normalized = normalizeSpec(spec);
@@ -234,7 +234,7 @@ async function saveSpec(
   return id;
 }
 
-async function deleteDashboard(dashboardId: unknown, deletedBy: number | null = null): Promise<void> {
+async function deleteDashboard(dashboardId: unknown, deletedBy: string | null = null): Promise<void> {
   const spec = await getSpec(dashboardId);
   const id = assertValidDashboardId(dashboardId);
   await dashboardRepository.softDelete({
@@ -300,7 +300,11 @@ async function createDashboard(actor: Actor, payload: unknown = {}): Promise<Cre
     throw fail('CONFLICT', `A dashboard with id "${id}" already exists.`);
   }
 
-  const companyId = actor.isPlatform ? (body.companyId ? Number(body.companyId) : null) : actor.companyId;
+  const companyId = actor.isPlatform
+    ? body.companyId
+      ? requireUuid(body.companyId, 'companyId')
+      : null
+    : actor.companyId;
 
   const spec = newDashboardSpec(body, { id, title, description });
 
@@ -357,7 +361,7 @@ async function updateCard(
   return { ...view, accessLevel };
 }
 
-async function ownerOfAnyDashboard(dashboardId: string): Promise<{ companyId: number | null }> {
+async function ownerOfAnyDashboard(dashboardId: string): Promise<{ companyId: string | null }> {
   const id = assertValidDashboardId(dashboardId);
   const row = await dashboardRepository.findById(id);
   if (row) return { companyId: row.company_id };

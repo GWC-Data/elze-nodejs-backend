@@ -67,9 +67,10 @@ describe('companyScope', () => {
   });
 
   it('binds a company account to its own company id', () => {
-    const scope = companyScope({ isPlatform: false, companyId: 12 }, 'u.company_id');
-    expect(scope.text).toBe('u.company_id = $1');
-    expect(scope.values).toEqual([12]);
+    const companyId = '00000000-0000-4000-8000-000000000012';
+    const scope = companyScope({ isPlatform: false, companyId }, 'u.company_id');
+    expect(scope.text).toBe('u.company_id = $1::uuid');
+    expect(scope.values).toEqual([companyId]);
   });
 });
 

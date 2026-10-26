@@ -5,7 +5,7 @@ interface ContextProfileView {
   connectionId: string;
   name: string;
   description: string | null;
-  createdBy: number | null;
+  createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

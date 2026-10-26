@@ -5,7 +5,7 @@ type AuditEntry = Record<string, unknown>;
 
 interface AuditRowMeta {
   id?: number | string | null;
-  companyId?: number | null;
+  companyId?: string | null;
   companyName?: string | null;
 }
 
@@ -20,7 +20,7 @@ interface AuditItem {
   actor?: unknown;
   actorId?: unknown;
   actorCompanyId?: unknown;
-  companyId?: number;
+  companyId?: string;
   companyName?: string;
 }
 
@@ -28,7 +28,8 @@ function toneFor(event: unknown): string {
   const name = String(event).toLowerCase();
   if (name.includes('denied') || name.includes('fail') || name.includes('block')) return 'danger';
   if (name.includes('deleted') || name.includes('revoked') || name.includes('deactivated')) return 'warning';
-  if (name.includes('created') || name.includes('granted') || name.includes('activated')) return 'success';
+  if (name.includes('created') || name.includes('granted') || name.includes('activated') || name.includes('restored'))
+    return 'success';
   return 'neutral';
 }
 

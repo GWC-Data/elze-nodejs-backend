@@ -27,7 +27,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
 
 async function listCompanies(actor: Actor, list: ListQuery, { active }: { active?: unknown } = {}) {
   const filter: companyRepository.CompanyFilter = {};
-  if (!actor.isPlatform) filter.companyId = actor.companyId as number;
+  if (!actor.isPlatform) filter.companyId = actor.companyId as string;
   if (active === 'true' || active === 'false') {
     filter.active = active === 'true';
   } else if (active !== undefined && active !== '') {
@@ -42,7 +42,7 @@ async function listCompanyOptions(actor: Actor) {
   return rows.map(companyOption);
 }
 
-async function requireCompany(actor: Actor, id: number, { counts = false }: { counts?: boolean } = {}) {
+async function requireCompany(actor: Actor, id: string, { counts = false }: { counts?: boolean } = {}) {
   if (!actor.isPlatform && id !== actor.companyId) {
     throw fail('TENANT_ACCESS_DENIED', 'That company is not yours to view.');
   }
@@ -52,7 +52,7 @@ async function requireCompany(actor: Actor, id: number, { counts = false }: { co
   return company;
 }
 
-async function requireCompanyRow(actor: Actor, id: number, { includeDeleted = false } = {}) {
+async function requireCompanyRow(actor: Actor, id: string, { includeDeleted = false } = {}) {
   if (!actor.isPlatform && id !== actor.companyId) {
     throw fail('TENANT_ACCESS_DENIED', 'That company is not yours to view.');
   }
@@ -61,7 +61,7 @@ async function requireCompanyRow(actor: Actor, id: number, { includeDeleted = fa
   return row;
 }
 
-async function requireActiveCompany(actor: Actor, id: number, message: string) {
+async function requireActiveCompany(actor: Actor, id: string, message: string) {
   const company = await requireCompany(actor, id);
   if (!company.active) throw fail('VALIDATION_ERROR', message);
   return company;
@@ -153,7 +153,7 @@ async function createCompany(
   return { ...shapeCompany(company), features: effectiveFeatures(featureKeys), admin: publicUser(user) };
 }
 
-async function updateCompany(actor: Actor, id: number, { name, active }: { name?: unknown; active?: unknown }) {
+async function updateCompany(actor: Actor, id: string, { name, active }: { name?: unknown; active?: unknown }) {
   const before = await requireCompany(actor, id);
 
   const changes: { name?: string; active?: boolean } = {};
@@ -184,7 +184,7 @@ async function updateCompany(actor: Actor, id: number, { name, active }: { name?
 
 async function deleteCompany(
   actor: Actor,
-  id: number,
+  id: string,
   { permanent = false }: { permanent?: boolean } = {}
 ): Promise<void> {
   if (permanent) assertPermission(actor, 'delete.permanent');
@@ -203,6 +203,20 @@ async function deleteCompany(
   audit(EVENTS.COMPANY_DELETED, actor, { companyId: id, name: company.name, soft: !permanent, permanent });
 }
 
+async function restoreCompany(actor: Actor, id: string) {
+  const company = await requireCompanyRow(actor, id, { includeDeleted: true });
+  try {
+    if (!(await companyRepository.restore(id))) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail('CONFLICT', `Another company now uses the name or slug of ${company.name}. Rename that one first.`);
+    }
+    throw err;
+  }
+  audit(EVENTS.COMPANY_RESTORED, actor, { companyId: id, name: company.name });
+  return requireCompany(actor, id);
+}
+
 const COMPANY_SORTS = companyRepository.COMPANY_SORTS;
 
 export {
@@ -214,4 +228,5 @@ export {
   createCompany,
   updateCompany,
   deleteCompany,
+  restoreCompany,
 };

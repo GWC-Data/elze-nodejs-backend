@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { rawRows } from '../../shared/db/baseRepository';
-import { NOT_DELETED, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 
 const { prisma, withTransaction } = config.database;
@@ -11,7 +11,7 @@ const COMPANY_DEFAULT_NAME = 'Member';
 
 interface CompanyRoleRow {
   id: string;
-  companyId: number;
+  companyId: string;
   kind: string;
   tier: string;
   name: string;
@@ -34,7 +34,7 @@ const ROLE_COLUMNS = Prisma.sql`r.id, r.company_id AS "companyId", r.kind, r.tie
                          JOIN users hu ON hu.id = ur.user_id AND hu.deleted_at IS NULL
                         WHERE ur.role_id = r.id) AS "userCount"`;
 
-async function writePermissions(tx: Tx, roleId: string, ids: readonly string[], actorId: number | null) {
+async function writePermissions(tx: Tx, roleId: string, ids: readonly string[], actorId: string | null) {
   await tx.rolePermissions.upsert({
     where: { roleId },
     create: { roleId, permissionIds: [...ids], updatedBy: actorId },
@@ -42,23 +42,23 @@ async function writePermissions(tx: Tx, roleId: string, ids: readonly string[], 
   });
 }
 
-async function listForCompany(companyId: number): Promise<CompanyRoleRow[]> {
+async function listForCompany(companyId: string): Promise<CompanyRoleRow[]> {
   return rawRows<CompanyRoleRow>(
     prisma,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
-      WHERE r.company_id = ${companyId} AND r.kind = 'custom' AND r.deleted_at IS NULL
+      WHERE r.company_id = ${companyId}::uuid AND r.kind = 'custom' AND r.deleted_at IS NULL
       ORDER BY lower(r.name), r.created_at`
   );
 }
 
-async function builtInCounts(companyId: number): Promise<Record<string, number>> {
+async function builtInCounts(companyId: string): Promise<Record<string, number>> {
   const rows = await rawRows<{ tier: string; n: number }>(
     prisma,
     Prisma.sql`SELECT r.tier, COUNT(*) AS n
        FROM users u
        JOIN access_control.user_roles ur ON ur.user_id = u.id
        JOIN access_control.roles r ON r.id = ur.role_id
-      WHERE u.company_id = ${companyId} AND u.deleted_at IS NULL AND r.kind <> 'custom'
+      WHERE u.company_id = ${companyId}::uuid AND u.deleted_at IS NULL AND r.kind <> 'custom'
       GROUP BY r.tier`
   );
   return Object.fromEntries(rows.map((r) => [r.tier, Number(r.n)]));
@@ -66,10 +66,10 @@ async function builtInCounts(companyId: number): Promise<Record<string, number>>
 
 async function findInCompany(
   id: string,
-  companyId: number | null,
+  companyId: string | null,
   { includeDeleted = false }: { includeDeleted?: boolean } = {}
 ): Promise<CompanyRoleRow | null> {
-  const company = companyId === null ? Prisma.empty : Prisma.sql`AND r.company_id = ${companyId}`;
+  const company = companyId === null ? Prisma.empty : Prisma.sql`AND r.company_id = ${companyId}::uuid`;
   const live = includeDeleted ? Prisma.empty : Prisma.sql`AND r.deleted_at IS NULL`;
   const rows = await rawRows<CompanyRoleRow>(
     prisma,
@@ -86,11 +86,11 @@ async function insert({
   permissionIds,
   createdBy,
 }: {
-  companyId: number;
+  companyId: string;
   name: string;
   description: string | null;
   permissionIds: readonly string[];
-  createdBy: number;
+  createdBy: string;
 }): Promise<string> {
   return withTransaction(async (tx) => {
     const id = crypto.randomUUID();
@@ -107,7 +107,7 @@ async function update(
     description,
     permissionIds,
   }: { name?: string; description?: string | null; permissionIds?: readonly string[] },
-  actorId: number
+  actorId: string
 ): Promise<void> {
   await withTransaction(async (tx) => {
     const now = new Date();
@@ -125,20 +125,20 @@ async function update(
   });
 }
 
-async function findCompanyDefault(companyId: number, tx: Tx = prisma): Promise<CompanyRoleRow | null> {
+async function findCompanyDefault(companyId: string, tx: Tx = prisma): Promise<CompanyRoleRow | null> {
   const rows = await rawRows<CompanyRoleRow>(
     tx,
     Prisma.sql`SELECT ${ROLE_COLUMNS} FROM access_control.roles r
-      WHERE r.company_id = ${companyId} AND r.kind = 'company_default' AND r.tier = 'USER'`
+      WHERE r.company_id = ${companyId}::uuid AND r.kind = 'company_default' AND r.tier = 'USER'`
   );
   return rows[0] || null;
 }
 
-async function ensureCompanyDefault(tx: Tx, companyId: number, actorId: number | null) {
+async function ensureCompanyDefault(tx: Tx, companyId: string, actorId: string | null) {
   const [row] = await rawRows<{ id: string; inserted: boolean }>(
     tx,
     Prisma.sql`INSERT INTO access_control.roles (id, company_id, kind, tier, name, created_by)
-     VALUES (${crypto.randomUUID()}::uuid, ${companyId}, 'company_default', 'USER', ${COMPANY_DEFAULT_NAME}, ${actorId}::int)
+     VALUES (${crypto.randomUUID()}::uuid, ${companyId}::uuid, 'company_default', 'USER', ${COMPANY_DEFAULT_NAME}, ${actorId}::uuid)
      ON CONFLICT (company_id, tier) WHERE kind = 'company_default'
        DO UPDATE SET updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`
@@ -146,7 +146,7 @@ async function ensureCompanyDefault(tx: Tx, companyId: number, actorId: number |
   return row;
 }
 
-async function seedCompanyDefault(companyId: number, permissionIds: readonly string[], tx?: Tx): Promise<boolean> {
+async function seedCompanyDefault(companyId: string, permissionIds: readonly string[], tx?: Tx): Promise<boolean> {
   const work = async (client: Tx) => {
     const row = await ensureCompanyDefault(client, companyId, null);
     if (row.inserted) await writePermissions(client, row.id, permissionIds, null);
@@ -155,7 +155,7 @@ async function seedCompanyDefault(companyId: number, permissionIds: readonly str
   return tx ? work(tx) : withTransaction(work);
 }
 
-async function saveCompanyDefault(companyId: number, permissionIds: readonly string[], actorId: number): Promise<void> {
+async function saveCompanyDefault(companyId: string, permissionIds: readonly string[], actorId: string): Promise<void> {
   await withTransaction(async (tx) => {
     const row = await ensureCompanyDefault(tx, companyId, actorId);
     const now = new Date();
@@ -165,9 +165,9 @@ async function saveCompanyDefault(companyId: number, permissionIds: readonly str
 }
 
 async function resetCompanyDefault(
-  companyId: number,
+  companyId: string,
   permissionIds: readonly string[],
-  actorId: number
+  actorId: string
 ): Promise<boolean> {
   return withTransaction(async (tx) => {
     const row = await ensureCompanyDefault(tx, companyId, null);
@@ -202,11 +202,16 @@ async function discard(id: string, fallbackRoleId: string): Promise<boolean> {
   });
 }
 
-async function softDelete(id: string, deletedBy: number | null): Promise<boolean> {
+async function softDelete(id: string, deletedBy: string | null): Promise<boolean> {
   const result = await prisma.role.updateMany({
     where: { id, kind: 'custom', ...NOT_DELETED, holders: { none: { user: NOT_DELETED } } },
     data: softDeletion(deletedBy),
   });
+  return result.count > 0;
+}
+
+async function restore(id: string): Promise<boolean> {
+  const result = await prisma.role.updateMany({ where: { id, kind: 'custom', ...DELETED }, data: RESTORED });
   return result.count > 0;
 }
 
@@ -219,6 +224,7 @@ export {
   update,
   softDelete,
   discard,
+  restore,
   findCompanyDefault,
   seedCompanyDefault,
   saveCompanyDefault,

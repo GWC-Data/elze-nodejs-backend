@@ -21,7 +21,7 @@ async function insertRefresh(
   }: {
     id: string;
     familyId: string;
-    userId: number;
+    userId: string;
     tokenHash: string;
     expiresAt: Date;
   },
@@ -44,7 +44,7 @@ async function revokeFamily(familyId: string, reason: string, tx: Tx = prisma): 
   });
 }
 
-async function revokeAllForUser(userId: number, reason: string, tx: Tx = prisma): Promise<number> {
+async function revokeAllForUser(userId: string, reason: string, tx: Tx = prisma): Promise<number> {
   const result = await tx.refreshToken.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date(), revokedReason: reason },
@@ -52,7 +52,7 @@ async function revokeAllForUser(userId: number, reason: string, tx: Tx = prisma)
   return result.count;
 }
 
-async function revokeAllForCompany(companyId: number, reason: string, tx: Tx = prisma): Promise<number> {
+async function revokeAllForCompany(companyId: string, reason: string, tx: Tx = prisma): Promise<number> {
   const result = await tx.refreshToken.updateMany({
     where: { revokedAt: null, user: { companyId } },
     data: { revokedAt: new Date(), revokedReason: reason },
@@ -81,7 +81,7 @@ async function pruneExpiredRefresh(): Promise<number> {
   return result.count;
 }
 
-async function listSessions(userId: number) {
+async function listSessions(userId: string) {
   const groups = await prisma.refreshToken.groupBy({
     by: ['familyId'],
     where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -91,7 +91,7 @@ async function listSessions(userId: number) {
   return groups.map((g) => ({ familyId: g.familyId, lastUsedAt: g._max.issuedAt }));
 }
 
-async function retireTokens(userId: number, purpose: TokenPurpose, tx: Tx = prisma): Promise<void> {
+async function retireTokens(userId: string, purpose: TokenPurpose, tx: Tx = prisma): Promise<void> {
   await tx.userToken.updateMany({
     where: { userId, purpose, consumedAt: null },
     data: { consumedAt: new Date() },
@@ -108,11 +108,11 @@ async function insertToken(
     createdBy,
   }: {
     id: string;
-    userId: number;
+    userId: string;
     purpose: TokenPurpose;
     tokenHash: string;
     expiresAt: Date;
-    createdBy: number | null;
+    createdBy: string | null;
   },
   tx: Tx = prisma
 ): Promise<void> {
@@ -121,7 +121,7 @@ async function insertToken(
   });
 }
 
-async function countIssuedSince(userId: number, purpose: TokenPurpose, since: Date): Promise<number> {
+async function countIssuedSince(userId: string, purpose: TokenPurpose, since: Date): Promise<number> {
   return prisma.userToken.count({ where: { userId, purpose, createdAt: { gte: since } } });
 }
 

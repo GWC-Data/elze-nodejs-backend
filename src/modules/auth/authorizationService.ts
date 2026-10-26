@@ -1,4 +1,5 @@
 import { fail } from '../../shared/errors/AppError';
+import { isUuid } from '../../shared/validation/commonValidator';
 import { PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
 import {
   featureKeys,
@@ -10,12 +11,12 @@ import {
 import type { Actor } from '../../shared/types/actor';
 
 interface ActorSource {
-  id: number;
+  id: string;
   username: string;
   email: string;
   display_name: string | null;
   role: string | null;
-  company_id: number | null;
+  company_id: string | null;
   status: string;
   must_change_password: boolean;
   role_id?: string | null;
@@ -23,9 +24,9 @@ interface ActorSource {
 }
 
 interface ManagedUser {
-  id: number;
+  id: string;
   role: string | null;
-  company_id: number | null;
+  company_id: string | null;
 }
 
 function buildActor(
@@ -97,19 +98,18 @@ function assertPermission(actor: Actor | null | undefined, permission: string): 
   throw fail('INSUFFICIENT_PERMISSION', 'You do not have permission to perform this action.');
 }
 
-function resolveTargetCompany(actor: Actor, requestedCompanyId: unknown): number {
-  if (!actor.isPlatform) return actor.companyId as number;
+function resolveTargetCompany(actor: Actor, requestedCompanyId: unknown): string {
+  if (!actor.isPlatform) return actor.companyId as string;
 
-  const id = Number(requestedCompanyId);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!isUuid(requestedCompanyId)) {
     throw fail('VALIDATION_ERROR', 'companyId is required: a platform account must say which company this is for.');
   }
-  return id;
+  return requestedCompanyId.trim().toLowerCase();
 }
 
 function assertCompanyMatch(actor: Actor, resourceCompanyId: unknown, what: string = 'That record'): void {
   if (actor.isPlatform) return;
-  if (resourceCompanyId !== null && Number(resourceCompanyId) === Number(actor.companyId)) return;
+  if (resourceCompanyId !== null && resourceCompanyId === actor.companyId) return;
 
   console.warn(
     `[authz] tenant denial: "${actor.username}" (company ${actor.companyId}) reached ` +

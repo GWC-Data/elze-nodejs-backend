@@ -901,7 +901,7 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
 
   await new Promise((done) => setTimeout(done, 500));
 
-  const inCompany = (item: any, id: number) => item.companyId === id || item.actorCompanyId === id;
+  const inCompany = (item: any, id: string) => item.companyId === id || item.actorCompanyId === id;
 
   r = await owner.call('GET', '/api/audit?pageSize=100');
   const ownerItems: any[] = r.body?.data?.items || [];
@@ -1436,6 +1436,218 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
   r = await owner.call('DELETE', `/api/platform/users/${otherHelperId}`);
   check('the owner deletes a platform admin', r.status === 200, JSON.stringify(r.body));
 
+  section('Deleted items');
+
+  const binItems = (res: CallResult) => (res.body?.data?.items || []) as any[];
+  const inBin = (res: CallResult, type: string, id: unknown) =>
+    binItems(res).find((i: any) => i.type === type && i.id === String(id));
+
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.binmember',
+    email: 'alpha.binmember@example.com',
+    role: 'USER',
+  });
+  const binMember = client('binMember');
+  r = await binMember.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('alpha.binmember@example.com')),
+    password: 'BinMember1!',
+  });
+  check('a member for the deleted items checks activates', r.status === 200, JSON.stringify(r.body));
+  r = await binMember.call('GET', '/api/deleted-items');
+  check(
+    'a member cannot open the deleted items',
+    r.status === 403 && r.body?.error?.code === 'INSUFFICIENT_PERMISSION',
+    JSON.stringify(r.body)
+  );
+
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.bin',
+    email: 'alpha.bin@example.com',
+    role: 'USER',
+  });
+  const binUserId = r.body?.data?.id;
+  r = await alphaBack.call('POST', '/api/users', {
+    username: 'alpha.binactive',
+    email: 'alpha.binactive@example.com',
+    role: 'USER',
+  });
+  const binActiveId = r.body?.data?.id;
+  r = await client('binActive').call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('alpha.binactive@example.com')),
+    password: 'BinActive1!',
+  });
+  r = await alphaBack.call('POST', '/api/groups', { name: 'Bin group' });
+  const binGroupId = r.body?.data?.id;
+  r = await alphaBack.call('POST', '/api/roles', { name: 'Bin role', permissionIds: [] });
+  const binRoleId = r.body?.data?.id;
+  for (const path of [
+    `/api/users/${binUserId}`,
+    `/api/users/${binActiveId}`,
+    `/api/groups/${binGroupId}`,
+    `/api/roles/${binRoleId}`,
+  ]) {
+    r = await alphaBack.call('DELETE', path);
+  }
+
+  r = await alphaBack.call('GET', '/api/deleted-items?pageSize=100');
+  const binUser = inBin(r, 'user', binUserId);
+  check(
+    'a company admin sees what was deleted in their company',
+    r.status === 200 && binUser && inBin(r, 'group', binGroupId) && inBin(r, 'role', binRoleId),
+    JSON.stringify(r.body)
+  );
+  check(
+    'with when and by whom',
+    Boolean(binUser?.deletedAt) && binUser?.deletedBy?.id === alphaAdminId && Boolean(binUser?.deletedBy?.name),
+    JSON.stringify(binUser)
+  );
+  check(
+    'and only their own company',
+    binItems(r).every((i: any) => i.companyId === companyA && i.type !== 'company'),
+    JSON.stringify(binItems(r).map((i: any) => [i.type, i.companyId]))
+  );
+  r = await alphaBack.call('GET', '/api/deleted-items?type=group&pageSize=100');
+  check(
+    'the list filters by type',
+    r.status === 200 && binItems(r).length > 0 && binItems(r).every((i: any) => i.type === 'group'),
+    JSON.stringify(binItems(r).map((i: any) => i.type))
+  );
+  r = await alphaBack.call('GET', '/api/deleted-items?search=binactive');
+  check(
+    'and searches',
+    r.status === 200 && binItems(r).length === 1 && binItems(r)[0].id === String(binActiveId),
+    JSON.stringify(binItems(r))
+  );
+  r = await alphaBack.call('GET', '/api/deleted-items?type=dashboard');
+  check('an unknown type is refused', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR', `${r.status}`);
+
+  const betaBin = client('betaBin');
+  r = await betaBin.call('POST', '/api/auth/login', { identifier: 'beta.admin', password: 'BetaAdmin1!' });
+  r = await betaBin.call('GET', '/api/deleted-items?pageSize=100');
+  check(
+    "another company's admin does not see them",
+    r.status === 200 && !inBin(r, 'user', binUserId) && !inBin(r, 'group', binGroupId),
+    `${r.status} ${JSON.stringify(binItems(r).map((i: any) => i.companyId))}`
+  );
+  r = await betaBin.call('POST', `/api/deleted-items/group/${binGroupId}/restore`);
+  check('nor recover them', r.status === 404, `${r.status}`);
+
+  r = await helper.call('GET', '/api/deleted-items?pageSize=100');
+  check(
+    'a platform admin sees the deleted items of every company',
+    r.status === 200 && inBin(r, 'user', binUserId) && inBin(r, 'group', binGroupId),
+    JSON.stringify(r.body?.error)
+  );
+  check('but not deleted platform accounts', !inBin(r, 'user', otherHelperId));
+  r = await helper.call('GET', `/api/deleted-items?companyId=${companyB}&pageSize=100`);
+  check(
+    'and can narrow them to one company',
+    r.status === 200 && binItems(r).every((i: any) => i.companyId === companyB),
+    JSON.stringify(binItems(r).map((i: any) => i.companyId))
+  );
+  r = await owner.call('GET', '/api/deleted-items?type=user&pageSize=100');
+  check('the owner also sees deleted platform accounts', Boolean(inBin(r, 'user', otherHelperId)));
+
+  r = await alphaBack.call('POST', `/api/deleted-items/user/${binUserId}/restore`);
+  check(
+    'a deleted account is recovered',
+    r.status === 200 && r.body?.data?.restored === true && r.body?.data?.item?.id === String(binUserId),
+    JSON.stringify(r.body)
+  );
+  r = await alphaBack.call('GET', `/api/users/${binUserId}`);
+  check(
+    'back among the members, still invited since it never chose a password',
+    r.status === 200 && r.body?.data?.status === 'pending',
+    JSON.stringify(r.body?.data)
+  );
+  r = await alphaBack.call('POST', `/api/deleted-items/user/${binActiveId}/restore`);
+  r = await alphaBack.call('GET', `/api/users/${binActiveId}`);
+  check(
+    'an activated account comes back deactivated',
+    r.status === 200 && r.body?.data?.status === 'disabled',
+    JSON.stringify(r.body?.data)
+  );
+  r = await alphaBack.call('POST', `/api/users/${binActiveId}/activate`);
+  check('and can be reactivated', r.status === 200 && r.body?.data?.status === 'active', JSON.stringify(r.body));
+  r = await alphaBack.call('POST', `/api/deleted-items/user/${binUserId}/restore`);
+  check('recovering it twice is a 404', r.status === 404, `${r.status}`);
+
+  r = await alphaBack.call('POST', `/api/deleted-items/group/${binGroupId}/restore`);
+  check('a deleted group is recovered', r.status === 200, JSON.stringify(r.body));
+  r = await alphaBack.call('GET', `/api/groups/${binGroupId}`);
+  check('it comes back paused', r.status === 200 && r.body?.data?.active === false, JSON.stringify(r.body?.data));
+
+  r = await alphaBack.call('POST', '/api/roles', { name: 'Bin role', permissionIds: [] });
+  check('a new role takes the deleted role’s name', r.status === 201, JSON.stringify(r.body));
+  r = await alphaBack.call('POST', `/api/deleted-items/role/${binRoleId}/restore`);
+  check(
+    'so the deleted role cannot come back under it',
+    r.status === 409 && r.body?.error?.code === 'CONFLICT',
+    JSON.stringify(r.body)
+  );
+  r = await alphaBack.call('DELETE', `/api/deleted-items/role/${binRoleId}`);
+  check(
+    'a deleted item is removed for good',
+    r.status === 200 &&
+      r.body?.data?.permanent === true &&
+      (await prisma.role.findUnique({ where: { id: binRoleId } })) === null,
+    JSON.stringify(r.body)
+  );
+  r = await alphaBack.call('GET', '/api/deleted-items?pageSize=100');
+  check('and leaves the deleted items', r.status === 200 && !inBin(r, 'role', binRoleId));
+  r = await alphaBack.call('DELETE', `/api/deleted-items/group/${binGroupId}`);
+  check('a live record is not in the deleted items', r.status === 404, `${r.status}`);
+
+  r = await owner.call('POST', '/api/platform/companies', {
+    name: 'Bin Company',
+    admin: { username: 'bin.admin', email: 'bin.admin@example.com' },
+  });
+  const binCompanyId = r.body?.data?.id;
+  r = await owner.call('GET', '/api/platform/users?search=bin.admin');
+  const binAdminId = binItems(r)[0]?.id;
+  await owner.call('DELETE', `/api/platform/users/${binAdminId}`);
+  r = await owner.call('DELETE', `/api/platform/companies/${binCompanyId}`);
+  check('a company is deleted for the deleted items checks', r.status === 200, JSON.stringify(r.body));
+  r = await helper.call('GET', '/api/deleted-items?pageSize=100');
+  check(
+    'a deleted company is listed, its accounts are not',
+    Boolean(inBin(r, 'company', binCompanyId)) && !inBin(r, 'user', binAdminId),
+    JSON.stringify(binItems(r).map((i: any) => [i.type, i.name]))
+  );
+  r = await alphaBack.call('POST', `/api/deleted-items/company/${binCompanyId}/restore`);
+  check('a company admin cannot recover a company', r.status === 404, `${r.status}`);
+  r = await helper.call('POST', `/api/deleted-items/company/${binCompanyId}/restore`);
+  check('a platform admin recovers it', r.status === 200, JSON.stringify(r.body));
+  r = await owner.call('GET', `/api/platform/companies/${binCompanyId}`);
+  check('it comes back suspended', r.status === 200 && r.body?.data?.active === false, JSON.stringify(r.body?.data));
+  const binCompanyRoles = await prisma.role.findMany({
+    where: { companyId: binCompanyId },
+    select: { deletedAt: true },
+  });
+  check(
+    'with what was deleted together with it',
+    binCompanyRoles.length > 0 && binCompanyRoles.every((role) => role.deletedAt === null),
+    JSON.stringify(binCompanyRoles)
+  );
+  r = await helper.call('GET', '/api/deleted-items?type=user&search=bin.admin');
+  check('its deleted accounts can now be recovered one by one', Boolean(inBin(r, 'user', binAdminId)));
+  await owner.call('DELETE', `/api/platform/companies/${binCompanyId}`);
+  r = await owner.call('DELETE', `/api/deleted-items/company/${binCompanyId}`);
+  check(
+    'a deleted company is removed for good, with its deleted accounts',
+    r.status === 200 &&
+      (await prisma.company.findUnique({ where: { id: binCompanyId } })) === null &&
+      (await prisma.user.findUnique({ where: { id: binAdminId } })) === null,
+    JSON.stringify(r.body)
+  );
+
+  let restoredEvent = null;
+  for (let attempt = 0; attempt < 20 && !restoredEvent; attempt++) {
+    restoredEvent = await prisma.auditLog.findFirst({ where: { event: 'user_restored' } });
+    if (!restoredEvent) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  check('recovering is on the audit trail', restoredEvent !== null);
+
   section('Hidden features stay out of responses');
 
   r = await owner.call('GET', '/api/platform/roles/permissions');
@@ -1658,7 +1870,10 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
   );
 
   r = await owner.call('GET', '/api/platform/users/abc');
-  check('a non-numeric id is a validation error', r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR');
+  check(
+    'an id that is not a UUID is a validation error',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR'
+  );
 
   await sink!.stop();
 

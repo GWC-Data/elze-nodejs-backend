@@ -144,7 +144,7 @@ interface DashboardSpec {
   id?: string;
   title?: string;
   description?: string | null;
-  companyId?: number | null;
+  companyId?: string | null;
   dataSource?: DataSourceSpec;
   source?: DataSourceSpec;
   dataset?: string | DatasetSpec;
@@ -174,8 +174,8 @@ interface DashboardEntry {
   id: string;
   title: string | undefined;
   description?: string | null;
-  companyId: number | null;
-  createdBy?: number | null;
+  companyId: string | null;
+  createdBy?: string | null;
   source: DashboardOrigin;
 }
 
@@ -197,7 +197,7 @@ interface CreatedDashboard {
   id: string;
   title: string;
   description: string | null;
-  companyId: number | null;
+  companyId: string | null;
   accessLevel: 'admin';
   spec: DashboardDraft;
 }

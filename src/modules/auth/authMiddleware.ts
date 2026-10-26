@@ -13,7 +13,7 @@ import { requireCsrf } from '../../shared/http/csrfMiddleware';
 import { SAFE_METHODS } from '../../shared/security/session';
 import { USER_STATUS } from '../../shared/db/statuses';
 import { permissionByKey } from '../catalogue/catalogueService';
-import { bodyOf } from '../../shared/validation/commonValidator';
+import { bodyOf, isUuid } from '../../shared/validation/commonValidator';
 import type { PublicUser } from '../users/userSerializer';
 
 function requestPath(req: Request): string {
@@ -30,7 +30,8 @@ function requireRbac(_req: Request, _res: Response, next: NextFunction): void {
 
 async function actorFromToken(token: string): Promise<{ actor: Actor; account: PublicUser }> {
   const payload = verifyAccessToken(token);
-  const found = await findActor(Number(payload.sub));
+  if (!isUuid(payload.sub)) throw fail('UNAUTHENTICATED', 'Your session is not valid.');
+  const found = await findActor(payload.sub);
   const user = found?.user;
 
   if (!user) throw fail('UNAUTHENTICATED', 'This account no longer exists.');

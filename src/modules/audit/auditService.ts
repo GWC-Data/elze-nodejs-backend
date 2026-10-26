@@ -1,6 +1,7 @@
 import * as auditRepository from './auditRepository';
 import { EVENTS, FORBIDDEN_DETAIL_KEYS } from './auditEvents';
 import { fail, messageOf } from '../../shared/errors/AppError';
+import { isUuid } from '../../shared/validation/commonValidator';
 import { COMPANY_ADMIN } from '../catalogue/roleTiers';
 import { seesPlatformAccounts } from '../auth/authorizationService';
 import { shapeEntry } from './auditSerializer';
@@ -56,9 +57,8 @@ function scrub(detail: AuditDetail | null | undefined): AuditDetail {
   return safe;
 }
 
-function idOrNull(value: unknown): number | null {
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : null;
+function idOrNull(value: unknown): string | null {
+  return isUuid(value) ? value.trim().toLowerCase() : null;
 }
 
 function audit(event: string, actor: AuditActor, detail: AuditDetail = {}): void {

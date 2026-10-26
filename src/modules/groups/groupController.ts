@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { bodyOf, optionalFlag, requireId } from '../../shared/validation/commonValidator';
+import { bodyOf, optionalFlag, requireUuid } from '../../shared/validation/commonValidator';
 import * as groupService from './groupService';
 
-const groupId = (req: Request) => requireId(req.params.id, 'group id');
+const groupId = (req: Request) => requireUuid(req.params.id, 'group id');
 
 async function list(req: Request, res: Response): Promise<void> {
   ok(res, await groupService.listGroups(req.actor));

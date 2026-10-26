@@ -32,7 +32,7 @@ async function requireDashboardId(dashboardId: unknown): Promise<string> {
   return id;
 }
 
-async function listCompanyDashboards(companyId: number | null) {
+async function listCompanyDashboards(companyId: string | null) {
   const [assigned, all] = await Promise.all([
     accessRepository.companyDashboardIds(companyId),
     dashboards.listDashboards(companyId),
@@ -40,7 +40,7 @@ async function listCompanyDashboards(companyId: number | null) {
   return all.filter((d) => assigned.has(d.id)).map((d) => dashboardSummary(d));
 }
 
-async function listAssignableDashboards(companyId: number | null) {
+async function listAssignableDashboards(companyId: string | null) {
   const [assigned, all] = await Promise.all([
     accessRepository.companyDashboardIds(companyId),
     dashboards.listDashboards(),
@@ -48,20 +48,20 @@ async function listAssignableDashboards(companyId: number | null) {
   return all.map((d) => dashboardSummary(d, { assigned: assigned.has(d.id) }));
 }
 
-async function assignDashboard(actor: Actor, companyId: number, rawDashboardId: unknown) {
+async function assignDashboard(actor: Actor, companyId: string, rawDashboardId: unknown) {
   const dashboardId = await requireDashboardId(rawDashboardId);
   await accessRepository.assign(companyId, dashboardId, actor.id);
   audit(EVENTS.DASHBOARD_ASSIGNED, actor, { companyId, dashboardId });
   return { companyId, dashboardId, assigned: true };
 }
 
-async function unassignDashboard(actor: Actor, companyId: number, dashboardId: string) {
+async function unassignDashboard(actor: Actor, companyId: string, dashboardId: string) {
   const removed = await accessRepository.unassign(companyId, dashboardId);
   audit(EVENTS.DASHBOARD_UNASSIGNED, actor, { companyId, dashboardId, wasAssigned: removed });
   return { companyId, dashboardId, assigned: false };
 }
 
-async function assertDashboardAssigned(actor: Actor, companyId: number | null, dashboardId: string): Promise<void> {
+async function assertDashboardAssigned(actor: Actor, companyId: string | null, dashboardId: string): Promise<void> {
   if (actor.isPlatform && companyId === null) return;
   if (!(await accessRepository.isAvailable(companyId, dashboardId))) {
     throw fail('TENANT_ACCESS_DENIED', 'That dashboard is not available to this company.');
@@ -134,7 +134,7 @@ async function countAccessibleDashboards(actor: Actor): Promise<number> {
   return accessRepository.countGrantedDashboards(actor);
 }
 
-async function listUserGrants(userId: number) {
+async function listUserGrants(userId: string) {
   const [rows, titles] = await Promise.all([accessRepository.userGrantRows(userId), dashboards.dashboardTitles()]);
   return rows.map((row) => {
     const grant = {
@@ -149,7 +149,7 @@ async function listUserGrants(userId: number) {
   });
 }
 
-async function listDashboardGrants(companyId: number, dashboardId: string) {
+async function listDashboardGrants(companyId: string, dashboardId: string) {
   const [users, groups] = await Promise.all([
     accessRepository.dashboardUserGrants(companyId, dashboardId),
     accessRepository.dashboardGroupGrants(companyId, dashboardId),
@@ -207,12 +207,12 @@ async function grantAuthority(actor: Actor, dashboardId: string, action: GrantAc
 async function assertSharerMayChange(
   actor: Actor,
   authority: GrantAuthority,
-  userId: number,
+  userId: string,
   dashboardId: string,
   level: string | null
 ): Promise<void> {
   if (authority.full) return;
-  if (Number(userId) === Number(actor.id)) {
+  if (userId === actor.id) {
     throw fail('INSUFFICIENT_PERMISSION', 'You cannot change your own access to a dashboard.');
   }
   if (level && !levelAtLeast(authority.level, level)) {
@@ -254,7 +254,7 @@ async function shareablePeople(actor: Actor, requestedCompanyId: unknown, rawDas
   return listUserOptions(actor);
 }
 
-async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: number, rawLevelId: unknown) {
+async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: string, rawLevelId: unknown) {
   const level = requireLevelId(rawLevelId);
   const target = await requireUserInScope(actor, userId);
   const { dashboardId } = await resolveGrantTarget(actor, target.company_id, rawDashboardId);
@@ -273,7 +273,7 @@ async function grantToUser(actor: Actor, rawDashboardId: unknown, userId: number
   return { dashboardId, userId, level, levelId: levelIdOf(level) };
 }
 
-async function revokeFromUser(actor: Actor, rawDashboardId: unknown, userId: number) {
+async function revokeFromUser(actor: Actor, rawDashboardId: unknown, userId: string) {
   const target = await requireUserInScope(actor, userId);
   const { dashboardId } = await resolveGrantTarget(actor, target.company_id, rawDashboardId);
   const authority = await grantAuthority(actor, dashboardId, 'revoke');
@@ -292,7 +292,7 @@ async function revokeFromUser(actor: Actor, rawDashboardId: unknown, userId: num
   return { dashboardId, userId, revoked: true };
 }
 
-async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: number, rawLevelId: unknown) {
+async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: string, rawLevelId: unknown) {
   const level = requireLevelId(rawLevelId);
   const group = await requireGroupInScope(actor, groupId);
   const { dashboardId } = await resolveGrantTarget(actor, group.companyId, rawDashboardId);
@@ -309,7 +309,7 @@ async function grantToGroup(actor: Actor, rawDashboardId: unknown, groupId: numb
   return { dashboardId, groupId, level, levelId: levelIdOf(level) };
 }
 
-async function revokeFromGroup(actor: Actor, rawDashboardId: unknown, groupId: number) {
+async function revokeFromGroup(actor: Actor, rawDashboardId: unknown, groupId: string) {
   const group = await requireGroupInScope(actor, groupId);
   const { dashboardId } = await resolveGrantTarget(actor, group.companyId, rawDashboardId);
 
@@ -326,7 +326,7 @@ async function revokeFromGroup(actor: Actor, rawDashboardId: unknown, groupId: n
   return { dashboardId, groupId, revoked: true };
 }
 
-async function groupDashboards(actor: Actor, groupId: number) {
+async function groupDashboards(actor: Actor, groupId: string) {
   const group = await requireGroupInScope(actor, groupId);
   const [assigned, rows] = await Promise.all([
     listCompanyDashboards(group.companyId),

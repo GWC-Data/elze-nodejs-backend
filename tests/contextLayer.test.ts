@@ -22,6 +22,7 @@ import contextLayer = require('../src/modules/contextLayer/contextLayerService')
 import publish = require('../src/modules/contextLayer/publishService');
 import sharing = require('../src/modules/contextLayer/contextSharingService');
 import agentGate = require('../src/modules/contextLayer/agentGateService');
+import deletedItems = require('../src/modules/deletedItems/deletedItemService');
 import catalogue = require('../src/modules/catalogue/catalogueService');
 const { accessLevelId, systemRoleId } = catalogue;
 import type { Actor } from '../src/shared/types/actor';
@@ -182,9 +183,9 @@ function installFakeDomo() {
   }) as unknown as typeof fetch;
 }
 
-const made: { companies: number[]; users: number[] } = { companies: [], users: [] };
+const made: { companies: string[]; users: string[] } = { companies: [], users: [] };
 
-async function makeCompany(name: string): Promise<number> {
+async function makeCompany(name: string): Promise<string> {
   const { rows } = await db.query(`INSERT INTO companies (name, slug, active) VALUES (?, ?, TRUE) RETURNING id`, [
     name,
     name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -193,7 +194,7 @@ async function makeCompany(name: string): Promise<number> {
   return rows[0].id;
 }
 
-async function makeAdmin(companyId: number, username: string): Promise<Actor> {
+async function makeAdmin(companyId: string, username: string): Promise<Actor> {
   const { rows } = await db.query(
     `INSERT INTO users (company_id, username, email, password_hash, status)
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
@@ -223,7 +224,7 @@ async function makeAdmin(companyId: number, username: string): Promise<Actor> {
   } as unknown as Actor;
 }
 
-async function makeMember(companyId: number, username: string): Promise<Actor> {
+async function makeMember(companyId: string, username: string): Promise<Actor> {
   const { rows } = await db.query(
     `INSERT INTO users (company_id, username, email, password_hash, status)
      VALUES (?, ?, ?, 'x', 'active') RETURNING id`,
@@ -456,15 +457,28 @@ async function cleanup(): Promise<void> {
   const removed = await codeOf(() => service.requireConnection(memberA, connectionId));
   check('and they lose sight of it again', removed === 'RESOURCE_NOT_FOUND', removed);
 
-  const toCompany = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'company' }));
-  check('a context can no longer be opened to the whole company', toCompany === 'VALIDATION_ERROR', toCompany);
-  const stillHidden = await codeOf(() => service.requireConnection(memberA, connectionId));
-  check('so other members still cannot see it', stillHidden === 'RESOURCE_NOT_FOUND', stillHidden);
+  shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'company' });
+  check('a context can be opened to the whole company', shared.generalAccess === 'company', shared.generalAccess);
+  check('every member then sees it', (await service.listConnections(memberA)).length === 1);
+  const asCompany = await service.requireConnection(memberA, connectionId);
+  check(
+    'with view access only',
+    asCompany.access.level === 'view' && asCompany.access.canShare === false,
+    JSON.stringify(asCompany.access)
+  );
+  const companyEdits = await codeOf(() => service.requireConnection(memberA, connectionId, 'edit'));
+  check('company access cannot change the draft', companyEdits === 'INSUFFICIENT_PERMISSION', companyEdits);
+  const memberOpens = await codeOf(() =>
+    sharing.setGeneralAccess(memberA, connectionId, { generalAccess: 'restricted' })
+  );
+  check('a member cannot change general access', memberOpens === 'INSUFFICIENT_PERMISSION', memberOpens);
+  const otherCompany = await codeOf(() => service.requireConnection(adminB, connectionId));
+  check('another company still cannot see it', otherCompany === 'RESOURCE_NOT_FOUND', otherCompany);
   const badGeneral = await codeOf(() => sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'public' }));
   check('an unknown general access is refused', badGeneral === 'VALIDATION_ERROR', badGeneral);
   shared = await sharing.setGeneralAccess(adminA, connectionId, { generalAccess: 'restricted' });
   check(
-    'restricted is still accepted',
+    'restricted hides it from members again',
     shared.generalAccess === 'restricted' && (await service.listConnections(memberA)).length === 0
   );
 
@@ -1167,6 +1181,26 @@ async function cleanup(): Promise<void> {
   );
   const versionTwice = await codeOf(() => contextLayer.deleteVersion(adminA, connectionId, v2.id));
   check('deleting it again is a 404', versionTwice === 'RESOURCE_NOT_FOUND', versionTwice);
+  const binList = { page: 1, pageSize: 100, offset: 0, search: '', sort: 'deletedAt', dir: 'desc' as const };
+  const versionBin = await deletedItems.listDeletedItems(adminA, binList, { type: 'version' });
+  const binnedVersion = versionBin.items.find((i) => i.id === v2.id);
+  check(
+    'the deleted version is among the deleted items, under its context',
+    binnedVersion?.parent?.id === connectionId && binnedVersion?.deletedBy?.id === adminA.id,
+    JSON.stringify(binnedVersion)
+  );
+  const otherCompanyBin = await deletedItems.listDeletedItems(adminB, binList, { type: 'version' });
+  check(
+    "another company's admin does not see it",
+    !otherCompanyBin.items.some((i) => i.id === v2.id),
+    JSON.stringify(otherCompanyBin.items)
+  );
+  await deletedItems.restoreDeletedItem(adminA, 'version', v2.id);
+  check(
+    'recovering it puts it back in the history',
+    (await publish.listPublications(connectionId)).some((v) => v.id === v2.id)
+  );
+  await contextLayer.deleteVersion(adminA, connectionId, v2.id);
   const v3 = await publish.publishContext(adminA, connectionRow, { name: 'Revenue' });
   check('its version number is not reused', v3.version === 'v3', v3.version);
   const memberVersionPurge = await codeOf(() =>
@@ -1183,6 +1217,7 @@ async function cleanup(): Promise<void> {
 
   section('Deleting');
 
+  await contextLayer.deleteVersion(adminA, connectionId, other.id);
   await service.deleteConnection(adminA, connectionId);
   check('the connection is gone', (await service.listConnections(adminA)).length === 0);
   const deletedOpen = await codeOf(() => service.requireConnection(adminA, connectionId));
@@ -1210,6 +1245,34 @@ async function cleanup(): Promise<void> {
   check('and so do its versions', keptVersions.rows[0].n > 0, String(keptVersions.rows[0].n));
   const connectionTwice = await codeOf(() => service.deleteConnection(adminA, connectionId));
   check('deleting it again is a 404', connectionTwice === 'RESOURCE_NOT_FOUND', connectionTwice);
+  const contextBin = await deletedItems.listDeletedItems(adminA, binList, { type: 'context' });
+  check(
+    'the deleted context is among the deleted items',
+    contextBin.items.some((i) => i.id === connectionId && i.deletedBy?.id === adminA.id),
+    JSON.stringify(contextBin.items)
+  );
+  const versionsOfDeleted = await deletedItems.listDeletedItems(adminA, binList, { type: 'version' });
+  check(
+    'its deleted versions are not listed on their own',
+    !versionsOfDeleted.items.some((i) => i.parent?.id === connectionId),
+    JSON.stringify(versionsOfDeleted.items)
+  );
+  await deletedItems.restoreDeletedItem(adminA, 'context', connectionId);
+  check('recovering it brings it back', (await service.listConnections(adminA)).length === 1);
+  const versionsAfterRestore = await deletedItems.listDeletedItems(adminA, binList, { type: 'version' });
+  check(
+    'and its deleted version is listed again',
+    versionsAfterRestore.items.some((i) => i.id === other.id),
+    JSON.stringify(versionsAfterRestore.items)
+  );
+  check(
+    'with its published versions',
+    (await publish.listPublications(connectionId)).length > 0,
+    String((await publish.listPublications(connectionId)).length)
+  );
+  const restoreTwice = await codeOf(() => deletedItems.restoreDeletedItem(adminA, 'context', connectionId));
+  check('recovering it twice is a 404', restoreTwice === 'RESOURCE_NOT_FOUND', restoreTwice);
+  await service.deleteConnection(adminA, connectionId);
   const memberContextPurge = await codeOf(() => service.deleteConnection(memberA, connectionId, { permanent: true }));
   check(
     'a member cannot remove a context for good',

@@ -10,14 +10,14 @@ datasource db {
 }
 
 model Company {
-  id        Int      @id @default(autoincrement())
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String    @db.VarChar(150)
   slug      String    @db.VarChar(64)
   active    Boolean   @default(true)
-  createdBy Int?      @map("created_by")
+  createdBy String?   @map("created_by") @db.Uuid
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
-  deletedBy Int?      @map("deleted_by")
+  deletedBy String?   @map("deleted_by") @db.Uuid
 
   users                User[]
   groups               Group[]
@@ -34,8 +34,8 @@ model Company {
 }
 
 model User {
-  id                 Int        @id @default(autoincrement())
-  companyId          Int?       @map("company_id")
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId          String?    @map("company_id") @db.Uuid
   username           String     @db.VarChar(50)
   email              String     @db.VarChar(190)
   displayName        String?    @map("display_name") @db.VarChar(120)
@@ -45,7 +45,7 @@ model User {
   lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(6)
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   deletedAt          DateTime?  @map("deleted_at") @db.Timestamptz(6)
-  deletedBy          Int?       @map("deleted_by")
+  deletedBy          String?    @map("deleted_by") @db.Uuid
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -84,14 +84,14 @@ model User {
 }
 
 model Group {
-  id        Int      @id @default(autoincrement())
-  companyId Int      @map("company_id")
-  name      String   @db.VarChar(100)
-  active    Boolean  @default(true)
-  creatorId Int?      @map("creator_id")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(100)
+  active    Boolean   @default(true)
+  creatorId String?   @map("creator_id") @db.Uuid
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
-  deletedBy Int?      @map("deleted_by")
+  deletedBy String?   @map("deleted_by") @db.Uuid
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator User?   @relation(fields: [creatorId], references: [id], onUpdate: NoAction)
@@ -106,8 +106,8 @@ model Group {
 }
 
 model GroupUser {
-  groupId   Int      @map("group_id")
-  userId    Int      @map("user_id")
+  groupId   String   @map("group_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -120,16 +120,16 @@ model GroupUser {
 }
 
 model Dashboard {
-  id          String   @id @db.VarChar(64)
-  title       String   @db.VarChar(150)
+  id          String    @id @db.VarChar(64)
+  title       String    @db.VarChar(150)
   description String?
-  companyId   Int?     @map("company_id")
-  createdBy   Int?     @map("created_by")
+  companyId   String?   @map("company_id") @db.Uuid
+  createdBy   String?   @map("created_by") @db.Uuid
   spec        Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
-  deletedBy   Int?      @map("deleted_by")
+  deletedBy   String?   @map("deleted_by") @db.Uuid
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator User?    @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -147,7 +147,7 @@ model Dashboard {
 model RefreshToken {
   id            String    @id @db.Uuid
   familyId      String    @map("family_id") @db.Uuid
-  userId        Int       @map("user_id")
+  userId        String    @map("user_id") @db.Uuid
   tokenHash     String    @unique(map: "uq_refresh_tokens_hash") @map("token_hash") @db.Char(64)
   issuedAt      DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
   expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
@@ -166,12 +166,12 @@ model RefreshToken {
 
 model UserToken {
   id         String    @id @db.Uuid
-  userId     Int       @map("user_id")
+  userId     String    @map("user_id") @db.Uuid
   purpose    String    @db.VarChar(24)
   tokenHash  String    @unique(map: "uq_user_tokens_hash") @map("token_hash") @db.Char(64)
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
   consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
-  createdBy  Int?      @map("created_by")
+  createdBy  String?   @map("created_by") @db.Uuid
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -195,11 +195,11 @@ model AuditLog {
   id             BigInt   @id @default(autoincrement())
   ts             DateTime @default(now()) @db.Timestamptz(6)
   event          String   @db.VarChar(64)
-  actorId        Int?     @map("actor_id")
+  actorId        String?  @map("actor_id") @db.Uuid
   actor          String?  @db.VarChar(190)
-  actorCompanyId Int?     @map("actor_company_id")
-  companyId      Int?     @map("company_id")
-  targetUserId   Int?     @map("target_user_id")
+  actorCompanyId String?  @map("actor_company_id") @db.Uuid
+  companyId      String?  @map("company_id") @db.Uuid
+  targetUserId   String?  @map("target_user_id") @db.Uuid
   detail         Json     @default("{}")
 
   eventType AuditEventType @relation(fields: [event], references: [key], onUpdate: NoAction)
@@ -244,7 +244,7 @@ model Connector {
 
 model Connection {
   id             String           @id @db.Uuid
-  companyId      Int              @map("company_id")
+  companyId      String           @map("company_id") @db.Uuid
   provider       String           @db.VarChar(32)
   name           String           @db.VarChar(120)
   host           String           @db.VarChar(190)
@@ -253,11 +253,11 @@ model Connection {
   status         ConnectionStatus @default(connected)
   lastError      String?          @map("last_error")
   lastVerifiedAt DateTime?        @map("last_verified_at") @db.Timestamptz(6)
-  createdBy      Int?             @map("created_by")
+  createdBy      String?          @map("created_by") @db.Uuid
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   generalAccess  GeneralAccess    @default(restricted) @map("general_access")
   deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
-  deletedBy      Int?             @map("deleted_by")
+  deletedBy      String?          @map("deleted_by") @db.Uuid
 
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator   User?     @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
@@ -282,7 +282,7 @@ model Dataset {
   rowCount     BigInt?  @map("row_count")
   columnCount  Int?     @map("column_count")
   selectedAt   DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
-  selectedBy   Int?     @map("selected_by")
+  selectedBy   String?  @map("selected_by") @db.Uuid
 
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   selector   User?      @relation(fields: [selectedBy], references: [id], onUpdate: NoAction)
@@ -295,7 +295,7 @@ model Dataset {
 model ContextLayerVersion {
   id                   String        @id @db.Uuid
   connectionId         String        @map("connection_id") @db.Uuid
-  companyId            Int           @map("company_id")
+  companyId            String        @map("company_id") @db.Uuid
   name                 String        @db.VarChar(120)
   version              Int
   status               VersionStatus @default(draft)
@@ -310,15 +310,15 @@ model ContextLayerVersion {
   stats                Json          @default("{}")
   snapshot             Json          @default("[]")
   notifyTeam           Boolean       @default(false) @map("notify_team")
-  createdBy            Int?          @map("created_by")
+  createdBy            String?       @map("created_by") @db.Uuid
   createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
-  publishedBy          Int?          @map("published_by")
+  publishedBy          String?       @map("published_by") @db.Uuid
   publishedAt          DateTime?     @map("published_at") @db.Timestamptz(6)
   datasets             Json          @default("[]")
   extractionDatasetIds Json?         @map("extraction_dataset_ids")
   deletedAt            DateTime?     @map("deleted_at") @db.Timestamptz(6)
-  deletedBy            Int?          @map("deleted_by")
+  deletedBy            String?       @map("deleted_by") @db.Uuid
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -337,7 +337,7 @@ model ContextObjectReview {
   connectionId String       @map("connection_id") @db.Uuid
   status       ReviewStatus
   note         String?
-  reviewedBy   Int?         @map("reviewed_by")
+  reviewedBy   String?      @map("reviewed_by") @db.Uuid
   reviewedAt   DateTime     @default(now()) @map("reviewed_at") @db.Timestamptz(6)
   edited       Boolean      @default(false)
 
@@ -352,10 +352,10 @@ model ContextObjectReview {
 model ContextProfile {
   id           String   @id @db.Uuid
   connectionId String   @unique(map: "uq_context_profiles_connection") @map("connection_id") @db.Uuid
-  companyId    Int      @map("company_id")
+  companyId    String   @map("company_id") @db.Uuid
   name         String   @db.VarChar(120)
   description  String?
-  createdBy    Int?     @map("created_by")
+  createdBy    String?  @map("created_by") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -425,18 +425,18 @@ model AccessLevel {
 
 model Role {
   id          String    @id @db.Uuid
-  companyId   Int?      @map("company_id")
+  companyId   String?   @map("company_id") @db.Uuid
   kind        RoleKind
   tier        RoleTier
   name        String    @db.VarChar(50)
   description String?   @db.VarChar(255)
-  createdBy   Int?      @map("created_by")
+  createdBy   String?   @map("created_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  modifiedBy  Int?      @map("modified_by")
+  modifiedBy  String?   @map("modified_by") @db.Uuid
   modifiedAt  DateTime? @map("modified_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
-  deletedBy   Int?      @map("deleted_by")
+  deletedBy   String?   @map("deleted_by") @db.Uuid
 
   company  Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_roles_company_id")
   creator  User?    @relation("RoleCreator", fields: [createdBy], references: [id], onUpdate: NoAction, map: "fk_roles_created_by")
@@ -453,7 +453,7 @@ model Role {
 model RolePermissions {
   roleId        String   @id @map("role_id") @db.Uuid
   permissionIds String[] @default([]) @map("permission_ids") @db.Uuid
-  updatedBy     Int?     @map("updated_by")
+  updatedBy     String?  @map("updated_by") @db.Uuid
   updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   role    Role  @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_role_permissions_role_id")
@@ -465,9 +465,9 @@ model RolePermissions {
 }
 
 model CompanyFeatures {
-  companyId  Int      @id @map("company_id")
+  companyId  String   @id @map("company_id") @db.Uuid
   featureIds String[] @default([]) @map("feature_ids") @db.Uuid
-  updatedBy  Int?     @map("updated_by")
+  updatedBy  String?  @map("updated_by") @db.Uuid
   updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_company_features_company_id")
@@ -479,9 +479,9 @@ model CompanyFeatures {
 }
 
 model UserRole {
-  userId     Int      @id @map("user_id")
+  userId     String   @id @map("user_id") @db.Uuid
   roleId     String   @map("role_id") @db.Uuid
-  assignedBy Int?     @map("assigned_by")
+  assignedBy String?  @map("assigned_by") @db.Uuid
   assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
   user     User  @relation("UserRoleHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_roles_user_id")
@@ -494,9 +494,9 @@ model UserRole {
 }
 
 model UserPermissions {
-  userId        Int      @id @map("user_id")
+  userId        String   @id @map("user_id") @db.Uuid
   permissionIds String[] @default([]) @map("permission_ids") @db.Uuid
-  updatedBy     Int?     @map("updated_by")
+  updatedBy     String?  @map("updated_by") @db.Uuid
   updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   user    User  @relation("UserPermissionsHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_permissions_user_id")
@@ -508,9 +508,9 @@ model UserPermissions {
 }
 
 model UserDataScope {
-  userId    Int      @id @map("user_id")
+  userId    String   @id @map("user_id") @db.Uuid
   scopes    Json     @default("{}")
-  updatedBy Int?     @map("updated_by")
+  updatedBy String?  @map("updated_by") @db.Uuid
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   user    User  @relation("UserDataScopeHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_data_scopes_user_id")
@@ -535,9 +535,9 @@ model ScopeDimension {
 }
 
 model CompanyDashboard {
-  companyId   Int      @map("company_id")
+  companyId   String   @map("company_id") @db.Uuid
   dashboardId String   @map("dashboard_id") @db.VarChar(64)
-  assignedBy  Int?     @map("assigned_by")
+  assignedBy  String?  @map("assigned_by") @db.Uuid
   assignedAt  DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
 
   company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_company_dashboards_company_id")
@@ -551,10 +551,10 @@ model CompanyDashboard {
 }
 
 model DashboardUserAccess {
-  userId        Int      @map("user_id")
+  userId        String   @map("user_id") @db.Uuid
   dashboardId   String   @map("dashboard_id") @db.VarChar(64)
   accessLevelId String   @map("access_level_id") @db.Uuid
-  grantedBy     Int?     @map("granted_by")
+  grantedBy     String?  @map("granted_by") @db.Uuid
   grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
 
   user        User        @relation("DashboardUserAccessHolder", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_user_access_user_id")
@@ -569,10 +569,10 @@ model DashboardUserAccess {
 }
 
 model DashboardGroupAccess {
-  groupId       Int      @map("group_id")
+  groupId       String   @map("group_id") @db.Uuid
   dashboardId   String   @map("dashboard_id") @db.VarChar(64)
   accessLevelId String   @map("access_level_id") @db.Uuid
-  grantedBy     Int?     @map("granted_by")
+  grantedBy     String?  @map("granted_by") @db.Uuid
   grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
 
   group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dashboard_group_access_group_id")
@@ -588,9 +588,9 @@ model DashboardGroupAccess {
 
 model ContextUserAccess {
   connectionId  String   @map("connection_id") @db.Uuid
-  userId        Int      @map("user_id")
+  userId        String   @map("user_id") @db.Uuid
   accessLevelId String   @map("access_level_id") @db.Uuid
-  grantedBy     Int?     @map("granted_by")
+  grantedBy     String?  @map("granted_by") @db.Uuid
   grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
 
   connection  Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_user_access_connection_id")
@@ -606,9 +606,9 @@ model ContextUserAccess {
 
 model ContextGroupAccess {
   connectionId  String   @map("connection_id") @db.Uuid
-  groupId       Int      @map("group_id")
+  groupId       String   @map("group_id") @db.Uuid
   accessLevelId String   @map("access_level_id") @db.Uuid
-  grantedBy     Int?     @map("granted_by")
+  grantedBy     String?  @map("granted_by") @db.Uuid
   grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
 
   connection  Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_group_access_connection_id")

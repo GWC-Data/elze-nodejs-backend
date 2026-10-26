@@ -9,7 +9,7 @@ interface ContextProfileRow {
   connection_id: string;
   name: string;
   description: string | null;
-  created_by: number | null;
+  created_by: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -39,10 +39,10 @@ async function upsert({
   createdBy,
 }: {
   connectionId: string;
-  companyId: number;
+  companyId: string;
   name: string;
   description: string | null;
-  createdBy: number | null;
+  createdBy: string | null;
 }): Promise<ContextProfileRow> {
   const profile = await prisma.contextProfile.upsert({
     where: { connectionId },

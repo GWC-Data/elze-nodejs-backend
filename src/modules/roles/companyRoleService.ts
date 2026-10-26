@@ -55,7 +55,7 @@ function shapeRole(row: CompanyRoleRow, features: readonly string[]) {
   };
 }
 
-async function companyFor(actor: Actor, requested: unknown): Promise<number> {
+async function companyFor(actor: Actor, requested: unknown): Promise<string> {
   const companyId = resolveTargetCompany(actor, requested);
   await requireCompany(actor, companyId);
   return companyId;
@@ -121,7 +121,7 @@ async function permissionOptions(actor: Actor, requestedCompanyId: unknown) {
   return { companyId, features, permissions: permissionOptionsFor(actor, features) };
 }
 
-async function memberRole(companyId: number) {
+async function memberRole(companyId: string) {
   const row = await companyRoleRepository.findCompanyDefault(companyId);
   return {
     id: row ? row.id : systemRoleId(USER),
@@ -172,7 +172,7 @@ async function listRoles(actor: Actor, requestedCompanyId: unknown) {
   return { companyId, features, builtIn, custom: rows.map((row) => shapeRole(row, features)) };
 }
 
-async function requireEditableBuiltIn(id: unknown, companyId: number) {
+async function requireEditableBuiltIn(id: unknown, companyId: string) {
   const roleId = requireUuid(id, 'role id');
   if (roleId === systemRoleId(COMPANY_ADMIN)) {
     throw fail(
@@ -314,19 +314,33 @@ async function deleteRole(
   });
 }
 
-async function builtInRoleId(tier: string, companyId: number | null, conn?: Tx): Promise<string> {
+async function restoreRole(actor: Actor, id: unknown) {
+  const role = await requireRoleInScope(actor, id, { includeDeleted: true });
+  try {
+    if (!(await companyRoleRepository.restore(role.id))) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail('CONFLICT', `Another role in this company is now called "${role.name}". Rename that one first.`);
+    }
+    throw err;
+  }
+  audit(EVENTS.ROLE_RESTORED, actor, { companyId: role.companyId, roleId: role.id, role: role.name });
+  return getRole(actor, role.id);
+}
+
+async function builtInRoleId(tier: string, companyId: string | null, conn?: Tx): Promise<string> {
   if (tier !== USER || !companyId) return systemRoleId(tier);
   const member = await companyRoleRepository.findCompanyDefault(companyId, conn);
   return member ? member.id : systemRoleId(USER);
 }
 
-async function resolveAssignableRole(actor: Actor, value: unknown, companyId: number | null): Promise<string | null> {
+async function resolveAssignableRole(actor: Actor, value: unknown, companyId: string | null): Promise<string | null> {
   if (value === null || value === undefined || value === '') return null;
   if (!companyId) throw fail('VALIDATION_ERROR', 'A platform account cannot hold a company role.');
   const roleId = requireUuid(value, 'customRoleId');
   const row = await companyRoleRepository.findInCompany(roleId, companyId);
   if (!row) throw fail('RESOURCE_NOT_FOUND', 'Role not found');
-  if (!actor.isPlatform && Number(actor.companyId) !== Number(companyId)) {
+  if (!actor.isPlatform && actor.companyId !== companyId) {
     throw fail('RESOURCE_NOT_FOUND', 'Role not found');
   }
   return row.id;
@@ -345,6 +359,7 @@ export {
   createRole,
   updateRole,
   deleteRole,
+  restoreRole,
   resolveAssignableRole,
   builtInRoleId,
 };

@@ -4,11 +4,11 @@ import { requireCompany } from './companyService';
 import { factTotals } from '../contextLayer/connectionService';
 import type { Actor } from '../../shared/types/actor';
 
-function tenantId(actor: Actor): number {
+function tenantId(actor: Actor): string {
   if (actor.isPlatform) {
     throw fail('TENANT_ACCESS_DENIED', 'A platform account has no workspace of its own. Use the platform console.');
   }
-  return actor.companyId as number;
+  return actor.companyId as string;
 }
 
 async function company(actor: Actor) {

@@ -10,8 +10,8 @@ import type { Tx } from '../../shared/db/database';
 const { ACTIVATION_TOKEN_TTL_SECONDS, APPLICATION_URL } = config.auth;
 
 async function issueActivationToken(
-  userId: number,
-  issuedBy: number | null | undefined,
+  userId: string,
+  issuedBy: string | null | undefined,
   conn?: Tx
 ): Promise<{ token: string; expiresAt: Date }> {
   await tokenRepository.retireTokens(userId, TOKEN_PURPOSE.ACTIVATION, conn);

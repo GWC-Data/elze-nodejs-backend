@@ -1,12 +1,12 @@
 interface Actor {
-  id: number;
+  id: string;
   username: string;
   email: string;
   displayName: string | null;
   role: string;
   roleScope: string;
   isPlatform: boolean;
-  companyId: number | null;
+  companyId: string | null;
   status: string;
   mustChangePassword: boolean;
   permissions: readonly string[];

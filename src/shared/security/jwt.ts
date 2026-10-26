@@ -9,8 +9,8 @@ const { JWT_ACCESS_SECRET, ACCESS_TOKEN_TTL_SECONDS } = config.auth;
 const ACCESS_TOKEN_TYPE = 'access';
 
 interface AccessTokenUser {
-  id: number | string;
-  company_id?: number | null;
+  id: string;
+  company_id?: string | null;
   role: string | null;
 }
 

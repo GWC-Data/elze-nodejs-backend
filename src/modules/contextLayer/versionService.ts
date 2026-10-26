@@ -208,7 +208,7 @@ async function requirePublishedVersion(
 async function deletePublishedVersion(
   connection: { id: string },
   versionId: string,
-  deletedBy: number | null,
+  deletedBy: string | null,
   { permanent = false }: { permanent?: boolean } = {}
 ): Promise<DeletedVersion> {
   return withTransaction(async (conn: Tx) => {
@@ -216,6 +216,12 @@ async function deletePublishedVersion(
     if (!row) throw fail('RESOURCE_NOT_FOUND', VERSION_NOT_FOUND);
     return deletedVersion(row);
   });
+}
+
+async function restorePublishedVersion(connection: { id: string }, versionId: string): Promise<DeletedVersion> {
+  const row = await versionRepository.restorePublished(connection.id, versionId);
+  if (!row) throw fail('RESOURCE_NOT_FOUND', VERSION_NOT_FOUND);
+  return deletedVersion(row);
 }
 
 async function currentDraft(connectionId: string): Promise<Version | null> {
@@ -248,6 +254,7 @@ export {
   latestPublished,
   requirePublishedVersion,
   deletePublishedVersion,
+  restorePublishedVersion,
   currentDraft,
   extractionFor,
   statusByConnection,

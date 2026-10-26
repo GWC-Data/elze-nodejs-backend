@@ -48,7 +48,7 @@ async function listSystemWithCounts(): Promise<SystemRoleRow[]> {
   );
 }
 
-async function replacePermissions(roleId: string, ids: readonly string[], actorId: number | null): Promise<void> {
+async function replacePermissions(roleId: string, ids: readonly string[], actorId: string | null): Promise<void> {
   await prisma.rolePermissions.upsert({
     where: { roleId },
     create: { roleId, permissionIds: [...ids], updatedBy: actorId },

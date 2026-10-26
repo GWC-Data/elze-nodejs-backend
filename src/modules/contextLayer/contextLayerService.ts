@@ -57,7 +57,7 @@ async function recordDraft(actor: Actor, connection: DraftTarget, patch: DraftPa
 function onConnection(connection: {
   id: string;
   name?: string | null;
-  companyId?: number | null;
+  companyId?: string | null;
 }): Record<string, unknown> {
   return {
     connectionId: connection.id,
@@ -441,6 +441,29 @@ async function deleteConnection(
   return { deleted: true, permanent };
 }
 
+async function restoreConnection(actor: Actor, id: unknown): Promise<{ restored: true }> {
+  const restored = await connections.restoreConnection(actor, id);
+  audit(EVENTS.CONTEXT_CONNECTION_RESTORED, actor, {
+    connectionId: id,
+    connectionName: restored.name,
+    companyId: restored.companyId,
+    provider: restored.provider,
+  });
+  return { restored: true };
+}
+
+async function restoreVersion(actor: Actor, id: unknown, versionId: string): Promise<{ restored: DeletedVersion }> {
+  const connection = await connections.requireConnection(actor, id, 'full');
+  const restored = await versions.restorePublishedVersion(connection, versionId);
+  audit(EVENTS.CONTEXT_VERSION_RESTORED, actor, {
+    ...onConnection(connection),
+    versionId: restored.id,
+    name: restored.name,
+    version: restored.label,
+  });
+  return { restored };
+}
+
 const listCompanyPublished = publish.listCompanyPublished;
 const listPublishedConnections = connections.listPublishedConnections;
 const listPublishedVersionOptions = connections.listPublishedVersionOptions;
@@ -465,6 +488,7 @@ export {
   versionState,
   createVersion,
   deleteVersion,
+  restoreVersion,
   trackDraft,
   contextProfile,
   saveContextProfile,
@@ -484,4 +508,5 @@ export {
   publishContext,
   selectDatasets,
   deleteConnection,
+  restoreConnection,
 };

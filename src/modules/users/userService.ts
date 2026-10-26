@@ -1,6 +1,7 @@
 import config from '../../config';
 import * as userRepository from './userRepository';
 import { fail } from '../../shared/errors/AppError';
+import { requireUuid } from '../../shared/validation/commonValidator';
 import { publicUser, userListItem } from './userSerializer';
 import {
   resolveTargetCompany,
@@ -19,13 +20,15 @@ import { audit, EVENTS } from '../audit/auditService';
 import { USER, scopeOfTier } from '../catalogue/roleTiers';
 import { effectiveFeatures, featureKeys, featureKeysOf } from '../catalogue/catalogueService';
 import { USER_STATUS, USER_STATUSES } from '../../shared/db/statuses';
+import { sqlState } from '../../shared/db/dbError';
+import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
 import type { Actor } from '../../shared/types/actor';
 import type { Tx } from '../../shared/db/database';
 import type { ListQuery } from '../../shared/validation/listValidator';
 
 const { withTransaction } = config.database;
 
-async function findActor(id: number) {
+async function findActor(id: string) {
   const row = await userRepository.findActorRow(id);
   if (!row) return null;
   const scopes: Record<string, unknown[]> = {};
@@ -42,11 +45,11 @@ async function findActor(id: number) {
   };
 }
 
-async function requireUserInScope(actor: Actor, id: number) {
+async function requireUserInScope(actor: Actor, id: string) {
   return requireVisibleUser(actor, id);
 }
 
-async function requireVisibleUser(actor: Actor, id: number, { includeDeleted = false } = {}) {
+async function requireVisibleUser(actor: Actor, id: string, { includeDeleted = false } = {}) {
   const user = await userRepository.findInScope(actor, id, { includeDeleted });
   if (!user) throw fail('RESOURCE_NOT_FOUND', 'User not found');
   if (scopeOfTier(user.role) === 'platform' && !seesPlatformAccounts(actor)) {
@@ -55,7 +58,7 @@ async function requireVisibleUser(actor: Actor, id: number, { includeDeleted = f
   return user;
 }
 
-async function requireManageable(actor: Actor, id: number, { includeDeleted = false } = {}) {
+async function requireManageable(actor: Actor, id: string, { includeDeleted = false } = {}) {
   const target = await requireVisibleUser(actor, id, { includeDeleted });
   assertCanManageUser(actor, target);
   return target;
@@ -70,12 +73,10 @@ async function listUsers(
 
   if (actor.isPlatform) {
     if (companyId !== undefined && companyId !== null && companyId !== '') {
-      const id = Number(companyId);
-      if (!Number.isInteger(id) || id < 1) throw fail('VALIDATION_ERROR', 'companyId must be a positive integer.');
-      filter.companyId = id;
+      filter.companyId = requireUuid(companyId, 'companyId');
     }
   } else {
-    filter.companyId = actor.companyId as number;
+    filter.companyId = actor.companyId as string;
   }
   if (actor.isPlatform && !seesPlatformAccounts(actor)) filter.companyAccountsOnly = true;
   if (role) {
@@ -93,7 +94,7 @@ async function listUsers(
   return userRepository.listPage(filter, list, (row) => userListItem(row, actor.isPlatform));
 }
 
-async function currentUser(id: number) {
+async function currentUser(id: string) {
   return publicUser(await userRepository.findById(id));
 }
 
@@ -154,7 +155,7 @@ async function createUser(
 
 async function updateUser(
   actor: Actor,
-  id: number,
+  id: string,
   { role, customRoleId, displayName }: { role?: unknown; customRoleId?: unknown; displayName?: unknown }
 ) {
   const target = await requireManageable(actor, id);
@@ -203,7 +204,7 @@ async function updateUser(
   return currentUser(id);
 }
 
-async function deactivateUser(actor: Actor, id: number) {
+async function deactivateUser(actor: Actor, id: string) {
   const target = await requireManageable(actor, id);
 
   if (target.status === USER_STATUS.DISABLED) {
@@ -217,7 +218,7 @@ async function deactivateUser(actor: Actor, id: number) {
   return currentUser(id);
 }
 
-async function activateUser(actor: Actor, id: number) {
+async function activateUser(actor: Actor, id: string) {
   const target = await requireManageable(actor, id);
 
   if (target.status === USER_STATUS.ACTIVE) throw fail('CONFLICT', 'That account is already active.');
@@ -230,7 +231,7 @@ async function activateUser(actor: Actor, id: number) {
   return currentUser(id);
 }
 
-async function reissueActivation(actor: Actor, id: number) {
+async function reissueActivation(actor: Actor, id: string) {
   const target = await requireManageable(actor, id);
 
   if (target.status === USER_STATUS.DISABLED) {
@@ -253,7 +254,7 @@ async function reissueActivation(actor: Actor, id: number) {
 
 async function deleteUser(
   actor: Actor,
-  id: number,
+  id: string,
   { permanent = false }: { permanent?: boolean } = {}
 ): Promise<void> {
   if (permanent) assertPermission(actor, 'delete.permanent');
@@ -265,6 +266,24 @@ async function deleteUser(
     await revokeAllForUser(id, 'account_deleted');
   }
   audit(EVENTS.USER_DELETED, actor, { userId: id, targetUsername: target.username, soft: !permanent, permanent });
+}
+
+async function restoreUser(actor: Actor, id: string) {
+  const target = await requireManageable(actor, id, { includeDeleted: true });
+  const status = target.has_password ? USER_STATUS.DISABLED : USER_STATUS.PENDING;
+  try {
+    if (!(await userRepository.restore(id, status))) throw fail('RESOURCE_NOT_FOUND', 'User not found');
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail(
+        'CONFLICT',
+        `Another account now uses the username or email of ${target.username}. Change that one first.`
+      );
+    }
+    throw err;
+  }
+  audit(EVENTS.USER_RESTORED, actor, { userId: id, targetUsername: target.username, companyId: target.company_id });
+  return currentUser(id);
 }
 
 const USER_SORTS = userRepository.USER_SORTS;
@@ -285,4 +304,5 @@ export {
   activateUser,
   reissueActivation,
   deleteUser,
+  restoreUser,
 };

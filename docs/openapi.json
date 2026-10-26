@@ -3,7 +3,7 @@
   "info": {
     "title": "Elze Backend API",
     "version": "1.0.0",
-    "description": "REST API of the Elze Node.js backend: authentication, platform administration, company workspaces, people and groups, roles and permissions, dashboard access, the audit trail, the Metadata Lakehouse (context layer) and the BI dashboard engine.\n\n**Responses.** Every JSON response uses one envelope. Success: `{ \"success\": true, \"data\": ... }`. Failure: `{ \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"...\", \"details\": ... } }`. The `code` is stable and meant for programs; the `message` is meant for people. 5xx messages are generic unless the code is one the API chooses to disclose.\n\n**Signing in.** `POST /api/auth/login` sets three cookies: `da_access` (short-lived access token, HTTP-only, sent on every request), `da_refresh` (long-lived refresh token, HTTP-only, only sent to `/api/auth`) and `da_csrf` (readable by the web app). There is no bearer header.\n\n**CSRF.** Every request that changes something (POST, PUT, PATCH, DELETE) on a signed-in route must send the `x-csrf-token` header with the value of the `da_csrf` cookie.\n\n**Permissions.** Each operation lists the permission it requires in `x-permissions`. A company account holds a permission through its role, limited by the features switched on for its company; the platform owner holds every permission. `x-platform-only` marks routes only the platform owner can call.\n\n**Lists.** Paged lists accept `page`, `pageSize` (at most 100), `search`, `sort` and `dir`, and return the items with the total count.",
+    "description": "REST API of the Elze Node.js backend: authentication, platform administration, company workspaces, people and groups, roles and permissions, dashboard access, the audit trail, the Metadata Lakehouse (context layer) and the BI dashboard engine.\n\n**Responses.** Every JSON response uses one envelope. Success: `{ \"success\": true, \"data\": ... }`. Failure: `{ \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"...\", \"details\": ... } }`. The `code` is stable and meant for programs; the `message` is meant for people. 5xx messages are generic unless the code is one the API chooses to disclose.\n\n**Signing in.** `POST /api/auth/login` sets three cookies: `da_access` (short-lived access token, HTTP-only, sent on every request), `da_refresh` (long-lived refresh token, HTTP-only, only sent to `/api/auth`) and `da_csrf` (readable by the web app). There is no bearer header.\n\n**CSRF.** Every request that changes something (POST, PUT, PATCH, DELETE) on a signed-in route must send the `x-csrf-token` header with the value of the `da_csrf` cookie.\n\n**Origin.** The API only serves the web app at `APPLICATION_URL`. A request whose `Origin` header (or, without one, the origin of its `Referer`) is anything else - another port, host or scheme - is refused with 403 `ORIGIN_NOT_ALLOWED`. Requests without either header (scripts, server-to-server calls) are not affected, and `/api/health` is always open. Outside production the backend's own address is also accepted, so this page keeps working.\n\n**Permissions.** Each operation lists the permission it requires in `x-permissions`. A company account holds a permission through its role, limited by the features switched on for its company; the platform owner holds every permission. `x-platform-only` marks routes only the platform owner can call.\n\n**Lists.** Paged lists accept `page`, `pageSize` (at most 100), `search`, `sort` and `dir`, and return the items with the total count.",
     "contact": {
       "name": "Elze backend team"
     }
@@ -78,6 +78,10 @@
     {
       "name": "Agent gate",
       "description": "Authorization check used by the reverse proxy in front of the agent service."
+    },
+    {
+      "name": "Deleted items",
+      "description": "Soft-deleted records in one list, with who deleted them and when; recover them or remove them for good."
     }
   ],
   "paths": {
@@ -1175,10 +1179,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1245,10 +1249,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1328,10 +1332,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -1425,10 +1429,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1500,10 +1504,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -1581,10 +1585,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -1661,10 +1665,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1731,10 +1735,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Company id (positive integer). A non-integer value gives 400 `VALIDATION_ERROR`.",
+            "description": "Company id (UUID). Any other value gives 400 `VALIDATION_ERROR`.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1909,7 +1913,7 @@
         ],
         "operationId": "listAssignableRoles",
         "summary": "Roles an account may be given",
-        "description": "The built-in roles to offer when creating or editing an account. With `companyId`, an account of that company: Company admin and Member only, never a platform role. Without it, a platform account: Platform admin, offered only to the platform owner (an empty list for platform admins). SUPER_ADMIN is never offered: there is only one platform owner. Company roles a company created are listed by `GET /api/roles`. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `user.create` permission (403 `INSUFFICIENT_PERMISSION`). Errors: 400 `VALIDATION_ERROR` (companyId not a positive integer). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
+        "description": "The built-in roles to offer when creating or editing an account. With `companyId`, an account of that company: Company admin and Member only, never a platform role. Without it, a platform account: Platform admin, offered only to the platform owner (an empty list for platform admins). SUPER_ADMIN is never offered: there is only one platform owner. Company roles a company created are listed by `GET /api/roles`. Platform administrators only: company accounts get 403 `TENANT_ACCESS_DENIED`. Requires the `user.create` permission (403 `INSUFFICIENT_PERMISSION`). Errors: 400 `VALIDATION_ERROR` (companyId not a UUID). Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded. Also fails with 403 `PASSWORD_CHANGE_REQUIRED` while the account must change its password.",
         "parameters": [
           {
             "name": "companyId",
@@ -1917,8 +1921,8 @@
             "required": false,
             "description": "The company the account belongs to. Leave it out for a platform account.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -2929,8 +2933,8 @@
             "required": false,
             "description": "Platform owner only: limit to one company. Ignored for company accounts.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3095,10 +3099,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3164,10 +3168,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3243,10 +3247,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -3324,10 +3328,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3398,10 +3402,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3472,10 +3476,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3548,10 +3552,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3621,10 +3625,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3690,10 +3694,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3770,10 +3774,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3839,10 +3843,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3958,7 +3962,7 @@
         ],
         "operationId": "createGroup",
         "summary": "Create a group",
-        "description": "Creates a group with its members. 400 VALIDATION_ERROR for a missing or too long name, userIds not an array of positive integers or naming accounts outside the company, or companyId missing for the platform owner; 404 RESOURCE_NOT_FOUND for an unknown company; 409 CONFLICT when the name is taken in the company.\n\nRequires permission `group.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Creates a group with its members. 400 VALIDATION_ERROR for a missing or too long name, userIds not an array of UUIDs or naming accounts outside the company, or companyId missing for the platform owner; 404 RESOURCE_NOT_FOUND for an unknown company; 409 CONFLICT when the name is taken in the company.\n\nRequires permission `group.create` (403 INSUFFICIENT_PERMISSION, or FEATURE_NOT_ENABLED when the permission's feature is off for the company; the platform owner passes every permission check).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [
           "group.create"
         ],
@@ -4044,10 +4048,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4113,10 +4117,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4195,10 +4199,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -4275,10 +4279,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4348,10 +4352,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4529,10 +4533,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4611,10 +4615,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4690,10 +4694,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4773,10 +4777,10 @@
             "name": "userId",
             "in": "path",
             "required": true,
-            "description": "Account id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Account id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4861,10 +4865,10 @@
             "name": "userId",
             "in": "path",
             "required": true,
-            "description": "Account id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Account id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4943,10 +4947,10 @@
             "name": "groupId",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5033,10 +5037,10 @@
             "name": "groupId",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5103,10 +5107,10 @@
             "name": "groupId",
             "in": "path",
             "required": true,
-            "description": "Group id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "Group id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5310,10 +5314,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5380,10 +5384,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5610,10 +5614,10 @@
             "name": "companyId",
             "in": "query",
             "required": false,
-            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a positive integer; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
+            "description": "Company to act on. Required for the platform owner (400 VALIDATION_ERROR when missing or not a UUID; 404 RESOURCE_NOT_FOUND when the company does not exist). Ignored for company accounts, which always act on their own company.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -7664,7 +7668,7 @@
         ],
         "operationId": "getContextGlossary",
         "summary": "Business glossary (Understand step)",
-        "description": "Glossary built from the table, metric and glossary facts of the latest extraction run (or a published version). Each fact becomes a term typed Entity (table), Metric (metric), Dimension (glossary fact with payload.kind \"dimension\") or Term (other glossary facts), sorted by type then name. \"stats\" always describes all terms; \"matched\" and \"terms\" honour filter and search. search matches the term, its definition and appliesTo (case-insensitive). Default page size is 10 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Glossary built from the table, metric and glossary facts of the latest extraction run (or a published version). Each fact becomes a term typed Entity (table), Metric (metric), Dimension (glossary fact with payload.kind \"dimension\") or Term (other glossary facts), sorted by type then name. \"stats\" always describes all terms; \"matched\" and \"terms\" honour filter and search. search matches the term, its definition and appliesTo (case-insensitive). Default page size is 10 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7771,7 +7775,7 @@
         ],
         "operationId": "listContextObjects",
         "summary": "List facts (context objects)",
-        "description": "Pages through the raw facts the extraction agent recorded for the latest extraction run of this connection (or for a published version's snapshot), ordered by object type, qualified name and id. Filters: type, minConfidence and search (matches the qualified name or the payload text, first 100 characters used). Review status is not filterable here. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Pages through the raw facts the extraction agent recorded for the latest extraction run of this connection (or for a published version's snapshot), ordered by object type, qualified name and id. Filters: type, minConfidence and search (matches the qualified name or the payload text, first 100 characters used). Review status is not filterable here. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7885,7 +7889,7 @@
         ],
         "operationId": "listContextFactsByTable",
         "summary": "Facts grouped per table",
-        "description": "Groups the facts of the latest extraction run (or a published version) by table: each table fact with its column_stats facts and the other facts that mention the table by name (\"related\"; a fact can appear under several tables). Facts tied to no table are returned in \"unattached\" (not paged). Tables are sorted by name and paged (default page size 10, max 100). search (first 100 characters) keeps tables where the table, a column or a related fact matches; review=pending keeps only pending facts and tables that are pending or have pending columns. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Groups the facts of the latest extraction run (or a published version) by table: each table fact with its column_stats facts and the other facts that mention the table by name (\"related\"; a fact can appear under several tables). Facts tied to no table are returned in \"unattached\" (not paged). Tables are sorted by name and paged (default page size 10, max 100). search (first 100 characters) keeps tables where the table, a column or a related fact matches; review=pending keeps only pending facts and tables that are pending or have pending columns. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -7987,7 +7991,7 @@
         ],
         "operationId": "getContextModelGraph",
         "summary": "Data model graph (Model step)",
-        "description": "Builds the relationship graph from the facts of the latest extraction run (or a published version): one node per table fact (columns from the table payload and column_stats facts), one edge per join fact, plus inferred edges for declared foreign keys (confidence 1), columns named like another table's primary key (0.8) and same-named non-generic columns (0.5) between tables not already joined. status is \"pending\" when no facts exist yet. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Builds the relationship graph from the facts of the latest extraction run (or a published version): one node per table fact (columns from the table payload and column_stats facts), one edge per join fact, plus inferred edges for declared foreign keys (confidence 1), columns named like another table's primary key (0.8) and same-named non-generic columns (0.5) between tables not already joined. status is \"pending\" when no facts exist yet. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8065,7 +8069,7 @@
         ],
         "operationId": "listReviewQueue",
         "summary": "Review queue",
-        "description": "Pages through the facts to review for the latest extraction run (or, read-only, a published version where everything is approved), ordered by object type, qualified name and id. Filters: type, status, minConfidence, search (qualified name or payload text, first 100 characters used). Also reports how many pending facts have confidence of at least 0.9 (respecting the type filter only), for the \"approve high-confidence\" action. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Pages through the facts to review for the latest extraction run (or, read-only, a published version where everything is approved), ordered by object type, qualified name and id. Filters: type, status, minConfidence, search (qualified name or payload text, first 100 characters used). Also reports how many pending facts have confidence of at least 0.9 (respecting the type filter only), for the \"approve high-confidence\" action. Default page size is 25 (max 100). Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8474,7 +8478,7 @@
         ],
         "operationId": "getPublishSummary",
         "summary": "Publish step summary",
-        "description": "What publishing would contain: counts of approved and pending facts, datasets, tables and facts per kind, which content sections are included, the suggested name and previous version number, the open draft, and blockers/warnings (\"nothing-approved\" blocker, \"pending-review\" warning). With ?version= it describes that published version instead: no blockers, ready is false, draft is null. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "What publishing would contain: counts of approved and pending facts, datasets, tables and facts per kind, which content sections are included, the suggested name and previous version number, the open draft, and blockers/warnings (\"nothing-approved\" blocker, \"pending-review\" warning). With ?version= it describes that published version instead: no blockers, ready is false, draft is null. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8553,7 +8557,7 @@
         ],
         "operationId": "validateContextPublish",
         "summary": "Check whether the context can be published",
-        "description": "Runs the publish summary checks for the current draft and splits them into blockers and warnings. valid is false only when a blocker exists (nothing approved yet). No request body; nothing is written. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Runs the publish summary checks for the current draft and splits them into blockers and warnings. valid is false only when a blocker exists (nothing approved yet). No request body; nothing is written. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8621,7 +8625,7 @@
         ],
         "operationId": "listContextPublications",
         "summary": "List published versions of the context",
-        "description": "Every published version of this connection, newest first. Not paged. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Every published version of this connection, newest first. Not paged. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8772,7 +8776,7 @@
         ],
         "operationId": "getContextSharing",
         "summary": "Sharing state of a context",
-        "description": "Owner, general access, the context access levels (from the access_control.access_levels catalogue), the user and group grants, and the caller's own level and whether they may share. Anyone who can see the context may read this. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant. A context the caller cannot see is reported as 404.",
+        "description": "Owner, general access, the context access levels (from the access_control.access_levels catalogue), the user and group grants, and the caller's own level and whether they may share. Anyone who can see the context may read this. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -8912,7 +8916,7 @@
         ],
         "operationId": "setContextGeneralAccess",
         "summary": "Set general access",
-        "description": "Kept for compatibility: the only accepted value is \"restricted\" (only the owner, admins and the people and groups it is shared with can see the context). \"company\" is refused with 400 VALIDATION_ERROR - a context can no longer be opened to the whole company. Setting the current value is a no-op. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "\"restricted\": only the owner, admins and the people and groups it is shared with can see the context. \"company\": everyone in the context's company can also see it, with view access; editing and full access still need a person or group grant. A new context starts restricted. Any other value is 400 VALIDATION_ERROR. Setting the current value is a no-op. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.update"
         ],
@@ -9014,10 +9018,10 @@
             "name": "userId",
             "in": "path",
             "required": true,
-            "description": "User id (positive integer). Anything else returns 400.",
+            "description": "User id (UUID). Anything else returns 400.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9104,10 +9108,10 @@
             "name": "userId",
             "in": "path",
             "required": true,
-            "description": "User id (positive integer). Anything else returns 400.",
+            "description": "User id (UUID). Anything else returns 400.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9257,10 +9261,10 @@
             "name": "groupId",
             "in": "path",
             "required": true,
-            "description": "Group id (positive integer). Anything else returns 400.",
+            "description": "Group id (UUID). Anything else returns 400.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9347,10 +9351,10 @@
             "name": "groupId",
             "in": "path",
             "required": true,
-            "description": "Group id (positive integer). Anything else returns 400.",
+            "description": "Group id (UUID). Anything else returns 400.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9557,8 +9561,8 @@
             "required": false,
             "description": "Platform owner only: limit to one company. Ignored for company accounts.",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -9725,10 +9729,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9795,10 +9799,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -9875,10 +9879,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -9957,10 +9961,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10032,10 +10036,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10107,10 +10111,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10184,10 +10188,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10258,10 +10262,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10328,10 +10332,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10409,10 +10413,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10479,10 +10483,10 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "description": "User id. Must be a positive integer (400 VALIDATION_ERROR otherwise).",
+            "description": "User id. Must be a UUID (400 VALIDATION_ERROR otherwise).",
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -10537,6 +10541,275 @@
           }
         },
         "x-platform-only": true
+      }
+    },
+    "/api/deleted-items": {
+      "get": {
+        "tags": [
+          "Deleted items"
+        ],
+        "operationId": "listDeletedItems",
+        "summary": "List deleted items",
+        "description": "Returns one page of soft-deleted records with when and by whom they were deleted. A company admin sees the deleted members, groups, custom roles, contexts and published context versions of their own company. A platform admin also sees deleted companies and the items of every company, but never platform accounts; the platform owner sees those too. Items deleted together with their company (and accounts of a deleted company) are not listed on their own: they come back when the company is recovered. Versions of a deleted context come back with the context. Dashboards are hidden and never listed. Defaults: pageSize 15 (max 100), sort deletedAt, dir desc. Search matches the name, detail, context, company and the name of whoever deleted it.\n\nRequires permission `delete.permanent` (held by company admins, platform admins and the platform owner, never by members; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "delete.permanent"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Sort column.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "deletedAt",
+                "name",
+                "type",
+                "company",
+                "deletedBy"
+              ],
+              "default": "deletedAt"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/SortDirection"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Only this kind of record.",
+            "schema": {
+              "$ref": "#/components/schemas/DeletedItemType"
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts only: limit to one company. Ignored for company accounts.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DeletedItemPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/deleted-items/{type}/{id}/restore": {
+      "post": {
+        "tags": [
+          "Deleted items"
+        ],
+        "operationId": "restoreDeletedItem",
+        "summary": "Recover a deleted item",
+        "description": "Puts a soft-deleted record back where it was deleted from and records a `*_restored` audit event. Things that can be switched off come back switched off: an account comes back deactivated (or invited, if it never chose a password), a group comes back paused and a company comes back suspended, so access returns only when an admin turns it back on. A company brings back the groups, roles and contexts that were deleted together with it. 409 CONFLICT when its name, username or email has since been taken by another record. Also needs the permission that deletes that kind of record (`user.delete`, `group.delete`, `role.delete`, `company.delete` or `context.delete`).\n\nRequires permission `delete.permanent` (held by company admins, platform admins and the platform owner, never by members; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "delete.permanent"
+        ],
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "description": "What kind of record it is (400 VALIDATION_ERROR for anything else).",
+            "schema": {
+              "$ref": "#/components/schemas/DeletedItemType"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The record id as listed: a number for users, groups and companies, a uuid for roles, contexts and versions. An id that is not among the caller's deleted items is 404 RESOURCE_NOT_FOUND.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DeletedItemRestored"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/deleted-items/{type}/{id}": {
+      "delete": {
+        "tags": [
+          "Deleted items"
+        ],
+        "operationId": "purgeDeletedItem",
+        "summary": "Delete a deleted item permanently",
+        "description": "Removes a soft-deleted record from the database for good, together with what depends on it (a company takes its accounts, groups, roles and contexts with it). It cannot be recovered afterwards. Same as the record's own DELETE with `?permanent=true`, and audited the same way. Also needs the permission that deletes that kind of record.\n\nRequires permission `delete.permanent` (held by company admins, platform admins and the platform owner, never by members; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "delete.permanent"
+        ],
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "description": "What kind of record it is (400 VALIDATION_ERROR for anything else).",
+            "schema": {
+              "$ref": "#/components/schemas/DeletedItemType"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The record id as listed: a number for users, groups and companies, a uuid for roles, contexts and versions. An id that is not among the caller's deleted items is 404 RESOURCE_NOT_FOUND.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DeletedItemPurged"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
       }
     }
   },
@@ -10639,7 +10912,7 @@
         }
       },
       "Forbidden": {
-        "description": "Signed in but not allowed. Codes: INSUFFICIENT_PERMISSION, TENANT_ACCESS_DENIED, FEATURE_NOT_ENABLED, CSRF_TOKEN_INVALID, PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED.",
+        "description": "Signed in but not allowed. Codes: INSUFFICIENT_PERMISSION, TENANT_ACCESS_DENIED, FEATURE_NOT_ENABLED, CSRF_TOKEN_INVALID, ORIGIN_NOT_ALLOWED, PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED.",
         "content": {
           "application/json": {
             "schema": {
@@ -10958,13 +11231,15 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "companyId": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "Null for platform accounts."
           },
           "companyName": {
@@ -11521,7 +11796,8 @@
         ],
         "properties": {
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "features": {
             "type": "array",
@@ -11558,7 +11834,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -11621,7 +11898,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -11696,7 +11974,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -11751,7 +12030,8 @@
         ],
         "properties": {
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "dashboardId": {
             "type": "string"
@@ -12144,7 +12424,8 @@
             "description": "Optional; derived from the title plus a random suffix when omitted."
           },
           "companyId": {
-            "type": "integer",
+            "type": "string",
+            "format": "uuid",
             "description": "Platform accounts only: the owning company. Ignored for company accounts (their own company is used)."
           },
           "spec": {
@@ -12201,9 +12482,10 @@
           },
           "companyId": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "Null for a platform template."
           },
           "accessLevel": {
@@ -12624,7 +12906,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -12697,7 +12980,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -12811,13 +13095,15 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "companyId": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "Null for platform accounts."
           },
           "companyName": {
@@ -12966,8 +13252,8 @@
             "description": "Optional custom company role, used only when role is USER. Must belong to the target company (404 RESOURCE_NOT_FOUND otherwise)."
           },
           "companyId": {
-            "type": "integer",
-            "minimum": 1,
+            "type": "string",
+            "format": "uuid",
             "description": "Target company. Required when the platform owner creates a company account; ignored for company callers and for SUPER_ADMIN accounts."
           }
         }
@@ -13057,7 +13343,8 @@
             ]
           },
           "groupId": {
-            "type": "integer",
+            "type": "string",
+            "format": "uuid",
             "description": "Present only when origin is group."
           },
           "groupName": {
@@ -13140,7 +13427,8 @@
         ],
         "properties": {
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "role": {
             "type": "object",
@@ -13242,7 +13530,8 @@
         ],
         "properties": {
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "scopes": {
             "type": "object",
@@ -13292,10 +13581,12 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "companyName": {
             "type": "string"
@@ -13331,7 +13622,8 @@
               "userIds": {
                 "type": "array",
                 "items": {
-                  "type": "integer"
+                  "type": "string",
+                  "format": "uuid"
                 },
                 "description": "Ids of the member accounts."
               }
@@ -13358,15 +13650,15 @@
           "userIds": {
             "type": "array",
             "items": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             },
             "default": [],
             "description": "Member account ids; each must belong to the group company."
           },
           "companyId": {
-            "type": "integer",
-            "minimum": 1,
+            "type": "string",
+            "format": "uuid",
             "description": "Required for the platform owner; ignored for company accounts."
           }
         }
@@ -13387,8 +13679,8 @@
           "userIds": {
             "type": "array",
             "items": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "format": "uuid"
             },
             "description": "When present, replaces the whole membership. Each id must belong to the group company."
           }
@@ -13405,7 +13697,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -13582,7 +13875,8 @@
         ],
         "properties": {
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -13615,7 +13909,8 @@
         ],
         "properties": {
           "groupId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "groupName": {
             "type": "string"
@@ -13674,7 +13969,8 @@
             ],
             "properties": {
               "userId": {
-                "type": "integer"
+                "type": "string",
+                "format": "uuid"
               },
               "level": {
                 "type": [
@@ -13728,7 +14024,8 @@
             "type": "string"
           },
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "level": {
             "type": "string",
@@ -13755,7 +14052,8 @@
             "type": "string"
           },
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "revoked": {
             "type": "boolean",
@@ -13776,7 +14074,8 @@
             "type": "string"
           },
           "groupId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "level": {
             "type": "string",
@@ -13803,7 +14102,8 @@
             "type": "string"
           },
           "groupId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "revoked": {
             "type": "boolean",
@@ -13930,13 +14230,16 @@
             "description": "Username of the actor, or a label such as 'anonymous'."
           },
           "actorId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "actorCompanyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "companyId": {
-            "type": "integer",
+            "type": "string",
+            "format": "uuid",
             "description": "Company the entry concerns."
           },
           "companyName": {
@@ -13981,7 +14284,8 @@
         ],
         "properties": {
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "features": {
             "type": "array",
@@ -14150,7 +14454,8 @@
         ],
         "properties": {
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "features": {
             "type": "array",
@@ -14205,8 +14510,8 @@
             "description": "Permission ids. The matching `<area>.read` permission is added automatically. Platform-only or admin-only permissions and permissions the caller does not hold are rejected (400); permissions of disabled features with 403 FEATURE_NOT_ENABLED."
           },
           "companyId": {
-            "type": "integer",
-            "minimum": 1,
+            "type": "string",
+            "format": "uuid",
             "description": "Required for the platform owner; ignored for company accounts."
           }
         }
@@ -14253,8 +14558,8 @@
             "description": "New permission ids of the Member role; same rules as for custom roles. Permissions of currently disabled features are kept."
           },
           "companyId": {
-            "type": "integer",
-            "minimum": 1,
+            "type": "string",
+            "format": "uuid",
             "description": "Required for the platform owner; ignored for company accounts."
           }
         }
@@ -14366,7 +14671,8 @@
             ],
             "properties": {
               "id": {
-                "type": "integer"
+                "type": "string",
+                "format": "uuid"
               },
               "name": {
                 "type": [
@@ -14387,7 +14693,8 @@
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted"
+              "restricted",
+              "company"
             ],
             "description": "`company` gives every user of the company view access."
           }
@@ -14454,7 +14761,8 @@
             "format": "uuid"
           },
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "provider": {
             "type": "string",
@@ -14777,9 +15085,10 @@
           },
           "companyId": {
             "type": [
-              "integer",
+              "string",
               "null"
-            ]
+            ],
+            "format": "uuid"
           },
           "companyName": {
             "type": [
@@ -15119,8 +15428,8 @@
             "description": "How many datasets to list in the response. Defaults to 20 when omitted or empty."
           },
           "companyId": {
-            "type": "integer",
-            "minimum": 1,
+            "type": "string",
+            "format": "uuid",
             "description": "Company the connection belongs to. Required for platform accounts; ignored for company accounts (their own company is used)."
           }
         }
@@ -15291,9 +15600,10 @@
           },
           "createdBy": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "User id of the first author."
           },
           "createdAt": {
@@ -15770,9 +16080,10 @@
           },
           "createdBy": {
             "type": [
-              "integer",
+              "string",
               "null"
-            ]
+            ],
+            "format": "uuid"
           },
           "createdAt": {
             "type": "string",
@@ -15784,9 +16095,10 @@
           },
           "publishedBy": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "User id of the publisher."
           },
           "publishedAt": {
@@ -16949,9 +17261,10 @@
           },
           "createdBy": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "User id."
           },
           "createdAt": {
@@ -16964,9 +17277,10 @@
           },
           "publishedBy": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "User id."
           },
           "publishedAt": {
@@ -17126,9 +17440,10 @@
                   },
                   "publishedBy": {
                     "type": [
-                      "integer",
+                      "string",
                       "null"
                     ],
+                    "format": "uuid",
                     "description": "User id."
                   },
                   "objectCount": {
@@ -17287,9 +17602,10 @@
           },
           "publishedBy": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "User id."
           },
           "publishedAt": {
@@ -17483,7 +17799,8 @@
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted"
+              "restricted",
+              "company"
             ]
           }
         }
@@ -17511,7 +17828,8 @@
             "format": "uuid"
           },
           "companyId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "provider": {
             "type": "string",
@@ -17621,7 +17939,8 @@
         ],
         "properties": {
           "id": {
-            "type": "integer",
+            "type": "string",
+            "format": "uuid",
             "description": "User id."
           },
           "name": {
@@ -17647,7 +17966,8 @@
         ],
         "properties": {
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -17692,7 +18012,8 @@
         ],
         "properties": {
           "groupId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -17742,9 +18063,10 @@
           },
           "generalAccess": {
             "type": "string",
-            "description": "Always `restricted`: only the owner, admins and the people and groups it is shared with can see it.",
+            "description": "`restricted`: only the owner, admins and the people and groups it is shared with can see it. `company`: everyone in the company can also view it.",
             "enum": [
-              "restricted"
+              "restricted",
+              "company"
             ]
           },
           "levels": {
@@ -17812,7 +18134,8 @@
         ],
         "properties": {
           "userId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "username": {
             "type": "string"
@@ -17837,7 +18160,8 @@
         ],
         "properties": {
           "groupId": {
-            "type": "integer"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "type": "string"
@@ -17856,7 +18180,8 @@
           "generalAccess": {
             "type": "string",
             "enum": [
-              "restricted"
+              "restricted",
+              "company"
             ]
           }
         }
@@ -17888,9 +18213,10 @@
         "properties": {
           "companyId": {
             "type": [
-              "integer",
+              "string",
               "null"
             ],
+            "format": "uuid",
             "description": "The company asked about, or null for a platform account."
           },
           "roles": {
@@ -17932,6 +18258,163 @@
                 }
               }
             }
+          }
+        }
+      },
+      "DeletedItemType": {
+        "type": "string",
+        "enum": [
+          "user",
+          "group",
+          "role",
+          "company",
+          "context",
+          "version"
+        ],
+        "description": "`user` an account, `group` a group, `role` a custom company role, `company` a company (platform only), `context` a Metadata Lakehouse context (connection), `version` a published version of a context."
+      },
+      "DeletedItem": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "name",
+          "detail",
+          "companyId",
+          "companyName",
+          "parent",
+          "deletedAt",
+          "deletedBy"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/DeletedItemType"
+          },
+          "id": {
+            "type": "string",
+            "description": "Record id, as text."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (an account shows its full name, or its username)."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Email for an account, slug for a company, description for a role, provider for a context, version label (v3) for a version."
+          },
+          "companyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The company it belonged to; null for a platform account."
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "For a version: the context it belongs to. Null otherwise.",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "deletedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deletedBy": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Who deleted it. `name` is null when that account has since been removed for good.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "DeletedItemPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeletedItem"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total number of matching deleted items."
+          }
+        }
+      },
+      "DeletedItemRestored": {
+        "type": "object",
+        "required": [
+          "restored",
+          "item"
+        ],
+        "properties": {
+          "restored": {
+            "type": "boolean",
+            "const": true
+          },
+          "item": {
+            "$ref": "#/components/schemas/DeletedItem"
+          }
+        }
+      },
+      "DeletedItemPurged": {
+        "type": "object",
+        "required": [
+          "deleted",
+          "permanent",
+          "item"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "const": true
+          },
+          "permanent": {
+            "type": "boolean",
+            "const": true
+          },
+          "item": {
+            "$ref": "#/components/schemas/DeletedItem"
           }
         }
       }

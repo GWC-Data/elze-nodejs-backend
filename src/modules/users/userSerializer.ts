@@ -4,7 +4,7 @@ import type { UserListRow, UserRow } from './userRepository';
 type UserSource = UserRow & { companyName?: string | null };
 
 interface UserListItem {
-  id: number;
+  id: string;
   username: string;
   email: string;
   role: string | null;

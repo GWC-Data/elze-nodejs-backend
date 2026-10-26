@@ -20,25 +20,28 @@ vi.mock('../../src/modules/catalogue/catalogueRepository', () => ({ loadAll: vi.
 
 const ALL_FEATURES = ['metadata_lakehouse', 'agents', 'context_layer'];
 
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
 function userRow(overrides: Record<string, unknown> = {}) {
   return {
-    id: 10,
+    id: uuid(10),
     username: 'ada',
     email: 'ada@example.com',
     display_name: 'Ada',
     role: 'USER',
-    company_id: 1,
+    company_id: uuid(1),
     status: 'active',
     must_change_password: false,
     ...overrides,
   };
 }
 
-const platformOwner = () => buildActor(userRow({ id: 1, role: 'SUPER_ADMIN', company_id: null }), []);
-const platformAdmin = () => buildActor(userRow({ id: 3, role: 'PLATFORM_ADMIN', company_id: null }), ['user.read']);
-const companyAdmin = (companyId = 1) =>
+const platformOwner = () => buildActor(userRow({ id: uuid(1), role: 'SUPER_ADMIN', company_id: null }), []);
+const platformAdmin = () =>
+  buildActor(userRow({ id: uuid(3), role: 'PLATFORM_ADMIN', company_id: null }), ['user.read']);
+const companyAdmin = (companyId = uuid(1)) =>
   buildActor(
-    userRow({ id: 2, role: 'COMPANY_ADMIN', company_id: companyId }),
+    userRow({ id: uuid(2), role: 'COMPANY_ADMIN', company_id: companyId }),
     ['user.read', 'agent.run'],
     ['metadata_lakehouse']
   );
@@ -58,12 +61,12 @@ describe('buildActor', () => {
   it('shapes a company account', () => {
     const actor = buildActor(userRow({ role_id: 'r1', role_name: 'Analyst' }), ['user.read'], ['agents']);
     expect(actor).toMatchObject({
-      id: 10,
+      id: uuid(10),
       displayName: 'Ada',
       role: 'USER',
       roleScope: 'company',
       isPlatform: false,
-      companyId: 1,
+      companyId: uuid(1),
       permissions: ['user.read'],
       features: ['agents'],
       roleId: 'r1',
@@ -81,7 +84,9 @@ describe('buildActor', () => {
 
   it('refuses rows that break the tenancy rules', () => {
     expect(errorCode(() => buildActor(userRow({ role: 'OWNER' }), []))).toBe('INTERNAL_ERROR');
-    expect(errorCode(() => buildActor(userRow({ role: 'SUPER_ADMIN', company_id: 4 }), []))).toBe('INTERNAL_ERROR');
+    expect(errorCode(() => buildActor(userRow({ role: 'SUPER_ADMIN', company_id: uuid(4) }), []))).toBe(
+      'INTERNAL_ERROR'
+    );
     expect(errorCode(() => buildActor(userRow({ company_id: null }), []))).toBe('INTERNAL_ERROR');
     expect(() => buildActor(null, [])).toThrow('buildActor requires a user row');
   });
@@ -118,13 +123,13 @@ describe('can and assertPermission', () => {
 
 describe('resolveTargetCompany', () => {
   it('pins a company account to its own company', () => {
-    expect(resolveTargetCompany(member(), 99)).toBe(1);
+    expect(resolveTargetCompany(member(), uuid(99))).toBe(uuid(1));
   });
 
   it('makes a platform account name a valid company', () => {
-    expect(resolveTargetCompany(platformOwner(), '7')).toBe(7);
+    expect(resolveTargetCompany(platformOwner(), uuid(7).toUpperCase())).toBe(uuid(7));
     expect(errorCode(() => resolveTargetCompany(platformOwner(), undefined))).toBe('VALIDATION_ERROR');
-    expect(errorCode(() => resolveTargetCompany(platformOwner(), '-3'))).toBe('VALIDATION_ERROR');
+    expect(errorCode(() => resolveTargetCompany(platformOwner(), '7'))).toBe('VALIDATION_ERROR');
   });
 });
 
@@ -155,23 +160,25 @@ describe('managing roles and accounts', () => {
   });
 
   it('leaves platform accounts to the platform owner', () => {
-    const target = userRow({ id: 40, role: 'PLATFORM_ADMIN', company_id: null });
+    const target = userRow({ id: uuid(40), role: 'PLATFORM_ADMIN', company_id: null });
     expect(errorCode(() => assertCanManageUser(platformOwner(), target))).toBeUndefined();
     expect(errorCode(() => assertCanManageUser(platformAdmin(), target))).toBe('TENANT_ACCESS_DENIED');
-    expect(errorCode(() => assertCanManageUser(platformAdmin(), userRow({ id: 41, company_id: 2 })))).toBeUndefined();
+    expect(
+      errorCode(() => assertCanManageUser(platformAdmin(), userRow({ id: uuid(41), company_id: uuid(2) })))
+    ).toBeUndefined();
   });
 
   it('lets a company admin manage the users of their own company only', () => {
     const admin = companyAdmin();
-    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: 30 })))).toBeUndefined();
-    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: 31, company_id: 2 })))).toBe(
+    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(30) })))).toBeUndefined();
+    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(31), company_id: uuid(2) })))).toBe(
       'TENANT_ACCESS_DENIED'
     );
-    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: 32, role: 'COMPANY_ADMIN' })))).toBe(
+    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(32), role: 'COMPANY_ADMIN' })))).toBe(
       'TENANT_ACCESS_DENIED'
     );
     expect(
-      errorCode(() => assertCanManageUser(admin, userRow({ id: 33, role: 'SUPER_ADMIN', company_id: null })))
+      errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(33), role: 'SUPER_ADMIN', company_id: null })))
     ).toBe('TENANT_ACCESS_DENIED');
   });
 
@@ -184,7 +191,9 @@ describe('managing roles and accounts', () => {
 
   it('lets the platform owner manage any company account', () => {
     expect(
-      errorCode(() => assertCanManageUser(platformOwner(), userRow({ id: 40, role: 'COMPANY_ADMIN', company_id: 5 })))
+      errorCode(() =>
+        assertCanManageUser(platformOwner(), userRow({ id: uuid(40), role: 'COMPANY_ADMIN', company_id: uuid(5) }))
+      )
     ).toBeUndefined();
   });
 

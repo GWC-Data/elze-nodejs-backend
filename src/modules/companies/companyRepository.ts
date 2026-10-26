@@ -2,20 +2,20 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { pagedRows, numericRow, rawRows } from '../../shared/db/baseRepository';
 import { likePattern, orderBy } from '../../shared/db/listQuery';
-import { NOT_DELETED, notDeleted, notDeletedRef, softDeletion } from '../../shared/db/softDelete';
+import { DELETED, NOT_DELETED, RESTORED, notDeleted, notDeletedRef, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { ListWindow } from '../../shared/db/baseRepository';
 
 const { prisma, withTransaction } = config.database;
 
 interface CompanyFilter {
-  companyId?: number;
+  companyId?: string;
   active?: boolean;
   search?: string;
 }
 
 interface CompanyRow {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   active: boolean;
@@ -33,7 +33,7 @@ interface CompanyCountsRow extends CompanyListRow {
 }
 
 interface CompanyOptionRow {
-  id: number;
+  id: string;
   name: string;
   active: boolean;
 }
@@ -62,7 +62,7 @@ const COMPANY_SORTS: Record<string, string> = {
 
 function whereOf(filter: CompanyFilter): Prisma.Sql {
   const conditions: Prisma.Sql[] = [notDeleted('c')];
-  if (filter.companyId !== undefined) conditions.push(Prisma.sql`c.id = ${filter.companyId}`);
+  if (filter.companyId !== undefined) conditions.push(Prisma.sql`c.id = ${filter.companyId}::uuid`);
   if (filter.active !== undefined) conditions.push(Prisma.sql`c.active = ${filter.active}`);
   if (filter.search) {
     const pattern = likePattern(filter.search);
@@ -85,25 +85,25 @@ async function listPage<R>(filter: CompanyFilter, list: ListWindow, shape: (row:
   );
 }
 
-async function listOptions(companyId: number | null): Promise<CompanyOptionRow[]> {
-  const only = companyId === null ? Prisma.empty : Prisma.sql`AND id = ${companyId}`;
+async function listOptions(companyId: string | null): Promise<CompanyOptionRow[]> {
+  const only = companyId === null ? Prisma.empty : Prisma.sql`AND id = ${companyId}::uuid`;
   return rawRows<CompanyOptionRow>(
     prisma,
     Prisma.sql`SELECT id, name, active FROM companies WHERE deleted_at IS NULL ${only} ORDER BY lower(name), id`
   );
 }
 
-async function findWithCounts(id: number): Promise<CompanyCountsRow | null> {
+async function findWithCounts(id: string): Promise<CompanyCountsRow | null> {
   const rows = await rawRows<CompanyCountsRow>(
     prisma,
     Prisma.sql`SELECT ${COUNTED_COLUMNS}, COALESCE(uc.pending, 0) AS "pendingCount"
        ${COUNTED_FROM}
-      WHERE c.id = ${id} AND ${notDeleted('c')}`
+      WHERE c.id = ${id}::uuid AND ${notDeleted('c')}`
   );
   return rows[0] || null;
 }
 
-function asRow(company: { id: number; name: string; slug: string; active: boolean; createdAt: Date }): CompanyRow {
+function asRow(company: { id: string; name: string; slug: string; active: boolean; createdAt: Date }): CompanyRow {
   return {
     id: company.id,
     name: company.name,
@@ -114,7 +114,7 @@ function asRow(company: { id: number; name: string; slug: string; active: boolea
 }
 
 async function findRow(
-  id: number,
+  id: string,
   { includeDeleted = false }: { includeDeleted?: boolean } = {}
 ): Promise<CompanyRow | null> {
   const company = await prisma.company.findFirst({ where: { id, ...(includeDeleted ? {} : NOT_DELETED) } });
@@ -122,17 +122,17 @@ async function findRow(
 }
 
 async function insert(
-  { name, slug, createdBy }: { name: string; slug: string; createdBy: number | null },
+  { name, slug, createdBy }: { name: string; slug: string; createdBy: string | null },
   tx: Tx = prisma
 ) {
   return asRow(await tx.company.create({ data: { name, slug, active: true, createdBy } }));
 }
 
-async function updateColumns(id: number, changes: { name?: string; active?: boolean }): Promise<void> {
+async function updateColumns(id: string, changes: { name?: string; active?: boolean }): Promise<void> {
   await prisma.company.update({ where: { id }, data: changes });
 }
 
-async function softDelete(id: number, deletedBy: number | null): Promise<boolean> {
+async function softDelete(id: string, deletedBy: string | null): Promise<boolean> {
   const deletion = softDeletion(deletedBy);
   return withTransaction(async (tx) => {
     const result = await tx.company.updateMany({ where: { id, ...NOT_DELETED }, data: { ...deletion, active: false } });
@@ -145,8 +145,22 @@ async function softDelete(id: number, deletedBy: number | null): Promise<boolean
   });
 }
 
-async function discard(id: number): Promise<void> {
+async function discard(id: string): Promise<void> {
   await prisma.company.deleteMany({ where: { id } });
+}
+
+async function restore(id: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    const row = await tx.company.findFirst({ where: { id, ...DELETED }, select: { deletedAt: true, deletedBy: true } });
+    if (!row) return false;
+    const deletedWithIt = { companyId: id, deletedAt: row.deletedAt, deletedBy: row.deletedBy };
+    await tx.company.updateMany({ where: { id }, data: RESTORED });
+    await tx.group.updateMany({ where: deletedWithIt, data: RESTORED });
+    await tx.role.updateMany({ where: deletedWithIt, data: RESTORED });
+    await tx.dashboard.updateMany({ where: deletedWithIt, data: RESTORED });
+    await tx.connection.updateMany({ where: deletedWithIt, data: RESTORED });
+    return true;
+  });
 }
 
 async function platformOverview(): Promise<Record<string, number>> {
@@ -162,7 +176,7 @@ async function platformOverview(): Promise<Record<string, number>> {
   return { companies, companiesActive, users, usersActive, usersPending, companyAdmins, groups };
 }
 
-async function workspaceOverview(companyId: number | null): Promise<Record<string, number>> {
+async function workspaceOverview(companyId: string | null): Promise<Record<string, number>> {
   if (companyId === null) {
     return numericRow({ users: 0, usersActive: 0, usersPending: 0, groups: 0, groupsActive: 0 });
   }
@@ -186,6 +200,7 @@ export {
   updateColumns,
   softDelete,
   discard,
+  restore,
   platformOverview,
   workspaceOverview,
 };
