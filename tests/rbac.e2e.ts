@@ -26,6 +26,7 @@ interface CallOptions {
 interface CallResult {
   status: number;
   body: any;
+  headers: Headers;
 }
 
 const BASE = process.env.E2E_BASE || 'http://localhost:8099';
@@ -95,7 +96,7 @@ function client(label: string) {
           json = null;
         }
       }
-      return { status: res.status, body: json };
+      return { status: res.status, body: json, headers: res.headers };
     },
     adopt(_data?: unknown) {},
   };
@@ -1838,6 +1839,276 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
     'the reset is in the audit trail',
     r.status === 200 && (r.body?.data?.items || []).length >= 1,
     `${r.status} ${JSON.stringify(r.body)}`
+  );
+
+  section('Credits');
+
+  r = await owner.call('POST', '/api/platform/companies', {
+    name: 'Credit Co',
+    admin: { username: 'credit.admin', email: 'credit.admin@example.com' },
+  });
+  check('creates a company for the credit tests', r.status === 201, JSON.stringify(r.body));
+  const creditCompany = r.body?.data?.id;
+  const creditAdminId = r.body?.data?.admin?.id;
+  const creditAdmin = client('creditAdmin');
+  r = await creditAdmin.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('credit.admin@example.com')),
+    password: 'CreditAdmin1!',
+  });
+  check('the credit company admin activates', r.status === 200, JSON.stringify(r.body));
+
+  r = await owner.call('POST', '/api/platform/users', {
+    companyId: creditCompany,
+    username: 'credit.member',
+    email: 'credit.member@example.com',
+    role: 'USER',
+  });
+  const creditMemberId = r.body?.data?.id;
+  const creditMember = client('creditMember');
+  r = await creditMember.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('credit.member@example.com')),
+    password: 'CreditMember1!',
+  });
+  check('the credit member activates', r.status === 200, JSON.stringify(r.body));
+
+  const creditContext = crypto.randomUUID();
+  await prisma.connection.create({
+    data: {
+      id: creditContext,
+      companyId: creditCompany,
+      provider: 'domo',
+      name: 'Credit context',
+      host: 'credit.domo.com',
+      secret: 'unused',
+      secretHint: '••••',
+      createdBy: creditAdminId,
+    },
+  });
+  await prisma.contextUserAccess.create({
+    data: { connectionId: creditContext, userId: creditMemberId, accessLevelId: accessLevelId('context', 'view') },
+  });
+  r = await creditAdmin.call('PUT', `/api/users/${creditMemberId}/permissions`, {
+    permissionIds: pids('analyst.use'),
+  });
+  check('the credit member may ask the data analyst', r.status === 200, JSON.stringify(r.body));
+
+  const question = `/svc/adk/contexts/${creditContext}/data-analyst/sessions/s-1/messages`;
+  const build = `/svc/adk/contexts/${creditContext}/context-layer/sessions/s-2/messages`;
+  const credits = async (who: ReturnType<typeof client>) => (await who.call('GET', '/api/credits/me')).body?.data;
+
+  r = await creditMember.call('GET', '/api/credits/me');
+  check(
+    'a new company starts with an empty pool',
+    r.status === 200 && r.body?.data?.balance === 0 && r.body?.data?.available === 0 && !r.body?.data?.exempt,
+    JSON.stringify(r.body)
+  );
+  r = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  check(
+    'an AI action is refused without credits',
+    r.status === 403 && r.headers.get('x-gate-reason') === 'INSUFFICIENT_CREDITS',
+    `${r.status} ${r.headers.get('x-gate-reason')}`
+  );
+
+  r = await creditAdmin.call('POST', `/api/credits/companies/${creditCompany}/allocations`, { credits: 10 });
+  check('a company admin cannot give credits', r.status === 403, JSON.stringify(r.body));
+  r = await owner.call('POST', `/api/credits/companies/${creditCompany}/allocations`, { credits: 10, note: 'Pilot' });
+  check(
+    'the platform owner gives the company credits',
+    r.status === 201 && r.body?.data?.balance === 10,
+    JSON.stringify(r.body)
+  );
+  r = await owner.call('POST', `/api/credits/companies/${creditCompany}/allocations`, { credits: -20 });
+  check(
+    'more than the pool cannot be taken back',
+    r.status === 400 && r.body?.error?.code === 'VALIDATION_ERROR',
+    JSON.stringify(r.body)
+  );
+  r = await owner.call('POST', `/api/credits/companies/${creditCompany}/allocations`, { credits: 0.001 });
+  check('credits have at most two decimals', r.status === 400, JSON.stringify(r.body));
+
+  r = await creditMember.call('GET', '/api/credits/rates');
+  check(
+    'everyone can read the price list',
+    r.status === 200 &&
+      (r.body?.data || []).find((x: any) => x.action === 'analyst.question')?.credits === 0.5 &&
+      (r.body?.data || []).find((x: any) => x.action === 'context.build')?.credits === 2,
+    JSON.stringify(r.body)
+  );
+
+  r = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  const chargeToken = r.headers.get('x-credit-charge');
+  check('a question is charged when the gate allows it', r.status === 204 && Boolean(chargeToken), String(r.status));
+  check(
+    'the charge comes off the pool and counts as the member’s use',
+    (await credits(creditMember))?.balance === 9.5 && (await credits(creditMember))?.used === 0.5
+  );
+  r = await creditMember.call(
+    'GET',
+    '/api/gate/agents',
+    undefined,
+    gate(`/svc/adk/contexts/${creditContext}/data-analyst/sessions`, 'GET')
+  );
+  check(
+    'reading sessions is free',
+    r.status === 204 && !r.headers.get('x-credit-charge') && (await credits(creditMember))?.balance === 9.5,
+    String(r.status)
+  );
+
+  r = await creditMember.call('POST', '/api/credits/refunds', { token: `${chargeToken}x` });
+  check('a forged charge token is refused', r.status === 400, JSON.stringify(r.body));
+  r = await creditAdmin.call('POST', '/api/credits/refunds', { token: chargeToken });
+  check('only the charged account can refund', r.status === 200 && r.body?.data?.refunded === false);
+  r = await creditMember.call('POST', '/api/credits/refunds', { token: chargeToken });
+  check(
+    'a rejected request is refunded',
+    r.status === 200 && r.body?.data?.refunded === true && r.body?.data?.credits === 0.5,
+    JSON.stringify(r.body)
+  );
+  r = await creditMember.call('POST', '/api/credits/refunds', { token: chargeToken });
+  check('a charge is refunded only once', r.status === 200 && r.body?.data?.refunded === false);
+  check('the refund restores the pool', (await credits(creditMember))?.balance === 10);
+
+  r = await creditMember.call('GET', '/api/credits/members');
+  check('a member cannot see everyone’s credits', r.status === 403, JSON.stringify(r.body));
+  r = await creditMember.call('PUT', `/api/credits/members/${creditMemberId}/limit`, { limit: 100 });
+  check('or raise their own limit', r.status === 403, JSON.stringify(r.body));
+  r = await creditAdmin.call('PUT', `/api/credits/members/${creditMemberId}/limit`, {});
+  check('a limit must be given or cleared explicitly', r.status === 400, JSON.stringify(r.body));
+  r = await creditAdmin.call('PUT', `/api/credits/members/${creditMemberId}/limit`, { limit: 1 });
+  check(
+    'a company admin restricts a member',
+    r.status === 200 && r.body?.data?.limit === 1 && r.body?.data?.remaining === 1,
+    JSON.stringify(r.body)
+  );
+  r = await creditAdmin.call('PUT', `/api/credits/members/${alphaUserId}/limit`, { limit: 1 });
+  check('but not for another company', r.status === 403 || r.status === 404, JSON.stringify(r.body));
+
+  r = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  const second = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  check('questions are charged up to the limit', r.status === 204 && second.status === 204);
+  r = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  check(
+    'the limit stops the member while the pool still has credits',
+    r.status === 403 && r.headers.get('x-gate-reason') === 'CREDIT_LIMIT_REACHED',
+    `${r.status} ${r.headers.get('x-gate-reason')}`
+  );
+  const limited = await credits(creditMember);
+  check(
+    'the member sees their limit and what is left',
+    limited?.limit === 1 && limited?.used === 1 && limited?.remaining === 0 && limited?.available === 0,
+    JSON.stringify(limited)
+  );
+
+  r = await creditAdmin.call('GET', '/api/gate/agents', undefined, gate(build, 'POST'));
+  check('another member still spends from the pool', r.status === 204, String(r.status));
+
+  r = await owner.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  check(
+    'platform accounts are not charged',
+    r.status === 204 && !r.headers.get('x-credit-charge') && (await credits(creditMember))?.balance === 7,
+    String(r.status)
+  );
+
+  r = await creditAdmin.call('GET', '/api/credits/members');
+  const memberRow = (r.body?.data?.items || []).find((m: any) => m.id === creditMemberId);
+  check(
+    'the admin sees each member’s limit and use',
+    r.status === 200 && memberRow?.limit === 1 && memberRow?.used === 1 && memberRow?.remaining === 0,
+    JSON.stringify(r.body)
+  );
+  r = await creditAdmin.call('GET', '/api/credits/overview');
+  check(
+    'the overview totals usage by action',
+    r.status === 200 &&
+      r.body?.data?.balance === 7 &&
+      r.body?.data?.allocated === 10 &&
+      r.body?.data?.used === 3 &&
+      r.body?.data?.runs === 4 &&
+      (r.body?.data?.byAction || []).find((a: any) => a.action === 'analyst.question')?.credits === 1 &&
+      (r.body?.data?.daily?.days || []).length === 30,
+    JSON.stringify(r.body?.data)
+  );
+  r = await creditAdmin.call('GET', '/api/credits/activity?pageSize=50');
+  const entries = r.body?.data?.items || [];
+  check(
+    'the history shows allocations, charges and refunds',
+    r.status === 200 &&
+      entries.some((e: any) => e.kind === 'allocation' && e.credits === 10 && e.note === 'Pilot') &&
+      entries.some((e: any) => e.kind === 'refund' && e.credits === 0.5) &&
+      entries.some((e: any) => e.kind === 'usage' && e.refunded),
+    JSON.stringify(entries)
+  );
+  check(
+    'platform accounts are not named to the company',
+    entries
+      .filter((e: any) => e.user?.platform)
+      .every((e: any) => e.user.id === null && e.user.name === 'Elze platform team') &&
+      entries.some((e: any) => e.kind === 'usage' && e.credits === 0 && e.note === 'Platform support'),
+    JSON.stringify(entries.map((e: any) => e.user))
+  );
+  r = await creditAdmin.call('GET', `/api/credits/activity?kind=usage&userId=${creditMemberId}`);
+  check(
+    'the history filters by member and kind',
+    r.status === 200 &&
+      (r.body?.data?.items || []).length === 3 &&
+      (r.body?.data?.items || []).every((e: any) => e.kind === 'usage' && e.user?.id === creditMemberId),
+    JSON.stringify(r.body?.data)
+  );
+
+  r = await owner.call('GET', '/api/credits/overview');
+  check('a platform account must name the company', r.status === 400, JSON.stringify(r.body));
+  r = await owner.call('GET', `/api/credits/overview?companyId=${creditCompany}`);
+  check('and then reads it', r.status === 200 && r.body?.data?.balance === 7, JSON.stringify(r.body));
+  r = await owner.call('GET', '/api/credits/companies?search=Credit%20Co');
+  const creditCompanyRow = (r.body?.data?.items || []).find((c: any) => c.id === creditCompany);
+  check(
+    'the platform lists each company’s credits',
+    r.status === 200 &&
+      creditCompanyRow?.balance === 7 &&
+      creditCompanyRow?.allocated === 10 &&
+      creditCompanyRow?.used === 3,
+    JSON.stringify(r.body?.data)
+  );
+  r = await creditAdmin.call('GET', '/api/credits/companies');
+  check('a company admin cannot list every company', r.status === 403, JSON.stringify(r.body));
+
+  r = await creditAdmin.call('PUT', '/api/credits/rates/analyst.question', { credits: 0 });
+  check('a company admin cannot change prices', r.status === 403, JSON.stringify(r.body));
+  r = await owner.call('PUT', '/api/credits/rates/analyst.question', { credits: 0.25 });
+  check(
+    'the platform owner changes a price',
+    r.status === 200 && r.body?.data?.credits === 0.25,
+    JSON.stringify(r.body)
+  );
+  r = await creditAdmin.call('PUT', `/api/credits/members/${creditMemberId}/limit`, { limit: null });
+  check('a limit can be removed', r.status === 200 && r.body?.data?.limit === null, JSON.stringify(r.body));
+  r = await creditMember.call('GET', '/api/gate/agents', undefined, gate(question, 'POST'));
+  check(
+    'the new price applies to the next question',
+    r.status === 204 && (await credits(creditMember))?.balance === 6.75,
+    String(r.status)
+  );
+  r = await owner.call('PUT', '/api/credits/rates/analyst.question', { credits: 0.5 });
+  check('the price is put back', r.status === 200, JSON.stringify(r.body));
+
+  r = await owner.call('POST', `/api/credits/companies/${creditCompany}/allocations`, { credits: -6 });
+  check('the platform takes credits back', r.status === 201 && r.body?.data?.balance === 0.75, JSON.stringify(r.body));
+  r = await creditAdmin.call('GET', '/api/gate/agents', undefined, gate(build, 'POST'));
+  check(
+    'an action dearer than the pool is refused for everyone',
+    r.status === 403 && r.headers.get('x-gate-reason') === 'INSUFFICIENT_CREDITS',
+    `${r.status} ${r.headers.get('x-gate-reason')}`
+  );
+
+  r = await owner.call('GET', '/api/audit?category=credits&pageSize=50');
+  const creditEvents = (r.body?.data?.items || []).map((e: any) => e.event);
+  check(
+    'allocations, limits and prices are audited',
+    r.status === 200 &&
+      creditEvents.includes('credits_allocated') &&
+      creditEvents.includes('credit_limit_updated') &&
+      creditEvents.includes('credit_rate_updated'),
+    JSON.stringify(creditEvents)
   );
 
   section('Unauthenticated and malformed requests');

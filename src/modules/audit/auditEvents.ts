@@ -62,6 +62,10 @@ const EVENTS = {
   CONTEXT_ACCESS_GRANTED: 'context_access_granted',
   CONTEXT_ACCESS_UPDATED: 'context_access_updated',
   CONTEXT_ACCESS_REVOKED: 'context_access_revoked',
+
+  CREDITS_ALLOCATED: 'credits_allocated',
+  CREDIT_LIMIT_UPDATED: 'credit_limit_updated',
+  CREDIT_RATE_UPDATED: 'credit_rate_updated',
 };
 
 const FORBIDDEN_DETAIL_KEYS = new Set([

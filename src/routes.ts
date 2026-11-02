@@ -17,6 +17,7 @@ import auditRoutes from './modules/audit/auditRoutes';
 import companyRoleRoutes from './modules/roles/companyRoleRoutes';
 import gateRoutes from './modules/contextLayer/gateRoutes';
 import deletedItemRoutes from './modules/deletedItems/deletedItemRoutes';
+import creditRoutes from './modules/credits/creditRoutes';
 import docsRoutes from './modules/system/docsRoutes';
 
 const { IS_PRODUCTION } = config.env;
@@ -42,6 +43,7 @@ router.use('/audit', auditRoutes);
 router.use('/roles', companyRoleRoutes);
 router.use('/gate', gateRoutes);
 router.use('/deleted-items', deletedItemRoutes);
+router.use('/credits', creditRoutes);
 
 router.use('/context', contextRoutes);
 

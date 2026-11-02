@@ -199,6 +199,7 @@ export {
   can,
   assertPermission,
   resolveTargetCompany,
+  assertCompanyMatch,
   strongestLevel,
   levelAtLeast,
   isPlatformOwner,

@@ -82,6 +82,10 @@
     {
       "name": "Deleted items",
       "description": "Soft-deleted records in one list, with who deleted them and when; recover them or remove them for good."
+    },
+    {
+      "name": "Credits",
+      "description": "Each company has one credit pool that the platform team fills. Every member spends from it, unless a company admin restricts them to a fixed number of credits. AI actions cost a fixed number of credits from the price list and are charged by the agent gate."
     }
   ],
   "paths": {
@@ -2227,7 +2231,7 @@
         ],
         "operationId": "checkAgentGate",
         "summary": "Authorize an agent-service request",
-        "description": "Authorization sub-request for a reverse proxy (auth_request style) placed in front of the agent service at `/svc/adk/...`. The proxy forwards the browser's cookies plus the original URI and method in headers. Allowed: `/svc/adk/health` and `/svc/adk/models` for any signed-in account, and `/svc/adk/contexts/{contextId}/...` where the sub-path decides the rule: `/context-layer`, `/description-editor`, `/context-objects`, `/context-versions` need `context.read` plus view access to the context (edit access for non-GET/HEAD/OPTIONS); `/data-analyst` needs `analyst.use` or `playbook.run`; `/playbook-builder` needs `playbook.create` or `playbook.update`; `/playbooks` needs `playbook.read` (reads) or `playbook.update` (writes); the last three also need view access to the context. Any other path is refused. Responses carry no body: 204 when allowed; 401 for authentication failures (`UNAUTHENTICATED`, `TOKEN_EXPIRED`); 403 for everything else (including permission, context-access, not-found, `PASSWORD_CHANGE_REQUIRED` and `SERVICE_UNAVAILABLE` errors). The error code is reported in the `X-Gate-Reason` response header and 403 denials are audited.",
+        "description": "Authorization sub-request for a reverse proxy (auth_request style) placed in front of the agent service at `/svc/adk/...`. The proxy forwards the browser's cookies plus the original URI and method in headers. Allowed: `/svc/adk/health` and `/svc/adk/models` for any signed-in account, and `/svc/adk/contexts/{contextId}/...` where the sub-path decides the rule: `/context-layer`, `/description-editor`, `/context-objects`, `/context-versions` need `context.read` plus view access to the context (edit access for non-GET/HEAD/OPTIONS); `/data-analyst` needs `analyst.use` or `playbook.run`; `/playbook-builder` needs `playbook.create` or `playbook.update`; `/playbooks` needs `playbook.read` (reads) or `playbook.update` (writes); the last three also need view access to the context. Any other path is refused. Responses carry no body: 204 when allowed; 401 for authentication failures (`UNAUTHENTICATED`, `TOKEN_EXPIRED`); 403 for everything else (including permission, context-access, not-found, `PASSWORD_CHANGE_REQUIRED` and `SERVICE_UNAVAILABLE` errors). Billable requests are charged here, before the agent runs: POST `.../context-layer/sessions/{id}/messages` (price `context.build`), `.../description-editor/sessions/{id}/messages` (`context.chat`) and `.../data-analyst/sessions/{id}/messages` (`analyst.question`), against the company that owns the context. A charge returns a signed `X-Credit-Charge` header for a refund; platform accounts are logged but not charged. Without enough credits the request is refused with 403 and reason `INSUFFICIENT_CREDITS` (company pool) or `CREDIT_LIMIT_REACHED` (the member's limit); these refusals are not audited as denials. The error code is reported in the `X-Gate-Reason` response header and 403 denials are audited.",
         "security": [
           {
             "cookieAuth": []
@@ -2256,7 +2260,15 @@
         ],
         "responses": {
           "204": {
-            "description": "The original request is allowed."
+            "description": "The original request is allowed.",
+            "headers": {
+              "X-Credit-Charge": {
+                "description": "Present when the request was charged: a signed token for POST /api/credits/refunds.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "description": "Not signed in or session expired. No body.",
@@ -2273,7 +2285,7 @@
             "description": "The original request is refused. No body.",
             "headers": {
               "X-Gate-Reason": {
-                "description": "Error code, e.g. `INSUFFICIENT_PERMISSION`, `FEATURE_NOT_ENABLED`, `RESOURCE_NOT_FOUND`, `PASSWORD_CHANGE_REQUIRED`, or `ERROR` when the error had no code.",
+                "description": "Error code, e.g. `INSUFFICIENT_PERMISSION`, `FEATURE_NOT_ENABLED`, `RESOURCE_NOT_FOUND`, `PASSWORD_CHANGE_REQUIRED`, `INSUFFICIENT_CREDITS`, `CREDIT_LIMIT_REACHED`, or `ERROR` when the error had no code.",
                 "schema": {
                   "type": "string"
                 }
@@ -10811,6 +10823,772 @@
           }
         }
       }
+    },
+    "/api/credits/me": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "getMyCredits",
+        "summary": "Your credit balance",
+        "description": "The company pool, your limit (if a company admin restricted you) and what you have used in total. `available` is what the next action may use. Platform accounts are never charged (`exempt`); they may pass `companyId` to read one company's pool.\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts only: read this company's pool. Ignored for company accounts.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditStatus"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/rates": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "listCreditRates",
+        "summary": "Price list",
+        "description": "What each AI action costs, for every signed-in account.\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CreditRate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/rates/{action}": {
+      "put": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "updateCreditRate",
+        "summary": "Change a price",
+        "description": "Sets what one AI action costs from now on. Past charges keep their price. Audited as `credit_rate_updated`.\n\nPlatform accounts only, with permission `credits.allocate` (platform admins and the platform owner; 403 TENANT_ACCESS_DENIED or INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.allocate"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCreditRateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditRate"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/companies": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "listCompanyCredits",
+        "summary": "Credits of every company",
+        "description": "One page of companies with their pool, net credits given and total use, plus platform totals. Defaults: pageSize 15, sort name, dir asc. Search matches the company name and slug.\n\nPlatform accounts only, with permission `credits.allocate` (platform admins and the platform owner; 403 TENANT_ACCESS_DENIED or INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.allocate"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Sort column.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "balance",
+                "allocated",
+                "used",
+                "lastUsedAt"
+              ],
+              "default": "name"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/SortDirection"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyCreditsPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/companies/{companyId}/allocations": {
+      "post": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "allocateCompanyCredits",
+        "summary": "Give or take back credits",
+        "description": "Adds credits to a company pool, or takes them back with a negative amount. The pool never goes below 0 (400 VALIDATION_ERROR). Audited as `credits_allocated`.\n\nPlatform accounts only, with permission `credits.allocate` (platform admins and the platform owner; 403 TENANT_ACCESS_DENIED or INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.allocate"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllocateCreditsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditAllocation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/overview": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "getCreditOverview",
+        "summary": "Company credit usage",
+        "description": "The pool, total use by action, and daily use for the last 30 days (UTC).\n\nRequires permission `credits.manage` (held by company admins, platform admins and the platform owner; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.manage"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts: the company to read (required). Ignored for company accounts, which always read their own company.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditOverview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/members": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "listCreditMembers",
+        "summary": "Members and their limits",
+        "description": "Every member of the company with their limit and total use, biggest user first.\n\nRequires permission `credits.manage` (held by company admins, platform admins and the platform owner; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.manage"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts: the company to read (required). Ignored for company accounts, which always read their own company.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditMembers"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/members/{userId}/limit": {
+      "put": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "setCreditLimit",
+        "summary": "Restrict a member",
+        "description": "Caps the credits one member may use in total, counting what they have already used; null removes the cap. Nothing resets on its own. The company pool still applies. Audited as `credit_limit_updated`.\n\nRequires permission `credits.manage` (held by company admins, platform admins and the platform owner; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.manage"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCreditLimitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditLimit"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/activity": {
+      "get": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "listCreditActivity",
+        "summary": "Credit history",
+        "description": "One page of the company ledger: allocations, charges and refunds. Defaults: pageSize 15, sort createdAt, dir desc. Search matches the member, context, action and note.\n\nRequires permission `credits.manage` (held by company admins, platform admins and the platform owner; 403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "credits.manage"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Search"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Sort column.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt",
+                "credits"
+              ],
+              "default": "createdAt"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/SortDirection"
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts: the company to read (required). Ignored for company accounts, which always read their own company.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "allocation",
+                "usage",
+                "refund"
+              ]
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditEntryPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/credits/refunds": {
+      "post": {
+        "tags": [
+          "Credits"
+        ],
+        "operationId": "refundAgentCharge",
+        "summary": "Refund a charge the agent service rejected",
+        "description": "Called by the `/svc/adk` proxy when the agent service answers a charged request with an error. The token is the signed `X-Credit-Charge` header of the gate response, which the proxy never passes to the browser. Only the charged account can refund, once, within 15 minutes; otherwise `refunded` is false.\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundCreditsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CreditRefund"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -18415,6 +19193,639 @@
           },
           "item": {
             "$ref": "#/components/schemas/DeletedItem"
+          }
+        }
+      },
+      "CreditStatus": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "balance",
+          "limit",
+          "used",
+          "remaining",
+          "available",
+          "exempt"
+        ],
+        "properties": {
+          "companyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "balance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "The company pool. Null for a platform account that named no company."
+          },
+          "limit": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Your credit limit, set by a company admin; null when you are unrestricted."
+          },
+          "used": {
+            "type": "number",
+            "description": "Credits you have used in total, net of refunds."
+          },
+          "remaining": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "limit minus used, never below 0; null when unrestricted."
+          },
+          "available": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "What you can spend now: the smaller of balance and remaining."
+          },
+          "exempt": {
+            "type": "boolean",
+            "description": "True for platform accounts: their agent runs are logged but not charged."
+          }
+        }
+      },
+      "CreditRate": {
+        "type": "object",
+        "required": [
+          "action",
+          "label",
+          "description",
+          "credits",
+          "updatedAt"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "context.build",
+              "context.chat",
+              "analyst.question"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credits": {
+            "type": "number",
+            "description": "Credits, at most two decimal places."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpdateCreditRateRequest": {
+        "type": "object",
+        "required": [
+          "credits"
+        ],
+        "properties": {
+          "credits": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        }
+      },
+      "CompanyCredits": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "active",
+          "balance",
+          "allocated",
+          "used",
+          "lastUsedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "balance": {
+            "type": "number",
+            "description": "Credits, at most two decimal places."
+          },
+          "allocated": {
+            "type": "number",
+            "description": "Net credits given to the company, all time."
+          },
+          "used": {
+            "type": "number",
+            "description": "Credits used in total, net of refunds."
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CompanyCreditsPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "totals"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyCredits"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "totals": {
+            "type": "object",
+            "required": [
+              "balance",
+              "allocated",
+              "used",
+              "companies"
+            ],
+            "properties": {
+              "balance": {
+                "type": "number"
+              },
+              "allocated": {
+                "type": "number"
+              },
+              "used": {
+                "type": "number"
+              },
+              "companies": {
+                "type": "integer",
+                "description": "Companies that were ever given credits."
+              }
+            }
+          }
+        }
+      },
+      "AllocateCreditsRequest": {
+        "type": "object",
+        "required": [
+          "credits"
+        ],
+        "properties": {
+          "credits": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000,
+            "description": "Positive adds credits, negative takes them back. Not zero."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          }
+        }
+      },
+      "CreditAllocation": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "credits",
+          "balance",
+          "entryId"
+        ],
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credits": {
+            "type": "number"
+          },
+          "balance": {
+            "type": "number",
+            "description": "The pool after the change."
+          },
+          "entryId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CreditOverview": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "balance",
+          "allocated",
+          "used",
+          "used30Days",
+          "runs",
+          "byAction",
+          "daily"
+        ],
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "balance": {
+            "type": "number"
+          },
+          "allocated": {
+            "type": "number"
+          },
+          "used": {
+            "type": "number",
+            "description": "In total, net of refunds."
+          },
+          "used30Days": {
+            "type": "number"
+          },
+          "runs": {
+            "type": "integer",
+            "description": "Charged actions in total, net of refunds."
+          },
+          "byAction": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "action",
+                "label",
+                "credits",
+                "runs"
+              ],
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "credits": {
+                  "type": "number"
+                },
+                "runs": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "daily": {
+            "type": "object",
+            "required": [
+              "days",
+              "actions",
+              "usage"
+            ],
+            "properties": {
+              "days": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "description": "The last 30 days (UTC), oldest first."
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "usage": {
+                "type": "array",
+                "description": "Non-zero (day, action) totals only.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "day": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "credits": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreditMember": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "username",
+          "email",
+          "role",
+          "status",
+          "limit",
+          "used",
+          "remaining"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "limit": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "used": {
+            "type": "number",
+            "description": "In total, net of refunds."
+          },
+          "remaining": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreditMembers": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreditMember"
+            }
+          }
+        }
+      },
+      "SetCreditLimitRequest": {
+        "type": "object",
+        "required": [
+          "limit"
+        ],
+        "properties": {
+          "limit": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "The most credits this member may use in total; null removes the restriction."
+          }
+        }
+      },
+      "CreditLimit": {
+        "type": "object",
+        "required": [
+          "userId",
+          "limit",
+          "used",
+          "remaining"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "used": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreditEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "credits",
+          "balanceAfter",
+          "user",
+          "action",
+          "context",
+          "sessionId",
+          "note",
+          "refunded",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "allocation",
+              "usage",
+              "refund"
+            ]
+          },
+          "credits": {
+            "type": "number",
+            "description": "Signed: allocations and refunds add, usage subtracts."
+          },
+          "balanceAfter": {
+            "type": "number"
+          },
+          "user": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Who spent or allocated. Platform accounts appear as \"Elze platform team\" to company readers.",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "platform": {
+                "type": "boolean"
+              }
+            }
+          },
+          "action": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            }
+          },
+          "context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "refunded": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreditEntryPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreditEntry"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "RefundCreditsRequest": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The X-Credit-Charge value the agent gate returned."
+          }
+        }
+      },
+      "CreditRefund": {
+        "type": "object",
+        "required": [
+          "refunded",
+          "credits"
+        ],
+        "properties": {
+          "refunded": {
+            "type": "boolean"
+          },
+          "credits": {
+            "type": "number"
           }
         }
       }

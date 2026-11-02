@@ -3,6 +3,7 @@ import { can, assertPermission } from '../auth/authorizationService';
 import { requireConnectionId } from './connectionService';
 import type { ContextAccessLevel } from './contextConstants';
 import type { Actor } from '../../shared/types/actor';
+import type { AgentRequest } from '../credits/creditService';
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -45,12 +46,12 @@ function requireAny(actor: Actor, permissions: string[]): void {
   assertPermission(actor, permissions[0]);
 }
 
-async function checkAgentRequest(actor: Actor, uri: unknown, method: unknown): Promise<void> {
+async function checkAgentRequest(actor: Actor, uri: unknown, method: unknown): Promise<AgentRequest | null> {
   const target = typeof uri === 'string' ? splitUri(uri) : null;
   const verb = String(method || 'GET').toUpperCase();
   if (!target) throw fail('INSUFFICIENT_PERMISSION', 'Unknown agent route.');
 
-  if (ADK_OPEN_PATHS.has(target.path)) return;
+  if (ADK_OPEN_PATHS.has(target.path)) return null;
   const m = ADK_CONTEXT_RE.exec(target.path);
   if (!m) throw fail('INSUFFICIENT_PERMISSION', 'Unknown agent route.');
   const [, contextId, rest = '/'] = m;
@@ -58,7 +59,8 @@ async function checkAgentRequest(actor: Actor, uri: unknown, method: unknown): P
   const rule = ADK_RULES.find((r) => r.match.test(rest));
   if (!rule) throw fail('INSUFFICIENT_PERMISSION', 'Unknown agent route.');
   requireAny(actor, rule.anyOf(verb));
-  await requireConnectionId(actor, contextId, rule.level ? rule.level(verb) : 'view');
+  const connection = await requireConnectionId(actor, contextId, rule.level ? rule.level(verb) : 'view');
+  return { contextId: connection.id, companyId: connection.companyId, path: rest, method: verb };
 }
 
 export { checkAgentRequest };
