@@ -176,7 +176,7 @@ async function moveBalance(tx: Tx, companyId: string, credits: number): Promise<
 async function totalUse(tx: Tx, companyId: string, userId: string): Promise<number> {
   const rows = await rawRows<{ used: number }>(
     tx,
-    Prisma.sql`SELECT COALESCE(-SUM(credits), 0) AS used FROM credit_ledger
+    Prisma.sql`SELECT COALESCE(-SUM(credits), 0) AS used FROM company_credit_ledger
                 WHERE company_id = ${companyId}::uuid AND user_id = ${userId}::uuid
                   AND kind IN ('usage', 'refund')`
   );
@@ -208,7 +208,7 @@ async function insertEntry(
 ): Promise<string | null> {
   const rows = await rawRows<{ id: string }>(
     tx,
-    Prisma.sql`INSERT INTO credit_ledger
+    Prisma.sql`INSERT INTO company_credit_ledger
                  (company_id, kind, credits, balance_after, user_id, action, context_id, session_id, refund_of, note)
                VALUES (${entry.companyId}::uuid, ${entry.kind}::credit_entry_kind, ${entry.credits}::numeric, ${entry.balanceAfter}::numeric,
                        ${entry.userId}::uuid, ${entry.action ?? null}, ${entry.contextId ?? null}::uuid,
@@ -262,7 +262,7 @@ async function refund(entryId: string, userId: string): Promise<RefundResult> {
       session_id: string | null;
     }>(
       tx,
-      Prisma.sql`SELECT company_id, credits, action, context_id, session_id FROM credit_ledger
+      Prisma.sql`SELECT company_id, credits, action, context_id, session_id FROM company_credit_ledger
                   WHERE id = ${entryId}::uuid AND kind = 'usage' AND user_id = ${userId}::uuid
                     AND created_at >= now() - make_interval(mins => ${REFUND_WINDOW_MINUTES}::int)`
     );
@@ -338,7 +338,7 @@ async function listMembers(companyId: string): Promise<MemberRow[]> {
                  LEFT JOIN access_control.user_roles ur ON ur.user_id = u.id
                  LEFT JOIN access_control.roles r ON r.id = ur.role_id
                  LEFT JOIN user_credit_limits l ON l.user_id = u.id
-                 LEFT JOIN (SELECT user_id, -SUM(credits) AS used FROM credit_ledger
+                 LEFT JOIN (SELECT user_id, -SUM(credits) AS used FROM company_credit_ledger
                              WHERE company_id = ${companyId}::uuid AND kind IN ('usage', 'refund')
                              GROUP BY user_id) m ON m.user_id = u.id
                 WHERE u.company_id = ${companyId}::uuid AND u.deleted_at IS NULL
@@ -375,7 +375,7 @@ async function companyTotals(companyId: string): Promise<CompanyTotals> {
                       COALESCE(-SUM(credits) FILTER (WHERE kind IN ('usage', 'refund')), 0) AS used,
                       COALESCE(-SUM(credits) FILTER (WHERE kind IN ('usage', 'refund') AND created_at >= now() - interval '30 days'), 0) AS used_30_days,
                       COUNT(*) FILTER (WHERE kind = 'usage') - COUNT(*) FILTER (WHERE kind = 'refund') AS runs
-                 FROM credit_ledger WHERE company_id = ${companyId}::uuid`
+                 FROM company_credit_ledger WHERE company_id = ${companyId}::uuid`
   );
   return rows[0];
 }
@@ -385,7 +385,7 @@ async function usageByAction(companyId: string): Promise<UsageByAction[]> {
     prisma,
     Prisma.sql`SELECT e.action, r.label, -SUM(e.credits) AS credits,
                       COUNT(*) FILTER (WHERE e.kind = 'usage') - COUNT(*) FILTER (WHERE e.kind = 'refund') AS runs
-                 FROM credit_ledger e
+                 FROM company_credit_ledger e
                  LEFT JOIN credit_rates r ON r.action = e.action
                 WHERE e.company_id = ${companyId}::uuid AND e.kind IN ('usage', 'refund')
                   AND e.action IS NOT NULL
@@ -401,7 +401,7 @@ async function usageByDay(companyId: string, days: number): Promise<UsageByDay[]
     prisma,
     Prisma.sql`SELECT to_char((e.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day, e.action,
                       -SUM(e.credits) AS credits
-                 FROM credit_ledger e
+                 FROM company_credit_ledger e
                 WHERE e.company_id = ${companyId}::uuid AND e.kind IN ('usage', 'refund') AND e.action IS NOT NULL
                   AND e.created_at >= ${since.toISOString()}::timestamptz
                 GROUP BY 1, e.action
@@ -425,7 +425,7 @@ function ledgerWhere(filter: LedgerFilter): Prisma.Sql {
   return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 }
 
-const LEDGER_FROM = Prisma.sql`FROM credit_ledger e
+const LEDGER_FROM = Prisma.sql`FROM company_credit_ledger e
        LEFT JOIN users u ON u.id = e.user_id
        LEFT JOIN connections cn ON cn.id = e.context_id
        LEFT JOIN credit_rates r ON r.action = e.action`;
@@ -438,7 +438,7 @@ async function listLedger<R>(filter: LedgerFilter, list: ListWindow, shape: (row
                       COALESCE(u.display_name, u.username) AS user_name, u.email AS user_email,
                       u.company_id AS user_company_id, e.action, r.label AS action_label,
                       e.context_id, cn.name AS context_name, e.session_id, e.note,
-                      EXISTS (SELECT 1 FROM credit_ledger x WHERE x.refund_of = e.id) AS refunded,
+                      EXISTS (SELECT 1 FROM company_credit_ledger x WHERE x.refund_of = e.id) AS refunded,
                       e.created_at, COUNT(*) OVER () AS "__total"
                  ${LEDGER_FROM} ${where}
                  ${Prisma.raw(orderBy(list, LEDGER_SORTS, 'e.created_at DESC, e.id'))}
@@ -461,7 +461,7 @@ function companyFrom(): Prisma.Sql {
                          SUM(credits) FILTER (WHERE kind = 'allocation') AS allocated,
                          -SUM(credits) FILTER (WHERE kind IN ('usage', 'refund')) AS used,
                          MAX(created_at) FILTER (WHERE kind = 'usage') AS last_used_at
-                    FROM credit_ledger GROUP BY company_id) s ON s.company_id = c.id`;
+                    FROM company_credit_ledger GROUP BY company_id) s ON s.company_id = c.id`;
 }
 
 async function listCompanies<R>(search: string, list: ListWindow, shape: (row: CompanyCreditRow) => R) {
