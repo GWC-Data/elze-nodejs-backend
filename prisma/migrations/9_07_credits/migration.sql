@@ -34,7 +34,7 @@ CREATE TABLE "user_credit_limits" (
 );
 
 -- CreateTable
-CREATE TABLE "credit_ledger" (
+CREATE TABLE "company_credit_ledger" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "company_id" UUID NOT NULL,
     "kind" "credit_entry_kind" NOT NULL,
@@ -48,17 +48,17 @@ CREATE TABLE "credit_ledger" (
     "note" VARCHAR(255),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT clock_timestamp(),
 
-    CONSTRAINT "credit_ledger_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "company_credit_ledger_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "credit_ledger_refund_of_key" ON "credit_ledger"("refund_of");
+CREATE UNIQUE INDEX "company_credit_ledger_refund_of_key" ON "company_credit_ledger"("refund_of");
 
 -- CreateIndex
-CREATE INDEX "idx_credit_ledger_company_time" ON "credit_ledger"("company_id", "created_at" DESC);
+CREATE INDEX "idx_company_credit_ledger_company_time" ON "company_credit_ledger"("company_id", "created_at" DESC);
 
 -- CreateIndex
-CREATE INDEX "idx_credit_ledger_user_time" ON "credit_ledger"("user_id", "created_at" DESC);
+CREATE INDEX "idx_company_credit_ledger_user_time" ON "company_credit_ledger"("user_id", "created_at" DESC);
 
 -- AddForeignKey
 ALTER TABLE "credit_rates" ADD CONSTRAINT "credit_rates_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
@@ -73,13 +73,13 @@ ALTER TABLE "user_credit_limits" ADD CONSTRAINT "user_credit_limits_user_id_fkey
 ALTER TABLE "user_credit_limits" ADD CONSTRAINT "user_credit_limits_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "credit_ledger" ADD CONSTRAINT "credit_ledger_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "company_credit_ledger" ADD CONSTRAINT "company_credit_ledger_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "credit_ledger" ADD CONSTRAINT "credit_ledger_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+ALTER TABLE "company_credit_ledger" ADD CONSTRAINT "company_credit_ledger_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "credit_ledger" ADD CONSTRAINT "credit_ledger_refund_of_fkey" FOREIGN KEY ("refund_of") REFERENCES "credit_ledger"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "company_credit_ledger" ADD CONSTRAINT "company_credit_ledger_refund_of_fkey" FOREIGN KEY ("refund_of") REFERENCES "company_credit_ledger"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 
 ALTER TABLE "credit_rates" ADD CONSTRAINT "ck_credit_rates_credits" CHECK ("credits" >= 0);
