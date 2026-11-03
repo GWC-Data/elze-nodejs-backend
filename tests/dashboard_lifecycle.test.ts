@@ -1,32 +1,39 @@
-import assert from 'assert';
+import assert from 'node:assert';
+
+process.env.BOOTSTRAP_ADMIN_USERNAME = process.env.BOOTSTRAP_ADMIN_USERNAME || 'platformowner';
+process.env.BOOTSTRAP_ADMIN_EMAIL = process.env.BOOTSTRAP_ADMIN_EMAIL || 'owner@example.com';
+process.env.BOOTSTRAP_ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD || 'ChangeMeAtFirstSignIn1!';
+
 import config from '../src/config';
 const { db } = config.database;
-import { T, V } from '../src/models/rbacModel';
-import { bootstrapAppMeta } from '../src/services/bootstrapService';
-import * as registry from '../src/services/dashboardService';
-import * as access from '../src/services/accessService';
+import { bootstrapAppMeta } from '../src/modules/system/bootstrapService';
+import * as registry from '../src/modules/dashboards/dashboardService';
+import * as access from '../src/modules/access/accessService';
+import * as roleRepository from '../src/modules/roles/roleRepository';
+import { COMPANY_ADMIN, USER } from '../src/modules/catalogue/roleTiers';
 import {
-  DEFAULT_ROLE_PERMISSIONS,
-  PLATFORM_ONLY_PERMISSIONS,
-  PERMISSION_KEYS,
-  COMPANY_ADMIN,
-  USER,
-  SYSTEM_ROLE_ID,
-} from '../src/constants/permissions';
-import type { Actor } from '../src/types/actor';
+  isPlatformOnly,
+  loadCatalogue,
+  permissionKeys,
+  permissionKeysOf,
+  systemRoleId,
+} from '../src/modules/catalogue/catalogueService';
+import type { Actor } from '../src/shared/types/actor';
 
 async function runTests(): Promise<void> {
   console.log('=== Starting Multi-Tenant Dashboard Architecture Tests ===\n');
 
   console.log('[1] Checking Permission Catalogue Role Bindings:');
+  await loadCatalogue();
+  const PERMISSION_KEYS = permissionKeys();
   assert(PERMISSION_KEYS.includes('dashboard.create'), 'Catalogue must include dashboard.create');
   assert(PERMISSION_KEYS.includes('dashboard.update'), 'Catalogue must include dashboard.update');
   assert(PERMISSION_KEYS.includes('dashboard.delete'), 'Catalogue must include dashboard.delete');
   assert(PERMISSION_KEYS.includes('dashboard.assign'), 'Catalogue must include dashboard.assign');
   console.log('  ✓ Catalogue defines dashboard.create, dashboard.update, dashboard.delete, dashboard.assign');
 
-  const companyAdminPerms = DEFAULT_ROLE_PERMISSIONS[COMPANY_ADMIN];
-  const userPerms = DEFAULT_ROLE_PERMISSIONS[USER];
+  const companyAdminPerms = permissionKeysOf(await roleRepository.permissionIds(systemRoleId(COMPANY_ADMIN)));
+  const userPerms = permissionKeysOf(await roleRepository.permissionIds(systemRoleId(USER)));
 
   assert(companyAdminPerms.includes('dashboard.create'), 'COMPANY_ADMIN must have dashboard.create');
   assert(companyAdminPerms.includes('dashboard.update'), 'COMPANY_ADMIN must have dashboard.update');
@@ -40,8 +47,8 @@ async function runTests(): Promise<void> {
   assert(!userPerms.includes('dashboard.assign'), 'USER must NOT have dashboard.assign');
   console.log('  ✓ USER has create and update; strictly forbidden from delete and assign');
 
-  assert(PLATFORM_ONLY_PERMISSIONS.has('dashboard.assign'), 'dashboard.assign must be PLATFORM_ONLY');
-  assert(!PLATFORM_ONLY_PERMISSIONS.has('dashboard.update'), 'dashboard.update must not be platform-only');
+  assert(isPlatformOnly('dashboard.assign'), 'dashboard.assign must be PLATFORM_ONLY');
+  assert(!isPlatformOnly('dashboard.update'), 'dashboard.update must not be platform-only');
   console.log('  ✓ PLATFORM_ONLY_PERMISSIONS correctly confines cross-company assignment\n');
 
   console.log('[2] Bootstrapping Database Schema:');
@@ -61,12 +68,12 @@ async function runTests(): Promise<void> {
   console.log('  ✓ dashboards table has company_id, created_by, spec columns');
 
   const rolePermRows = await db.query(
-    `SELECT role_id, permissions FROM ${V.rolePermissionSummary} WHERE role_id IN (?, ?)`,
-    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
+    `SELECT role_id, permissions FROM access_control.role_permission_summary WHERE role_id IN (?, ?)`,
+    [systemRoleId(COMPANY_ADMIN), systemRoleId(USER)]
   );
   const permsOf = (roleId: string): string[] => rolePermRows.rows.find((r) => r.role_id === roleId)?.permissions || [];
-  const adminPermsInDb = permsOf(SYSTEM_ROLE_ID[COMPANY_ADMIN]);
-  const userPermsInDb = permsOf(SYSTEM_ROLE_ID[USER]);
+  const adminPermsInDb = permsOf(systemRoleId(COMPANY_ADMIN));
+  const userPermsInDb = permsOf(systemRoleId(USER));
   assert(adminPermsInDb.includes('dashboard.create'), 'COMPANY_ADMIN must have dashboard.create in DB');
   assert(adminPermsInDb.includes('dashboard.update'), 'COMPANY_ADMIN must have dashboard.update in DB');
   assert(adminPermsInDb.includes('dashboard.delete'), 'COMPANY_ADMIN must have dashboard.delete in DB');
@@ -84,52 +91,62 @@ async function runTests(): Promise<void> {
   console.log('  ✓ default dashboard is present as platform template (companyId === null)');
 
   console.log('\n[4] Creating Multi-Tenant Test Dashboards:');
-  const compA_Id = 9991;
-  const compB_Id = 9992;
-  const userA_Id = 8881;
-  const userB_Id = 8882;
+  const compA_Id = '00000000-0000-4000-8000-000000009991';
+  const compB_Id = '00000000-0000-4000-8000-000000009992';
+  const userA_Id = '00000000-0000-4000-8000-000000008881';
+  const userB_Id = '00000000-0000-4000-8000-000000008882';
+  const userUserA_Id = '00000000-0000-4000-8000-000000008883';
 
   const dashA_Id = 'test-dash-corp-a';
   const dashB_Id = 'test-dash-corp-b';
 
   await db.query(
-    `INSERT INTO ${T.companies} (id, name, slug)
+    `INSERT INTO companies (id, name, slug)
      VALUES
-       (9991, 'Test Corp A', 'test-corp-a'),
-       (9992, 'Test Corp B', 'test-corp-b')
-     ON CONFLICT (id) DO NOTHING`
+       (?, 'Test Corp A', 'test-corp-a'),
+       (?, 'Test Corp B', 'test-corp-b')
+     ON CONFLICT (id) DO NOTHING`,
+    [compA_Id, compB_Id]
   );
   await db.query(
-    `INSERT INTO ${T.users} (id, company_id, username, email, status)
+    `INSERT INTO users (id, company_id, username, email, status)
      VALUES
-       (8881, 9991, 'testuser_a', 'user_a@test.com', 'active'),
-       (8882, 9992, 'testuser_b', 'user_b@test.com', 'active'),
-       (8883, 9991, 'testuser_user_a', 'user_user_a@test.com', 'active')
-     ON CONFLICT (id) DO NOTHING`
+       (?, ?, 'testuser_a', 'user_a@test.com', 'active'),
+       (?, ?, 'testuser_b', 'user_b@test.com', 'active'),
+       (?, ?, 'testuser_user_a', 'user_user_a@test.com', 'active')
+     ON CONFLICT (id) DO NOTHING`,
+    [userA_Id, compA_Id, userB_Id, compB_Id, userUserA_Id, compA_Id]
   );
   await db.query(
-    `INSERT INTO ${T.userRoles} (user_id, role_id)
-     VALUES (8881, ?), (8882, ?), (8883, ?)
+    `INSERT INTO access_control.user_roles (user_id, role_id)
+     VALUES (?, ?), (?, ?), (?, ?)
      ON CONFLICT (user_id) DO NOTHING`,
-    [SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[COMPANY_ADMIN], SYSTEM_ROLE_ID[USER]]
+    [userA_Id, systemRoleId(COMPANY_ADMIN), userB_Id, systemRoleId(COMPANY_ADMIN), userUserA_Id, systemRoleId(USER)]
   );
 
-  await registry.deleteDashboard(dashA_Id).catch(() => {});
-  await registry.deleteDashboard(dashB_Id).catch(() => {});
+  await db.query('DELETE FROM dashboards WHERE id IN (?, ?)', [dashA_Id, dashB_Id]);
 
-  await registry.saveSpec(dashA_Id, { title: 'Corp A Analytics', cards: [{ id: 'card1', title: 'Revenue' }] }, {
-    companyId: compA_Id,
-    userId: userA_Id,
-    title: 'Corp A Analytics',
-    description: 'Internal to Corp A',
-  });
+  await registry.saveSpec(
+    dashA_Id,
+    { title: 'Corp A Analytics', cards: [{ id: 'card1', title: 'Revenue' }] },
+    {
+      companyId: compA_Id,
+      userId: userA_Id,
+      title: 'Corp A Analytics',
+      description: 'Internal to Corp A',
+    }
+  );
 
-  await registry.saveSpec(dashB_Id, { title: 'Corp B Analytics', cards: [{ id: 'card1', title: 'Orders' }] }, {
-    companyId: compB_Id,
-    userId: userB_Id,
-    title: 'Corp B Analytics',
-    description: 'Internal to Corp B',
-  });
+  await registry.saveSpec(
+    dashB_Id,
+    { title: 'Corp B Analytics', cards: [{ id: 'card1', title: 'Orders' }] },
+    {
+      companyId: compB_Id,
+      userId: userB_Id,
+      title: 'Corp B Analytics',
+      description: 'Internal to Corp B',
+    }
+  );
 
   console.log('  ✓ Created dashA for Company A and dashB for Company B');
 
@@ -156,7 +173,7 @@ async function runTests(): Promise<void> {
   } as unknown as Actor;
 
   const mockCompanyUser = {
-    id: 8883,
+    id: userUserA_Id,
     companyId: compA_Id,
     role: USER,
     isPlatform: false,
@@ -179,8 +196,8 @@ async function runTests(): Promise<void> {
   await registry.deleteDashboard(dashB_Id);
   console.log('  ✓ Cleaned up test dashboards');
 
-  await db.query(`DELETE FROM ${T.users} WHERE id IN (8881, 8882, 8883)`);
-  await db.query(`DELETE FROM ${T.companies} WHERE id IN (9991, 9992)`);
+  await db.query('DELETE FROM users WHERE id IN (?, ?, ?)', [userA_Id, userB_Id, userUserA_Id]);
+  await db.query('DELETE FROM companies WHERE id IN (?, ?)', [compA_Id, compB_Id]);
   console.log('  ✓ Cleaned up test users and companies');
 
   console.log('\n=== All Multi-Tenant Dashboard Architecture Tests PASSED! ===');

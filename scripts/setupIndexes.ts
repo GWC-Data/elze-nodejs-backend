@@ -1,11 +1,11 @@
 import config from '../src/config';
-const { db } = config.database;
-import * as dashboards from '../src/services/dashboardService';
-import { resolveSourceMetadata } from '../src/services/metadataService';
-import { quoteIdentifier, quoteQualified } from '../src/tools/sql';
-
-type ColMeta = Record<string, any>;
-type Spec = Record<string, any>;
+const { db, prisma } = config.database;
+import * as dashboards from '../src/modules/dashboards/dashboardService';
+import { resolveSourceMetadata } from '../src/modules/queryEngine/metadataService';
+import { quoteIdentifier, quoteQualified } from '../src/shared/db/sql';
+import { messageOf } from '../src/shared/errors/AppError';
+import type { DashboardSpec, DateGrainSpec, GroupBySpec, OrderByEntry } from '../src/modules/dashboards/dashboardTypes';
+import type { ColumnMeta, SourceMetadata } from '../src/modules/queryEngine/queryTypes';
 
 interface IndexTarget {
   expr: string;
@@ -30,17 +30,18 @@ function parseArgs(argv: string[]): { ids: string[]; dryRun: boolean } {
 }
 
 function slug(value: unknown): string {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 function indexName(table: string, column: string, suffix: string = ''): string {
   const base = `idx_${slug(table)}_${slug(column)}${suffix}`;
-  return base.length <= MAX_IDENTIFIER_LENGTH
-    ? base
-    : base.slice(0, MAX_IDENTIFIER_LENGTH).replace(/_+$/, '');
+  return base.length <= MAX_IDENTIFIER_LENGTH ? base : base.slice(0, MAX_IDENTIFIER_LENGTH).replace(/_+$/, '');
 }
 
-function indexTargets(colMeta: ColMeta): { skip?: string; targets?: IndexTarget[] } {
+function indexTargets(colMeta: ColumnMeta): { skip?: string; targets?: IndexTarget[] } {
   const type = String(colMeta.type || '').toLowerCase();
   if (UNINDEXABLE_TYPES.has(type)) {
     return { skip: `type ${type} cannot be indexed with a default btree` };
@@ -59,16 +60,16 @@ function indexTargets(colMeta: ColMeta): { skip?: string; targets?: IndexTarget[
   return { targets };
 }
 
-function candidateColumns(spec: Spec): string[] {
+function candidateColumns(spec: DashboardSpec): string[] {
   const columns = new Set<string>();
   const add = (name: unknown) => {
     if (typeof name === 'string' && name.trim()) columns.add(name.trim());
   };
-  const addGroupBy = (list: any[] | undefined) => {
-    for (const g of list || []) add(g && g.column);
+  const addGroupBy = (list: GroupBySpec[] | undefined) => {
+    for (const g of list || []) add(g?.column);
   };
-  const addDateGrain = (node: any) => {
-    if (node && node.dateGrain && typeof node.dateGrain === 'object') add(node.dateGrain.column);
+  const addDateGrain = (node: { dateGrain?: DateGrainSpec | null }) => {
+    if (node?.dateGrain && typeof node.dateGrain === 'object') add(node.dateGrain.column);
   };
 
   for (const slicer of spec.slicers || []) add(slicer.column);
@@ -76,12 +77,12 @@ function candidateColumns(spec: Spec): string[] {
   for (const card of spec.cards || []) {
     addDateGrain(card);
     addGroupBy(card.groupBy);
-    if (!(card.groupBy && card.groupBy.length)) {
+    if (!card.groupBy?.length) {
       for (const col of card.columns || []) {
-        if (['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
+        if (col.mapping && ['XTIME', 'SERIES', 'ITEM'].includes(col.mapping)) add(col.column);
       }
     }
-    for (const term of ([] as any[]).concat(card.orderBy || [], card.sort || [])) {
+    for (const term of ([] as OrderByEntry[]).concat(card.orderBy || [], card.sort || [])) {
       if (typeof term === 'string') add(term);
       else if (term) add(term.column || term.field || term.name);
     }
@@ -91,7 +92,7 @@ function candidateColumns(spec: Spec): string[] {
 }
 
 async function existingIndexes(schema: string, table: string): Promise<{ leading: Set<string>; names: Set<string> }> {
-  const { rows } = await db.query(
+  const { rows } = await db.query<{ index_name: string; column_name: string | null; position: string }>(
     `SELECT i.relname AS index_name,
             a.attname AS column_name,
             k.ordinality AS position
@@ -116,42 +117,49 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
   return { leading, names };
 }
 
+async function closeDatabase(): Promise<void> {
+  await prisma.$disconnect();
+  await db.end();
+}
+
 (async () => {
   const { ids, dryRun } = parseArgs(process.argv.slice(2));
 
-  // @ts-expect-error -- pre-existing bug kept as-is: this const shadows the imported module and reads itself in its own initializer
-  const dashboards = ids.length ? ids : dashboards.listDashboards().map((d) => d.id);
-  if (!dashboards.length) {
+  const dashboardIds = ids.length ? ids : (await dashboards.listDashboards()).map((d) => d.id);
+  if (!dashboardIds.length) {
     console.log('No dashboards found. Nothing to index.');
-    await db.end();
+    await closeDatabase();
     return;
   }
 
-  console.log(`Dashboards: ${dashboards.join(', ')}${dryRun ? '  (dry run)' : ''}`);
+  console.log(`Dashboards: ${dashboardIds.join(', ')}${dryRun ? '  (dry run)' : ''}`);
 
-  const wanted = new Map<string, { schema: string; table: string; columns: Map<string, ColMeta> }>();
+  const wanted = new Map<string, { schema: string; table: string; columns: Map<string, ColumnMeta> }>();
 
-  for (const id of dashboards) {
-    let spec: Spec;
+  for (const id of dashboardIds) {
+    let spec: DashboardSpec;
     try {
-      spec = dashboards.getSpec(id);
-    } catch (err: any) {
-      console.log(`! ${id}: ${err.message}`);
+      spec = await dashboards.getSpec(id);
+    } catch (err) {
+      console.log(`! ${id}: ${messageOf(err)}`);
       continue;
     }
 
-    let meta: Record<string, any>;
+    let meta: SourceMetadata;
     try {
       meta = await resolveSourceMetadata(spec);
-    } catch (err: any) {
-      console.log(`! ${id}: ${err.message}`);
+    } catch (err) {
+      console.log(`! ${id}: ${messageOf(err)}`);
       continue;
     }
 
     const { schema, table } = meta.table;
     const key = `${schema}.${table}`;
-    if (!wanted.has(key)) wanted.set(key, { schema, table, columns: new Map() });
-    const entry = wanted.get(key)!;
+    let entry = wanted.get(key);
+    if (!entry) {
+      entry = { schema, table, columns: new Map() };
+      wanted.set(key, entry);
+    }
 
     const resolved: string[] = [];
     for (const name of candidateColumns(spec)) {
@@ -175,14 +183,14 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
     const { leading, names } = await existingIndexes(schema, table);
 
     for (const colMeta of columns.values()) {
-      const { skip, targets } = indexTargets(colMeta);
+      const { skip, targets = [] } = indexTargets(colMeta);
       if (skip) {
         console.log(`  - ${colMeta.name}: ${skip}`);
         skipped += 1;
         continue;
       }
 
-      for (const target of targets!) {
+      for (const target of targets) {
         const name = indexName(table, colMeta.name, target.suffix);
 
         if (!target.suffix && leading.has(colMeta.name.toLowerCase())) {
@@ -196,8 +204,7 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
           continue;
         }
 
-        const sql =
-          `CREATE INDEX ${quoteIdentifier(name)} ON ${quoteQualified(schema, table)} (${target.expr})`;
+        const sql = `CREATE INDEX ${quoteIdentifier(name)} ON ${quoteQualified(schema, table)} (${target.expr})`;
         if (dryRun) {
           console.log(`  ~ ${sql}   -- ${target.note}`);
         } else {
@@ -210,8 +217,8 @@ async function existingIndexes(schema: string, table: string): Promise<{ leading
   }
 
   console.log(`\n${dryRun ? 'Would create' : 'Created'}: ${created}, skipped: ${skipped}`);
-  await db.end();
-})().catch((e: any) => {
-  console.error('ERROR', e.message);
+  await closeDatabase();
+})().catch((e: unknown) => {
+  console.error('ERROR', messageOf(e));
   process.exit(1);
 });

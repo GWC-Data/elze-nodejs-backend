@@ -14,17 +14,14 @@ const SMTP_PASSWORD = optional('SMTP_PASSWORD', null);
 
 if (Boolean(SMTP_USERNAME) !== Boolean(SMTP_PASSWORD)) {
   throw new ConfigError(
-    'SMTP_USERNAME and SMTP_PASSWORD must be set together, or both left blank for an ' +
-    'unauthenticated relay.'
+    'SMTP_USERNAME and SMTP_PASSWORD must be set together, or both left blank for an ' + 'unauthenticated relay.'
   );
 }
 
 const EMAIL_FROM = optional('EMAIL_FROM', null) || SMTP_USERNAME;
 
 if (!EMAIL_FROM) {
-  throw new ConfigError(
-    'No From address: set EMAIL_FROM, or SMTP_USERNAME for it to default to.'
-  );
+  throw new ConfigError('No From address: set EMAIL_FROM, or SMTP_USERNAME for it to default to.');
 }
 
 const SUPPORT_EMAIL = optional('SUPPORT_EMAIL', null);

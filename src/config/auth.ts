@@ -14,7 +14,7 @@ const JWT_REFRESH_SECRET = required(
 if (JWT_ACCESS_SECRET === JWT_REFRESH_SECRET) {
   throw new ConfigError(
     'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ: sharing one secret means a stolen ' +
-    'access token and a stolen refresh token are interchangeable.'
+      'access token and a stolen refresh token are interchangeable.'
   );
 }
 
@@ -31,10 +31,14 @@ try {
 }
 
 const APPLICATION_URL_BASE = APPLICATION_URL.replace(/\/+$/, '');
+const APPLICATION_ORIGIN = applicationOrigin.origin;
 
 const ACCESS_TOKEN_TTL_SECONDS = appConfig.ACCESS_TOKEN_TTL_SECONDS;
 const REFRESH_TOKEN_TTL_SECONDS = appConfig.REFRESH_TOKEN_TTL_SECONDS;
 const ACTIVATION_TOKEN_TTL_SECONDS = appConfig.ACTIVATION_TOKEN_TTL_SECONDS;
+const PASSWORD_RESET_TOKEN_TTL_SECONDS = appConfig.PASSWORD_RESET_TOKEN_TTL_SECONDS;
+const PASSWORD_RESET_MAX_REQUESTS = appConfig.PASSWORD_RESET_MAX_REQUESTS;
+const PASSWORD_RESET_WINDOW_SECONDS = appConfig.PASSWORD_RESET_WINDOW_SECONDS;
 
 const COOKIE_SECURE = boolean('COOKIE_SECURE', applicationOrigin.protocol === 'https:');
 const COOKIE_SAMESITE = optional('COOKIE_SAMESITE', 'strict');
@@ -47,33 +51,33 @@ const LOGIN_WINDOW_SECONDS = appConfig.LOGIN_WINDOW_SECONDS;
 const LOGIN_LOCKOUT_SECONDS = appConfig.LOGIN_LOCKOUT_SECONDS;
 
 function bootstrapSuperAdmin() {
-  const { username, email, password } = appConfig.BOOTSTRAP_SUPERADMIN;
-  if (!username || !email || !password) {
-    throw new ConfigError(
-      'BOOTSTRAP_SUPERADMIN in config/appConfig.js needs a username, an email and a password.'
-    );
-  }
-  return { username, email, password };
+  const purpose =
+    'the database has no accounts yet, so the platform owner is created from it. ' +
+    'Remove it once the owner has signed in.';
+  return {
+    username: required('BOOTSTRAP_ADMIN_USERNAME', purpose),
+    email: required('BOOTSTRAP_ADMIN_EMAIL', purpose),
+    password: required('BOOTSTRAP_ADMIN_PASSWORD', purpose),
+  };
 }
 
 export {
   JWT_ACCESS_SECRET,
   JWT_REFRESH_SECRET,
   APPLICATION_URL_BASE as APPLICATION_URL,
-
+  APPLICATION_ORIGIN,
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_SECONDS,
   ACTIVATION_TOKEN_TTL_SECONDS,
-
+  PASSWORD_RESET_TOKEN_TTL_SECONDS,
+  PASSWORD_RESET_MAX_REQUESTS,
+  PASSWORD_RESET_WINDOW_SECONDS,
   COOKIE_SECURE,
   COOKIE_SAMESITE,
-
   BCRYPT_ROUNDS,
   MIN_PASSWORD_LENGTH,
-
   LOGIN_MAX_ATTEMPTS,
   LOGIN_WINDOW_SECONDS,
   LOGIN_LOCKOUT_SECONDS,
-
   bootstrapSuperAdmin,
 };

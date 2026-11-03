@@ -1,70 +1,89 @@
 # Backend — API + Query Engine
 
 Express API in front of a generic, metadata-driven query engine, on PostgreSQL. Nothing in
-the query engine (`src/services/query*.service.ts`, `sqlGenerator`, `semanticLayer`) knows anything about a particular dashboard: table names, columns, measures,
+the query engine (`src/modules/queryEngine/`) knows anything about a particular dashboard: table names, columns, measures,
 dimensions, filters, aggregations and date grains all arrive from dashboard JSON and are
 validated against the live catalogue before reaching SQL.
 
 ## Layout
 
-Layered MVC + service. A request goes route -> middleware -> controller -> service ->
-repository, and each layer has one job: routes declare paths and guards, controllers
-parse the request and send the response, services hold the business rules (they never
-see `req`/`res`), and repositories are the only code that touches the database or the
-runtime files.
+Feature modules over a shared core. Each module in `src/modules/` holds one feature end to
+end, with the files named after their layer: `<name>Routes.ts` declares paths and guards,
+`<name>Controller.ts` parses the request and sends the response, `<name>Service.ts` holds
+the business rules (services never see `req`/`res`), `<name>Repository.ts` is the only code
+that touches the database, and `<name>Serializer.ts` / `<name>Validator.ts` shape responses
+and check input. A request still goes route -> middleware -> controller -> service ->
+repository. Modules import each other's services directly; `src/shared/` holds what every
+module uses and imports nothing from `src/modules/`.
 
 ```
 backend/
 ├── src/
 │   ├── server.ts                    listen, startup tasks, graceful shutdown
 │   ├── app.ts                       express app: cors, json, cookies, /api, static + SPA fallback
+│   ├── routes.ts                    mounts every module's router under /api
 │   │
 │   ├── config/                      single export: require('./config').<env|app|auth|email|database|engine|context>
-│   │   ├── index.ts                 lazy namespaces over the files below
+│   │   ├── index.ts                 lazy namespaces over the files below (database lives in shared/db)
 │   │   ├── env.ts                   loads .env once, resolves directory roots
 │   │   ├── configError.ts           required/optional readers that fail loudly
-│   │   ├── pgPool.ts                the driver, `?` placeholders, type coercions
-│   │   ├── database.ts              the one PostgreSQL pool, withTransaction
-│   │   ├── appConfig.ts             fixed in source: TTLs, throttling, bootstrap owner
+│   │   ├── appConfig.ts             fixed in source: TTLs, throttling, query concurrency
 │   │   ├── auth.ts                  tokens, cookies, password policy
 │   │   ├── email.ts                 the SMTP relay, read from the environment
 │   │   ├── engine.ts                DB_SCHEMA, Redis cache, dashboard directory
 │   │   ├── context.ts               CREDENTIAL_SECRET, CONTEXT_MCP_* settings
-│   │   ├── dashboards/default.json  runtime dashboard metadata (not source)
-│   │   └── rbac/scope-dimensions.json  columns a data scope may be assigned on
+│   │   └── dashboards/default.json  runtime dashboard metadata (not source)
 │   │
-│   ├── routes/                      definitions only; index.ts mounts every router under /api
-│   ├── middleware/                  auth, csrf, requestTimer, error (404 + terminal handler)
-│   ├── controllers/                 one per router: parse request -> call service -> respond
-│   ├── services/                    business logic
-│   │   ├── auth, token, activation, onboarding, loginThrottle
-│   │   ├── authorization            the one allow/deny layer: can / assert / levels
-│   │   ├── user, company, group, role, access, scope, audit, platform, workspace
-│   │   ├── dashboard                spec resolution, caching, create/edit/delete, editor
-│   │   ├── queryEngine, queryPlanner, queryOptimizer, sqlGenerator,
-│   │   │   resultFormatter, semanticLayer, metadata    the query engine
-│   │   ├── contextLayer             orchestration for the /api/context endpoints
-│   │   ├── connection, context, version, publish, mcp  the context layer
-│   │   ├── email, bootstrap
-│   │   └── providers/               smtpProvider.ts, domoProvider.ts
-│   ├── repositories/                every SQL statement and file read/write (baseRepository.ts: paging, scoping)
-│   ├── models/                      rbacModel.ts, contextModel.ts (DDL + table names), cardModel.ts
-│   ├── views/
-│   │   ├── templates/               accountActivationTemplate.ts
-│   │   └── serializers/             row -> response shaping, per resource
-│   ├── validators/                  request validation (ids, strings, lists, users, scopes, dashboards, context)
-│   ├── constants/                   error codes, permissions, audit events, statuses, query vocabulary, ...
-│   ├── tools/                       AppError, apiResponse, jwt, hash, password, cookies, secretBox,
-│   │                                sql quoting, list/pagination helpers, slugify, caches
-│   └── types/                       Actor, and the req.actor/req.account typing for Express
+│   ├── modules/
+│   │   ├── auth/                    sign-in, refresh, sessions, activation, password reset, onboarding,
+│   │   │                            login throttle, authorization (can / assert / levels), authMiddleware,
+│   │   │                            activation and password reset emails
+│   │   ├── users/                   users, per-user extra permissions, row-level data scopes
+│   │   ├── companies/               companies, company features, the platform and workspace overviews
+│   │   ├── groups/                  groups and their members
+│   │   ├── roles/                   system roles and company roles, built-in role defaults
+│   │   ├── access/                  dashboard grants to users and groups
+│   │   ├── catalogue/               permissions, features, access levels, system roles, connectors and
+│   │   │                            audit event types, loaded from the database; role tier names
+│   │   ├── audit/                   the audit trail and its event names
+│   │   ├── dashboards/              dashboard specs, the editor (metadata routes), card model
+│   │   ├── contextLayer/            warehouse connections, context store, review, versions, publish,
+│   │   │                            sharing, MCP, the agent gate, the Domo provider and its throttle
+│   │   ├── queryEngine/             metadata, planner, optimizer, SQL generator, semantic layer,
+│   │   │                            result formatter, query repository and cache
+│   │   └── system/                  startup bootstrap, health, API docs
+│   │
+│   ├── shared/
+│   │   ├── db/                      database.ts (pool + Prisma client + withTransaction), pgPool.ts (the
+│   │   │                            query engine's driver), baseRepository.ts (raw-SQL helpers, paging,
+│   │   │                            scoping), sql quoting, dbError, listQuery, statuses
+│   │   ├── http/                    apiResponse, csrf, requestTimer and error middleware
+│   │   ├── errors/                  AppError, error codes, PostgreSQL error codes
+│   │   ├── security/                jwt, password, hash, secretBox, cookies, session names
+│   │   ├── email/                   emailService and the SMTP provider
+│   │   ├── validation/              common and list validators, page limits, pagination
+│   │   ├── cache/                   ttlCache
+│   │   ├── text/                    slugify
+│   │   └── types/                   Actor, and the req.actor/req.account typing for Express
+│   │
+│   └── generated/prisma/            Prisma client, written by `prisma generate` (gitignored)
 │
+├── biome.json                       lint and format rules
+├── vitest.config.mts                unit test runner settings
+├── .github/workflows/ci.yml         what every pull request has to pass
 ├── tsconfig.json                    strict, CommonJS output into dist/ (gitignored)
+├── prisma.config.ts                 Prisma CLI settings; builds the database URL from DB_*
+├── prisma/schema.prisma             the application tables, as Prisma models
+├── prisma/migrations/               every schema change, applied by `npm run db:migrate`
 ├── docs/context-layer.md            read before touching warehouse connections
+├── docs/openapi.json                the API reference (OpenAPI 3.1), served at /api/docs outside production
 │
 ├── scripts/setupIndexes.ts          creates indexes for slicer/groupBy columns
 ├── scripts/resetAccess.ts           emails an account a fresh activation link
-├── scripts/migrateDatabase.ts       copies data from a previous database
+├── scripts/checkApiDocs.ts          fails when docs/openapi.json and the routers disagree
+├── scripts/testDb.ts                runs the integration suites, each in a throwaway database
 │
+├── tests/unit/                      Vitest unit tests, no database (support/ holds shared fixtures)
 ├── tests/rbac.e2e.ts                the RBAC / tenancy / token / onboarding suite
 ├── tests/smtpSink.ts                an in-process SMTP relay the suite reads mail from
 ├── tests/reportingFixture.ts        a small source table so dashboard checks are real
@@ -76,19 +95,19 @@ backend/
 
 ```
 GET /api/dashboard/<id>
-  routes/dashboardRoutes.ts           requirePermission('dashboard.read')
-  middleware/authMiddleware.ts        verify access token -> resolve the actor
-                                       requireDashboardAccess('view')  <- before any SQL
-  controllers/dashboardController.ts  parse filters
-  services/dashboardService.ts        dashboardId -> dashboard JSON, hydrateView
-  services/queryEngineService.ts      hydrateDashboard
-    services/metadataService          resolve + validate table and columns
-    services/queryPlannerService      one isolated plan per card / slicer
-    services/queryOptimizerService    merge compatible KPI queries
-    services/sqlGeneratorService      parameterised SQL
-    tools/queryCache                   keyed on SQL + bound params
-    repositories/queryRepository      PostgreSQL, bounded concurrency
-    services/resultFormatterService   rows -> cards / slicers
+  dashboards/dashboardRoutes.ts         requirePermission('dashboard.read')
+  auth/authMiddleware.ts                verify access token -> resolve the actor
+                                         requireDashboardAccess('view')  <- before any SQL
+  dashboards/dashboardController.ts     parse filters
+  dashboards/dashboardService.ts        dashboardId -> dashboard JSON, hydrateView
+  queryEngine/queryEngineService.ts     hydrateDashboard
+    queryEngine/metadataService         resolve + validate table and columns
+    queryEngine/queryPlannerService     one isolated plan per card / slicer
+    queryEngine/queryOptimizerService   merge compatible KPI queries
+    queryEngine/sqlGeneratorService     parameterised SQL
+    queryEngine/queryCache              keyed on SQL + bound params
+    queryEngine/queryRepository         PostgreSQL, bounded concurrency
+    queryEngine/resultFormatterService  rows -> cards / slicers
   JSON response
 ```
 
@@ -102,7 +121,7 @@ would misstate every visual.
 
 ## Cards
 
-A dashboard declares one ordered `cards` list. `models/cardModel.ts` reads each card's
+A dashboard declares one ordered `cards` list. `modules/dashboards/cardModel.ts` reads each card's
 `chartType` to decide whether it is planned as a KPI badge (`planKpi` — one aggregated
 value, optionally compared across a date grain) or as a chart (`planCard`). Nothing else
 distinguishes them, so the same JSON keys mean the same thing on every card and the
@@ -150,7 +169,7 @@ dashboard, which cannot mean anything now that dashboards belong to companies.
 
 ## Access control
 
-RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/middleware/authMiddleware.ts`, and stores its data in
+RBAC lives in `src/services` (authorization, user, company, group, role, access, token), is enforced by `src/modules/auth/authMiddleware.ts`, and stores its data in
 the **same database as the reporting tables** — one `DB_NAME`, one pool, created
 automatically on first start.
 
@@ -162,20 +181,34 @@ activation tokens are stored as HMACs keyed with a secret that lives outside the
 so a dump of these tables still cannot be replayed on its own. Give the reporting data its
 own `DB_SCHEMA` if either set of tables might want a name like `users`.
 
-### Three roles, two of them inside a company
+### Four built-in roles, two of them inside a company
 
 ```
-SUPER_ADMIN            platform owner: every company, user, role and assignment
+SUPER_ADMIN              the one platform owner: every company, user, role and assignment
    |
-   +-- COMPANY_ADMIN   one company: its users, groups and access
+   +-- PLATFORM_ADMIN    created by the owner: companies and their accounts, nothing about
+   |                     platform accounts and no editing of the built-in role defaults
+   |
+   +-- COMPANY_ADMIN     one company: its users, groups and access
           |
-          +-- USER     one company: only what has been granted to them
+          +-- USER       one company: only what has been granted to them
 ```
+
+There is exactly one `SUPER_ADMIN`: nobody can be created as or promoted to it, and the
+unique index `uq_user_roles_one_platform_owner` guarantees a single holder. Only the owner
+creates, edits, deletes, lists or opens platform admins (`authorizationService`
+`isPlatformOwner` / `seesPlatformAccounts`); a platform admin's `/api/platform/users`,
+pickers and audit trail leave platform accounts out, and one by id is a `404`. A company
+account can never hold a platform role (`trg_user_roles_check`).
+`GET /api/platform/roles/assignable[?companyId=]` is the list to offer in a role picker:
+Company admin and Member for a company account, Platform admin for a platform account (to the
+owner only).
 
 A role's **scope** — `platform` or `company` — is a column on the role row, and it is what
-authorization reads. Nothing in the codebase compares a role *name* to decide what somebody
-may do, so adding a capability is a permission id plus a guard, not an audit of thirty
-`if (role === ...)` branches.
+authorization reads. Outside `modules/auth/authorizationService.ts` (`can()`, which lets the
+platform owner through, and `isPlatformOwner()`), nothing in the codebase compares a role
+*name* to decide what somebody may do, so adding a capability is a permission id plus a guard,
+not an audit of thirty `if (role === ...)` branches.
 
 ### Three independent axes
 
@@ -186,12 +219,12 @@ may do, so adding a capability is a permission id plus a guard, not an audit of 
 | **Access level** | a grant on the user or a **group** | what may they do with *one dashboard*? |
 
 Permissions are business capabilities (`user.create`, `access.grant`, `dashboard.read`, …)
-listed in `src/constants/permissions.ts` — that file is the whole vocabulary, and a
+stored in `access_control.permissions` — that table is the whole vocabulary, and a
 permission missing from it cannot be granted. Access levels are ranked `view < share <
 developer < admin`; a user's effective level is the **strongest** of their direct grant and
 the grants of every *active* group they belong to, in their own company.
 
-`PLATFORM_ONLY_PERMISSIONS` can never be given to a company role — those are the
+A permission with `platform_only` set can never be given to a company role — those are the
 capabilities that would let a customer's administrator act outside their own company.
 
 ### Features and company roles
@@ -199,7 +232,7 @@ capabilities that would let a customer's administrator act outside their own com
 Two more things shape what a company account holds (full detail: `.claude/ARCHITECTURE.md`
 §2.3.1–§2.3.3):
 
-- **Features** (`src/constants/features.ts`) — the platform owner switches Data analyst agent,
+- **Features** (`access_control.features`) — the platform owner switches Data analyst agent,
   Agents and Dashboards on or off per company (`/api/platform/companies/:id/features`);
   Metadata Lakehouse is always on. A feature is a **ceiling**: effective permissions are the
   role's ∩ the enabled features' (plus core ones like `user.*`). A refused request whose
@@ -209,14 +242,24 @@ Two more things shape what a company account holds (full detail: `.claude/ARCHIT
   the built-in `USER` role; the custom role's permissions replace USER's. Custom roles never
   hold platform permissions nor the ones that manage people, groups or roles.
 - **Every company's own Member** — each company has a copy of the built-in `USER` role
-  (`company_roles` with `builtin_role = 'USER'`), created with the company. It follows the
+  (`access_control.roles` with `kind = 'company_default'`), created with the company. It follows the
   platform defaults until the company admin edits it; from then on it is that company's alone
   (`modified_by`/`modified_at`), until **Reset**.
 - **The database enforces it too**: a member's company role must be from their own company, a
   company role holds only known, non-platform, non-admin permissions, and a company's Member
-  copy can never be handed out as a custom role (constraints and triggers in `INTEGRITY`).
+  copy can never be handed out as a custom role (constraints and triggers in
+  `prisma/migrations/1_database_objects`).
 - **Responses carry only what the account can use**: `user.features` lists only features the
   account holds permissions in, and role endpoints never send a disabled feature's permissions.
+- **Hidden features** (`access_control.features.hidden`, set for Dashboards and Agents) are
+  left out of every response, with their permissions (`dashboard.*`, `data.read`,
+  `access.*`, `scope.*`, `agent.*`): sign-in and `/auth/me` (which no longer carries a
+  `dashboards` list), role and permission grids, the feature list, company features, extra
+  permissions, overview counts (`dashboards`, `assignments`, `dashboardsGranted`,
+  `dashboardCount`) and the audit trail (dashboard events and the `dashboards` category).
+  They cannot be given to a role (`FEATURE_NOT_ENABLED`), and saving features or permissions
+  keeps whatever was stored for them. The code and routes are unchanged; clearing `hidden`
+  brings a feature back.
 
 ### Tenant isolation
 
@@ -235,9 +278,63 @@ resource in another company answers `404`, not `403` — telling them apart woul
 A `companyId` in a request body is **ignored** for a company-scoped caller rather than
 validated: the only correct value is one the client cannot influence.
 
+### Deleting keeps the row (soft delete)
+
+Deleting a user, company, group, company role, dashboard, context (connection) or published
+context version does not remove the row: it sets `deleted_at` and `deleted_by`, and every
+lookup, list, count, picker and access check skips it (`src/shared/db/softDelete.ts`:
+`NOT_DELETED` for Prisma, `notDeleted(alias)` and `notDeletedRef(table, column)` for SQL). A
+deleted record answers `404` exactly as a missing one did, and deleting it again is a `404`.
+The `access_control` views skip deleted rows too.
+
+| Record | Also on delete |
+|---|---|
+| user | status `disabled`, every session revoked, activation and reset links stop working |
+| company | only once it has no accounts that are not deleted; its groups, roles, dashboards and contexts are soft-deleted with it |
+| group | `active = false`, so it grants nothing |
+| company role | refused while an account that is not deleted holds it |
+| dashboard | grants and assignments are kept; a dashboard that is only a JSON file gets a deleted row so it stays hidden |
+| context | datasets, versions, reviews and shares are kept; the agent gate refuses it |
+| context version | the next publish does not reuse its number |
+
+Names are unique only among records that are not deleted (partial unique indexes in
+`8_soft_delete`): a deleted user's username and email, and a deleted company's, group's,
+role's or context's name, can be used again. Dashboard ids and version numbers are never reused.
+
+Still removed for good: shares, grants, dashboard assignments and group memberships (links,
+whose history is in the audit trail), extra permissions and data scopes when they are replaced,
+expired tokens and login attempts, and the half-created records a failed onboarding email rolls
+back.
+
+**Deleted items.** `GET /api/deleted-items` lists the soft-deleted accounts, groups, custom roles,
+companies, contexts and published context versions the caller may see, newest first, with
+`deletedAt` and `deletedBy` (who deleted it). `POST /api/deleted-items/:type/:id/restore` puts
+one back where it was deleted from; `DELETE /api/deleted-items/:type/:id` removes it for good.
+All three need `delete.permanent` (company admins, platform admins, the platform owner) plus the
+permission that deletes that kind of record. A company admin sees their own company; platform
+accounts see every company and deleted companies, and only the platform owner sees deleted
+platform accounts. What was deleted together with a company (and its deleted accounts) is listed
+only once the company is recovered; versions of a deleted context come back with the context.
+Recovered records come back switched off where they have a switch: an account deactivated (or
+invited, if it never chose a password), a group paused, a company suspended. A recovered company
+brings back the groups, roles, dashboards and contexts deleted with it. Recovering answers 409
+`CONFLICT` when the name, username or email has since been taken.
+
+**Permanent delete.** Every record delete above takes `?permanent=true` to remove the record
+from the database for good, with what depends on it, instead of keeping it as deleted; it also
+works on a record that is already soft-deleted. It needs the admin-only `delete.permanent`
+permission, held by company admins, platform admins and the platform owner and never by
+members (who therefore only ever soft-delete). A permanently deleted role first moves any
+deleted accounts still holding it to the company's Member role; a permanently deleted
+dashboard that also exists as a JSON file comes back from the file.
+
+The agent backend reads `connections` directly and does not know about `deleted_at`. Behind
+nginx the agent gate refuses a deleted context; a direct call to the ADK API (local
+development) is not stopped.
+
 ### Dashboards are still files
 
-There is no `dashboards` table. `services/dashboardService.ts` remains the only source of
+There is no `dashboards` table. `modules/dashboards/dashboardService.ts` remains the only source of
 truth for which dashboards exist, so assignments and grants store the dashboard id as plain
 text, validated against the registry on write and joined against it on read.
 
@@ -248,7 +345,7 @@ text, validated against the registry on write and joined against it on read.
 | **Access token** | `ACCESS_TOKEN_EXPIRY` (15m) | HttpOnly cookie `da_access`, `Path=/` (nginx's agent gate reads it; it is stripped before `/svc/*`) | no — it expires |
 | **Refresh token** | `REFRESH_TOKEN_EXPIRY` (30d) | HttpOnly cookie `da_refresh`, `Path=/api/auth` | yes — it is a row |
 
-No token is ever in a response body: login, refresh, activation and password change return
+No token is ever in a response body: login, refresh, activation, password reset and password change return
 only the user, its permissions and the auth state. Both tokens are cookies no script can read.
 
 Access-token claims carry identity only. Role, permissions, company status and scopes are
@@ -258,14 +355,14 @@ their next call rather than at token expiry.
 Refresh **rotates**: every refresh issues a new token and marks the old one replaced.
 Presenting a replaced token means two parties hold the same secret, so the whole family —
 the entire login chain — is revoked at once. Sessions are also revoked on logout, password
-change, role change, deactivation, access reissue and company deactivation.
+change, password reset, role change, deactivation, access reissue and company deactivation.
 
 Only the HMAC of a refresh token is stored, keyed with `JWT_REFRESH_SECRET`, so a dump of
 `refresh_tokens` cannot be replayed without a secret that lives outside the database.
 
 Every endpoint is cookie-authenticated, so every state-changing request needs CSRF
 protection: `SameSite=Strict` plus a double-submit header (`X-CSRF-Token` matching the
-readable `da_csrf` cookie), checked in `src/middleware/csrfMiddleware.ts`. `requireAuth` applies it
+readable `da_csrf` cookie), checked in `src/shared/http/csrfMiddleware.ts`. `requireAuth` applies it
 to every non-GET/HEAD/OPTIONS request; refresh and logout, which authenticate from the
 refresh cookie instead, apply it directly. There is no `Authorization: Bearer` path.
 
@@ -274,7 +371,7 @@ refresh cookie instead, apply it directly. There is no `Authorization: Bearer` p
 Every list that grows with the business — `GET /api/users` (and `/api/platform/users`),
 `GET /api/platform/companies`, `GET /api/audit`, and the context layer's review queue,
 glossary and fact list — takes `?page&pageSize&search&sort&dir` plus its own filters and answers
-`{ items, total }` (`src/validators/listValidator.ts`, `src/repositories/baseRepository.ts`). The database filters, orders and limits; `total`
+`{ items, total }` (`src/shared/validation/listValidator.ts`, `src/shared/db/baseRepository.ts`). The database filters, orders and limits; `total`
 comes from `COUNT(*) OVER ()` in the same statement, so paging costs no extra round trip. `sort`
 is a key from the endpoint's own whitelist, never SQL; an unknown key is a 400. Company scoping is
 applied in SQL exactly as before — a company caller's `companyId` parameter is still ignored.
@@ -301,7 +398,7 @@ Every response under `/api` is one of two shapes:
 ```
 
 `code` is the stable part — clients branch on it and never on the message. The codes are
-listed in `src/constants/errorCodes.ts`, a code that is not there cannot be sent, and any 5xx
+listed in `src/shared/errors/errorCodes.ts`, a code that is not there cannot be sent, and any 5xx
 message is replaced with a generic one before it leaves the process.
 
 ### Endpoints
@@ -312,6 +409,8 @@ message is replaced with a generic one before it leaves the process.
 | `POST` | `/api/auth/login` | — |
 | `POST` | `/api/auth/refresh`, `/api/auth/logout` | refresh cookie + CSRF header |
 | `GET`/`POST` | `/api/auth/activation` | the activation token itself |
+| `POST` | `/api/auth/forgot-password` | — (throttled per username/email) |
+| `GET`/`POST` | `/api/auth/reset-password` | the reset token itself |
 | `GET` | `/api/auth/me`, `/api/auth/sessions` | signed in |
 | `POST` | `/api/auth/change-password` | signed in |
 | `GET` | `/api/companies`, `/api/companies/:id` | `company.read` |
@@ -336,6 +435,30 @@ message is replaced with a generic one before it leaves the process.
 | `PATCH`/`POST` | `/api/dashboard/:id/config`, `/api/dashboard/preview` | `dashboard.update` + `developer` on it |
 
 The dashboard endpoints are **no longer open to anonymous callers**.
+
+### API reference
+
+The table above is a summary. Every endpoint, with its request body, query parameters,
+response shapes and error codes, is in `docs/openapi.json` (OpenAPI 3.1). Outside
+production the server serves it:
+
+| URL | What |
+|---|---|
+| `/api/docs` | Swagger UI |
+| `/api/docs/openapi.json` | the raw spec, for Postman, Insomnia or a client generator |
+
+With `NODE_ENV=production` neither route is mounted and both return the usual 404.
+
+Swagger UI sends the browser's cookies and copies the `da_csrf` cookie into the
+`x-csrf-token` header on every request, so sign in through `POST /api/auth/login` from the
+page first; after that the signed-in routes, writes included, work without pasting tokens.
+
+The spec is written by hand, so it has to follow the routes. When you add, remove or
+rename a route, update `docs/openapi.json` in the same change and run
+`npm run docs:check`. The check starts at `src/routes.ts`, follows each `router.use` mount into the module routers,
+reads the spec, and fails on a route the spec does not have, a documented operation the
+server does not serve, a missing or repeated `operationId`, an operation without a tag,
+or a path parameter that is not declared.
 
 ### Onboarding
 
@@ -368,7 +491,7 @@ Creation and mail are all-or-nothing on both paths. If delivery fails, the accou
 the company path the company with it — is removed again, because what would otherwise be
 left behind holds the username and email address that the retry needs.
 
-Both paths render the invitation through `services/onboardingService.ts`, so the wording, the
+Both paths render the invitation through `modules/auth/onboardingService.ts`, so the wording, the
 expiry and the security notice cannot drift apart between them.
 
 "Reset access" (`POST /api/users/:id/activation`) is the same mechanism — it clears the
@@ -378,11 +501,43 @@ password until a link gets through. That is the safe direction — the old passw
 to stop working — and the error message says so outright rather than leaving it to be
 discovered.
 
+The activation link works once and expires after `ACTIVATION_TOKEN_TTL_SECONDS` (48 hours).
+
+### Forgot password
+
+An active account can choose a new password without an administrator:
+
+```
+POST /api/auth/forgot-password { identifier }      username or email
+   -> always the same 200 answer, whether or not an account matches
+   -> after the response: an active account with a password, in an active company,
+      gets a reset link (stored as an HMAC, purpose "password_reset" in user_tokens)
+GET  /api/auth/reset-password?token=...             who the link is for
+POST /api/auth/reset-password { token, password }  sets the password, ends every
+                                                    session, signs the user in
+```
+
+- The link opens `APPLICATION_URL/reset-password?token=...`, works once and expires after
+  `PASSWORD_RESET_TOKEN_TTL_SECONDS` (1 hour). Asking again replaces the earlier link, and a
+  password change cancels any outstanding one.
+- Nothing in the answer or its timing tells the caller whether the account exists: the lookup
+  and the email run after the response is sent, and a delivery failure is only logged.
+- A pending account gets no link — it still needs a new activation link from an administrator —
+  and neither does a deactivated account or one in a deactivated company.
+- **Throttling.** At most `PASSWORD_RESET_MAX_REQUESTS` (3) requests per username or email in
+  `PASSWORD_RESET_WINDOW_SECONDS` (1 hour), counted in `login_attempts` under a `reset:` key
+  whether or not an account matches; the next one answers 429 `RATE_LIMITED` with how many
+  minutes to wait. An account is also sent at most 3 links an hour in total, so alternating its
+  username and email does not double that.
+- A successful reset also clears any sign-in lockout on the account's username and email.
+- Audit events: `password_reset_requested` (with `sent` and, when nothing was sent, `reason`)
+  and `password_reset`.
+
 ### Email
 
-`src/services/emailService.ts` is the only way the application sends mail. Business code calls
+`src/shared/email/emailService.ts` is the only way the application sends mail. Business code calls
 `sendEmail({ to, subject, text, html }, { consequence })` and knows nothing about transport;
-swapping SMTP for SES, SendGrid or Graph is a new file under `src/services/providers/`.
+swapping SMTP for SES, SendGrid or Graph is a new provider file next to `src/shared/email/smtpProvider.ts`.
 
 `consequence` is what the caller did about a failure, in the caller's own words. Only the
 caller knows: the same undelivered message rolls back a company on one path, a single
@@ -408,36 +563,53 @@ the same layers as everything else — see `docs/context-layer.md` for its file 
 |---|---|
 | Context layer | Warehouse connections. Domo is implemented; Snowflake, Databricks, BigQuery, Redshift and PostgreSQL are listed as `planned` and refused by the API. |
 
+A context is visible to its creator, to holders of `context.manage_all` (company admins by
+default) and to the people and groups it is shared with, at view, edit or full. Its creator and
+company admins (any `context.manage_all` holder, and platform accounts) can share it with any
+active person or group of its company - a company admin also shares the contexts members
+created; a member never shares a context someone else created, whatever their level. The same
+people can open it to the whole company with `PUT …/access/general` `{ "generalAccess": "company" }`:
+everyone in its company then sees it at view, and edit or full still need a person or group
+grant. A new context starts `restricted`.
+
 `docs/context-layer.md` is worth reading before touching it: it stores a third-party credential **reversibly**, which is the one place
 in this application that is true, and it calls Domo endpoints that are not part
 of Domo's versioned public API.
 
 ```bash
-DB_NAME=app_e2e npm run test:context   # 59 checks, against a stand-in Domo
+npm run test:context   # against a stand-in Domo, in a throwaway database (see Tests)
 ```
 
 ### Row-level data scopes
 
-`user_data_scope` records which slices of the data a user may see. It is **stored and
+`access_control.user_data_scopes` records which slices of the data a user may see. It is **stored and
 configurable, but nothing filters on it yet** — every endpoint that touches scopes reports
 `enforced: false`. Turning it on means doing *both* halves: injecting the predicates during
 planning, **and** folding the acting user's scope into the cache key in
-`tools/queryCache.ts`. Doing only the first would serve one user's rows to another out of
+`modules/queryEngine/queryCache.ts`. Doing only the first would serve one user's rows to another out of
 the cache.
 
-Which columns a scope may be assigned on is runtime configuration, so it sits beside the
-dashboard JSON:
+Which columns a scope may be assigned on is a row in `access_control.scope_dimensions`, read
+per request, so a new dimension needs no restart:
 
-```bash
-cp src/config/rbac/scope-dimensions.example.json src/config/rbac/scope-dimensions.json
+```sql
+INSERT INTO access_control.scope_dimensions (dimension, label, source_table, source_column)
+VALUES ('theater', 'Theater', 'cinema_analysis', 'Theater Name');
 ```
 
 ### First start
 
-`bootstrapAppMeta()` runs on every start and is idempotent: it creates the tables, the
-indexes, the three roles and — only when the users table is empty — the platform owner
-declared in `src/config/appConfig.ts`, flagged to change its password at first sign-in.
-There is no database to create: the tables go into `DB_NAME`, beside the reporting data.
+The tables come from the migrations, not from the server: run `npm run db:migrate` against
+a new database before its first start, and again after pulling a change that adds a
+migration. The server checks at startup and refuses to start while a migration is missing,
+naming it.
+
+`bootstrapAppMeta()` then runs on every start: it loads the catalogue and — only when the
+users table is empty — creates the platform owner from `BOOTSTRAP_ADMIN_USERNAME`,
+`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, flagged to change its password at
+first sign-in. Those three variables are read at no other time; once the owner exists they can
+be removed. There is no database to create: the tables go into `DB_NAME`, beside the
+reporting data.
 
 Bootstrap failure **is fatal**. Every endpoint now resolves an actor and checks a grant, so
 a process that cannot reach the database cannot authorize anything; staying up would mean
@@ -449,38 +621,124 @@ crash naming the variable. There are no fallback secrets — a default one is
 indistinguishable at runtime from a correctly configured deployment, and forges every token
 in the system.
 
-#### New permissions on an existing installation
+**One web app origin.** `APPLICATION_URL` is also the only browser origin the API serves
+(`src/shared/http/originMiddleware.ts`): a request whose `Origin` header - or, without one, the
+origin of its `Referer` - differs in scheme, host or port is refused with 403
+`ORIGIN_NOT_ALLOWED`. `localhost` and `127.0.0.1` count as different origins. Behind a proxy (the
+Next.js `/api` rewrite, nginx) the browser's headers are passed through, so `APPLICATION_URL` is
+the address in the browser's address bar, not the proxy's target. Requests carrying neither header
+(curl, health probes, server-to-server calls) pass and `/api/health` is never checked: this keeps a
+misconfigured or foreign web app out, it does not stop scripts, which still need a session and the
+CSRF token. Outside production the backend's own address is accepted too, for Swagger at
+`/api/docs`.
 
-Role defaults are seeded only for a role the current start actually created,
-so an administrator who deliberately narrows a role does not get the defaults
-restored under them at the next restart. On its own that also means a
-permission added in a later release never reaches the roles of an installation
-that already exists — the first company administrator to look for the new
-screen finds it missing, with nothing to say why.
+#### The catalogue lives in the database
 
-`permission_seed_log` separates the two cases. It records which permission ids
-the catalogue has contained at a previous start, whether or not anybody was
-granted them. At each start:
+Permissions, features, access levels, the three system roles and their default
+permissions, the warehouse connectors and the audit event types are rows, not code:
+`access_control.permissions`, `features`, `access_levels`, `roles`, `role_permissions`, and
+`public.connectors`, `audit_event_types`. The server reads them once at startup
+(`modules/catalogue/catalogueService.ts`) and refuses to start if a system role, an access level or an
+audit event the code writes is missing.
 
-- an id **in** the log that no role holds was revoked on purpose, and is left alone;
-- an id **not in** the log is new here, and the catalogue default is applied.
+Nothing at startup rewrites them any more, so an edit made through the API — narrowing a
+built-in role, for instance — stays as it was made. Changing the catalogue itself is a
+migration:
 
-The first start after the log was introduced backfills it from what the roles
-currently hold, so that one time a previously revoked permission is treated as
-new and comes back. Nothing recorded the difference before the log existed;
-every start after it is exact.
+- a new permission: `INSERT` it into `access_control.permissions` (with its `feature_id`,
+  `platform_only` and `admin_only`), and add it to the `role_permissions` of whichever built-in
+  roles should have it by default. The platform owner's role receives every new permission
+  automatically (`trg_permissions_platform_owner`). The code then guards a route with it.
+- a new connector or audit event: `INSERT` into `connectors` or `audit_event_types`.
+
+Restart the server after applying such a migration so it reloads the catalogue.
+
+### Database schema and migrations
+
+`prisma/schema.prisma` describes every table this backend owns, in the `public` and
+`access_control` schemas. Model and field names follow Prisma's conventions (`User`,
+`companyId`); `@@map`/`@map` keep the real table and column names, so nothing in the
+database was renamed.
+
+`prisma/migrations/` holds the history:
+
+| Migration | Contents |
+|---|---|
+| `0_init` | the tables, keys, indexes and foreign keys as they stood when Prisma was introduced |
+| `1_database_objects` | what `schema.prisma` cannot express: CHECK constraints, the partial unique indexes, the PL/pgSQL triggers, the five `access_control` views and the table comments. Written to be re-runnable |
+| `2_catalogue_in_database` | `connectors` and `audit_event_types`, the catalogue rows (permissions, features, access levels, system roles and their defaults) with their fixed UUIDs, and the trigger that gives the platform owner every new permission |
+| `3_scope_dimensions` | `access_control.scope_dimensions` |
+| `4_status_enums` | status-like columns become PostgreSQL enums (`user_status`, `role_tier`, `review_status`, …) in place of CHECK constraints; the views are recreated around the change |
+| `5_context_edit_permissions` | every holder of `context.read` is given `context.update` and `context.delete` |
+| `6_drop_context_publications` | drops the legacy `context_publications` table |
+| `7_password_reset_audit_events` | the `password_reset_requested` and `password_reset` audit event types |
+| `8_soft_delete` | `deleted_at` / `deleted_by` on users, companies, groups, roles, dashboards, connections and context versions; their unique names become partial unique indexes over rows that are not deleted; every context becomes `restricted`; the views skip deleted rows |
+| `9_01_permanent_delete_permission` | the admin-only `delete.permanent` permission, given to the company admin role |
+| `9_02_platform_admin_tier` | the `PLATFORM_ADMIN` value of `role_tier` (its own migration: a new enum value cannot be used in the transaction that adds it) |
+| `9_03_platform_admin_role` | the Platform admin system role, one platform owner (extra `SUPER_ADMIN` holders become platform admins, then a unique index), the user-role trigger and `user_resource_access` view taught about platform admins |
+| `9_04_hidden_features` | `features.hidden`, set for Dashboards and Agents; `dashboard.assign` joins the Dashboards feature |
+| `9_05_restore_audit_events` | the `*_restored` audit event types written when a deleted item is recovered |
+| `9_06_uuid_ids` | `companies.id`, `users.id` and `groups.id`, and the 53 columns that point at them, become UUIDs (`gen_random_uuid()` for new rows). Existing rows get a fresh UUID and every reference follows it; references to rows already purged become NULL, including `userId` / `groupId` / `companyId` inside `audit_logs.detail` and `companyId` in `dashboards.spec`. Foreign keys and the five views are saved from the live database and recreated unchanged; foreign keys from other schemas (`legacy_rbac`) are dropped. `audit_logs.id` stays a BIGINT |
+| `9_09_audit_permission` | the `audit.read` permission, given to the platform owner, platform admin and company admin roles; it decides who reads more of the audit trail than their own activity |
+
+Prisma applies migrations in **folder-name order**, compared as text: `10_…` would run right
+after `1_…`. That is why the migrations after `8_soft_delete` are numbered `9_01_`, `9_02_`, …;
+keep that prefix (`9_05_`, `9_06_`, …) for the next ones.
+
+The database is shared. The agent backend (`Elze-backend`) owns `context_objects`,
+`context_versions`, `context_dataset_blueprint`, `pii_classifications`, `access_policies`,
+`context_access_log`, `adk_agent_artifacts` and Google ADK's session tables, and the reporting
+tables live beside them. None of these are in `schema.prisma`, and that is deliberate. It is
+also why two Prisma commands must never be pointed at a shared database:
+
+- `prisma migrate dev` sees those tables as drift and offers to reset the database;
+- `prisma db push` offers to drop them.
+
+Either would wipe the agents' sessions and context facts. Apply changes with
+`npm run db:migrate` (`prisma migrate deploy`), which only runs the files in
+`prisma/migrations/`.
+
+To make a schema change, edit `schema.prisma`, then write the migration without touching a
+database by diffing the previous schema against the new one:
+
+```bash
+git show HEAD:prisma/schema.prisma > /tmp/before.prisma
+npx prisma migrate diff --from-schema /tmp/before.prisma --to-schema prisma/schema.prisma   --script -o prisma/migrations/2_describe_the_change/migration.sql
+```
+
+Read the SQL before applying it, then run `npm run db:migrate` and `npm run db:generate`.
+
+### Talking to the database
+
+Repositories use the Prisma client (`config.database.prisma`). Where a query needs something
+Prisma's model API cannot express - a window function, a UNION, `ON CONFLICT` against a partial
+index, an ordering on an expression, the access-control views, or the agent service's
+`context_objects` table, which is not a Prisma model - it stays SQL, run through
+`tx.$queryRaw`/`$executeRaw` with `Prisma.sql` templates (`rawRows` in `baseRepository.ts`). Either
+way it goes through Prisma, so it joins the caller's transaction.
+
+`withTransaction(async (tx) => ...)` is `prisma.$transaction`; repository functions that take a
+`tx` default to the plain client. Repositories return the same row shapes as before (snake_case
+columns), so services and serializers did not change with the move to Prisma.
+
+A database error from Prisma carries the PostgreSQL code under
+`meta.driverAdapterError.cause.originalCode`; `sqlState(err)` in `shared/db/dbError.ts` reads it from
+either a Prisma or a `pg` error, so `UNIQUE_VIOLATION` and friends are checked the same way.
+
+The query engine (`queryRepository.ts`, `sqlGeneratorService.ts`), `scopeRepository.distinctValues`
+and `scripts/setupIndexes.ts` query reporting tables named at runtime by a dashboard spec, and keep
+using `config.database.db`, the `pg` pool.
 
 ### What is configured where
 
 | | Where | Why |
 |---|---|---|
 | Database, `APPLICATION_URL`, signing secrets, SMTP | `.env` | deployment-specific, or a live credential |
-| Token lifetimes, login throttling, query concurrency | `src/config/appConfig.ts` | product decisions; a value that drifts per deployment is one nobody can reason about |
-| Bootstrap owner's username, email and password | `src/config/appConfig.ts` | a first-use credential, spent the moment it is used |
+| Token and link lifetimes, login and password reset throttling, query concurrency | `src/config/appConfig.ts` | product decisions; a value that drifts per deployment is one nobody can reason about |
+| Bootstrap owner's username, email and password | `.env` (`BOOTSTRAP_ADMIN_*`) | a first-use credential, read only while the users table is empty |
 
-The bootstrap password being in source is a real trade-off: it is in version control, stays
-in the history, and is identical in every deployment built from that source. What limits it
-is that the seeded account carries `must_change_password`, so signing in once replaces it.
+The seeded account carries `must_change_password`, so signing in once replaces the bootstrap
+password.
 
 ### PostgreSQL notes
 
@@ -489,77 +747,115 @@ The engine targets PostgreSQL only. The differences that shaped the code:
 | | How it is handled |
 |---|---|
 | **Identifiers** | Double-quoted everywhere, always using the name read from the catalogue. Unquoted identifiers fold to lower case, so a real column `"Booking Date"` is unreachable without quotes - and a spec that spells it `booking date` must still emit the catalogue's spelling. `sqlGenerator` therefore *references* the catalogue name and *aliases* to the spec's, because the formatter reads rows back by the latter. |
-| **Placeholders** | `config/pgPool.ts` rewrites `?` into `$1, $2, …`, skipping anything inside quotes. The SQL here is frequently assembled - IN lists, multi-row inserts, optional fragments - and hand-numbering those is where an off-by-one hides as a wrong *value* bound to the right position. |
+| **Placeholders** | Repositories bind values through `Prisma.sql` templates, so a value is never pasted into SQL. The query engine and the context store queries still assemble SQL with `?` placeholders - IN lists, optional fragments - and `shared/db/sql.ts`'s `splitPlaceholders` finds them outside quotes and comments, for `shared/db/pgPool.ts` (`$1, $2, …`) and for `sqlOf` in `baseRepository.ts`. Hand-numbering is where an off-by-one hides as a wrong *value* bound to the right position. |
 | **Date bucketing** | `to_char(col, 'YYYY-MM')`, and `to_char(to_date(col, <template>), …)` for string date columns. ISO weeks use `IYYY"-W"IW`, which cannot disagree with itself the way `YYYY` + `IW` would at a year boundary. |
 | **Slicer filters** | Values arrive from a URL as strings, so a non-text column is compared as `col::text = $1` - comparing text to an integer is refused outright. `setup:indexes` creates a matching expression index, because a plain index cannot serve a cast. |
-| **int8 and numeric** | node-postgres returns both as strings to protect precision. `config/pgPool.ts` parses them to Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
-| **One database** | The RBAC tables and the reporting tables share `DB_NAME` and one pool. The RBAC tables are unqualified and resolve through `search_path`; reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
-| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `repositories/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
+| **int8 and numeric** | node-postgres returns both as strings to protect precision, and Prisma returns them as `BigInt` and `Decimal`, which `res.json` cannot serialize. `shared/db/pgPool.ts` (query engine) and `plainRow` in `baseRepository.ts` (raw SQL through Prisma) turn them into Number, because every `COUNT(*)` in this application is an int8 and a count arriving as `"1234"` breaks arithmetic and chart scales silently. Values beyond 2^53 would lose precision; for row counts and these aggregates that is unreachable. |
+| **One database** | The application tables and the reporting tables share `DB_NAME` and one pool: Prisma runs on the same `pg` pool through `@prisma/adapter-pg`. Application tables are reached through Prisma (or unqualified raw SQL resolving through `search_path`); reporting tables are schema-qualified from the dashboard spec, so `DB_SCHEMA` keeps the two sets from colliding over a name like `users`. |
+| **Upserts** | `ON CONFLICT (cols) DO UPDATE`. Note that every assignment sees the row as it was *before* the statement - there is no left-to-right chaining - which is why `modules/auth/loginAttemptRepository.ts` repeats its window test in each expression rather than computing it once. |
 
 ## Audit trail
 
-Every audited action is a row in `audit_logs` (created at startup with the other tables),
-written by `services/auditService.ts` in the background so a failed write can never fail the
+Every audited action is a row in `audit_logs` (created by the migrations with the other tables),
+written by `modules/audit/auditService.ts` in the background so a failed write can never fail the
 action. It is also printed to stdout. There are no foreign keys, so an entry outlives the user
 or company it names.
 
-`GET /api/audit` is open to every signed-in account and scoped by role:
+`GET /api/audit` is open to every signed-in account and scoped by the `audit.read` permission:
 
 | Reader | Sees |
 |---|---|
-| `SUPER_ADMIN` | every entry |
-| `COMPANY_ADMIN` | entries for their company (acted on it, or done by someone in it) |
-| `USER` | what they did, and what was done to their account |
+| platform account with `audit.read` | every entry (a platform admin: not those naming other platform accounts) |
+| company account with `audit.read` | what people in their company did, and entries about the company with no signed-in actor (a password reset request); never what platform accounts did |
+| anyone without `audit.read` | what they did, and entries about their account with no signed-in actor; never what an administrator did to it |
 
-The response's `scope` field (`all`, `company`, `self`) says which one applied.
+`audit.read` is held by the platform owner, platform admins and company admins by default. It is
+not admin-only, so a company admin can give it to a custom role or to one member as an extra
+permission. The response's `scope` field (`all`, `company`, `self`) says which one applied.
 
 ## Scripts
 
 The code is TypeScript (`tsconfig.json`, strict, CommonJS output). `npm start` and the
-three scripts run the compiled output in `dist/`, so run `npm run build` first; `npm run dev`
-and the two test suites run the `.ts` sources directly through `tsx`.
+two scripts run the compiled output in `dist/`, so run `npm run build` first; `npm run dev`
+and the test suites run the `.ts` sources directly through `tsx`. `build`, `typecheck` and
+`dev` run `prisma generate` first, because the Prisma client is generated into
+`src/generated/` rather than committed.
 
 ```bash
-npm run build             # compile src/, scripts/ and tests/ into dist/
-npm run typecheck         # tsc --noEmit
+npm run build             # generate the Prisma client, compile src/, scripts/ and tests/ into dist/
+npm run typecheck         # generate the Prisma client, tsc --noEmit
+npm run lint              # Biome lint rules
+npm run format            # rewrite files in the project style
+npm run check             # lint + formatting, without writing (what CI runs)
 npm run dev               # tsx src/server.ts under nodemon
 npm start                 # serve the API and the built frontend (from dist/)
 npm run setup:indexes     # create indexes from dashboard metadata (--dry-run supported)
 npm run reset:access      # email an account a new activation link, without a token
-npm run migrate:db        # copy this database into the one .env points at
-npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts)
+npm run db:migrate        # apply pending migrations to the database .env points at
+npm run db:status         # list applied and pending migrations
+npm run db:generate       # regenerate the Prisma client after editing schema.prisma
+npm run docs:check        # compare docs/openapi.json with the routes in src/routes
+npm test                  # unit tests, then the integration suites
+npm run test:unit         # Vitest, tests/unit/, no database
+npm run test:integration  # the three suites below, each in a fresh throwaway database
+npm run test:e2e          # the RBAC/tenancy/token suite (see tests/rbac.e2e.ts), against a running server
 npm run test:context      # the context layer (see tests/contextLayer.test.ts)
+npm run test:dashboard    # dashboard ownership and tenancy (see tests/dashboard_lifecycle.test.ts)
 ```
+
+### Tests
+
+Unit tests live in `tests/unit/`, run under Vitest and never touch a database or the
+network: modules that would (the catalogue repository, column metadata) are replaced with
+`vi.mock`. Add one next to the others as `<sourceModule>.test.ts`.
+
+The integration suites need PostgreSQL. `scripts/testDb.ts` runs them: for each suite it
+drops and recreates a database called `elze_test`, applies the migrations, starts the API
+on port 8099 when the suite needs a server, runs the suite, stops the server, and drops the
+database at the end (`--keep` leaves it for inspection). The server and the suites get a
+complete test environment of their own: test-only secrets, an in-process SMTP relay on port
+2525, no Redis. Nothing from `.env` decides which database they use, so they cannot write
+to the development database; the runner also refuses to start if `TEST_DB_NAME` names the
+database `.env` points at.
+
+| Variable | Default |
+|---|---|
+| `TEST_DB_HOST`, `TEST_DB_PORT` | `localhost`, `5432` |
+| `TEST_DB_USER`, `TEST_DB_PASSWORD` | `postgres`, `postgres` |
+| `TEST_DB_NAME` | `elze_test` |
+| `TEST_SERVER_PORT`, `TEST_SMTP_PORT` | `8099`, `2525` |
+
+```bash
+TEST_DB_PASSWORD=root npm run test:integration
+TEST_DB_PASSWORD=root npm run test:e2e -- --keep
+```
+
+The `TEST_DB_*` variables can also go in `.env`.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`, on Node 22
+(the version in the Dockerfile) with a PostgreSQL 18 service: `npm ci`, Prisma client
+generation, `tsc --noEmit`, `biome ci`, `docs:check`, a check that a database built from
+`prisma/migrations` matches `schema.prisma` (`prisma migrate diff --exit-code`), the unit
+tests and the integration suites.
+
+### Lint and format
+
+Biome does both (`biome.json`); ESLint is not used because `typescript-eslint` does not
+support TypeScript 7. The style is 2 spaces, single quotes, semicolons, ES5 trailing
+commas and 120 columns. `noExplicitAny` and `noNonNullAssertion` are off until the
+repositories return typed rows. Run `npm run format` before committing, or install the
+Biome editor extension and format on save.
+
+The commit that first formatted the whole codebase is listed in `.git-blame-ignore-revs`.
+GitHub skips it in blame views; locally, run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
 
 ### Moving the database
 
-`migrate:db` copies everything — accounts, grants, dashboards, connections and the
-reporting tables — into whatever `.env` currently points at. The destination's schema is
-created by `bootstrapAppMeta()`, the same code that runs at every start, so the script
-cannot drift from the real definition.
-
-```bash
-# 1. point .env at the new database (DB_HOST/DB_NAME/DB_USER/DB_PASSWORD, DB_SSL)
-# 2. rehearse
-SOURCE_DB_URL=postgresql://postgres:root@localhost:5432/elze npm run migrate:db -- --dry-run
-# 3. run it
-SOURCE_DB_URL=postgresql://postgres:root@localhost:5432/elze npm run migrate:db
-```
-
-Three things worth knowing:
-
-- **The source always wins.** Every insert upserts. `bootstrapAppMeta()` seeds the three
-  roles and — on an empty users table — the platform owner, and those rows collide with the
-  real ones. With `DO NOTHING` the seeded row would win and the owner would silently end up
-  with the bootstrap password from `config/appConfig.ts`, discovered at the next sign-in.
-- **Re-running is safe**, and resumes: a run that failed halfway is fixed by running it again.
-- **`--skip-reporting`** copies only the application tables. The reporting tables are the
-  slow half (`cinema_analysis` is 200k rows) and are discovered rather than listed — whatever
-  is in the source and is not one of ours.
-
-Identity sequences are advanced past the copied ids at the end. Without that, the first
-account created after a migration reuses id 1 and fails on the primary key, days later,
-with nothing pointing back at the migration.
+Copy the data with `pg_dump`/`pg_restore`, which carries `_prisma_migrations` along with it,
+then check the destination with `npm run db:status`: it should report nothing pending.
 
 ### Connecting to a database elsewhere
 
@@ -570,22 +866,11 @@ certificate with its own authority — Render, Heroku, and most others — add
 encryption-without-authentication, which is why it is a second, explicit setting rather
 than something `DB_SSL=true` quietly implies.
 
-The suite brings its own SMTP relay and its own reporting table, so it needs a throwaway
-database and the server pointed at that relay. `DB_NAME` goes on **both** processes — the
-fixture connects through the application's own pool, which otherwise reads `.env` and
-builds its table in the real database:
-
-```bash
-# terminal 1
-DB_NAME=app_e2e PORT=8099 \
-SMTP_HOST=127.0.0.1 SMTP_PORT=2525 SMTP_USERNAME= SMTP_PASSWORD= \
-EMAIL_FROM=e2e@example.com npm start
-
-# terminal 2
-DB_NAME=app_e2e npm run test:e2e
-```
-
-Drop `app_e2e` between runs: the suite expects to start from an empty installation.
+When `DB_HOST` is a connection pooler (Neon's `-pooler` endpoint, PgBouncer), set
+`DB_DIRECT_HOST` to the database's direct host as well. The application keeps using
+`DB_HOST`; the Prisma CLI (`npm run db:migrate`, `db:status`) uses `DB_DIRECT_HOST`, because
+migrations take a session-level advisory lock that a transaction-mode pooler cannot hold. For
+Neon the direct host is the pooled one without `-pooler`.
 
 `reset:access` exists because the API needs an administrator who can sign in, and the case
 it is for is that nobody can — if the only SUPER_ADMIN loses their password, bootstrap will

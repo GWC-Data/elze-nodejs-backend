@@ -1,10 +1,11 @@
-import type { Server } from 'http';
+import type { Server } from 'node:http';
 import config from './config';
 import app from './app';
-import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './services/bootstrapService';
+import { bootstrapWithRetry, verifyEmailTransport, startHousekeeping } from './modules/system/bootstrapService';
+import { codeOf, messageOf } from './shared/errors/AppError';
 
 const { APPLICATION_URL } = config.auth;
-const { db } = config.database;
+const { db, prisma } = config.database;
 
 const PORT = process.env.PORT || 8080;
 const SHUTDOWN_GRACE_MS = 10000;
@@ -21,11 +22,13 @@ async function start(): Promise<void> {
   await verifyEmailTransport();
   startHousekeeping();
 
-  server = app.listen(PORT, (err?: any) => {
+  server = app.listen(PORT, (err?: Error) => {
     if (err) {
-      console.error(`[startup] cannot listen on port ${PORT}: ${err.code || err.message}`);
-      if (err.code === 'EADDRINUSE') {
-        console.error('[startup] another process owns this port - often the docker-compose `web` container. Stop it or set PORT.');
+      console.error(`[startup] cannot listen on port ${PORT}: ${codeOf(err) || err.message}`);
+      if (codeOf(err) === 'EADDRINUSE') {
+        console.error(
+          '[startup] another process owns this port - often the docker-compose `web` container. Stop it or set PORT.'
+        );
       }
       process.exit(1);
     }
@@ -41,13 +44,13 @@ function shutdown(signal: string): void {
 
   setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
 
-  const closeServer = server
-    ? new Promise<void>((resolve) => server!.close(() => resolve()))
-    : Promise.resolve();
+  const current = server;
+  const closeServer = current ? new Promise<void>((resolve) => current.close(() => resolve())) : Promise.resolve();
 
   closeServer
+    .then(() => prisma.$disconnect())
     .then(() => db.end())
-    .catch((err) => console.warn('[shutdown] cleanup failed:', err.message))
+    .catch((err: unknown) => console.warn('[shutdown] cleanup failed:', messageOf(err)))
     .finally(() => process.exit(0));
 }
 
@@ -65,7 +68,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => shutdown(signal));
 }
 
-start().catch((err) => {
-  console.error('[startup] failed:', err.stack || err.message);
+start().catch((err: unknown) => {
+  console.error('[startup] failed:', err instanceof Error ? err.stack || err.message : messageOf(err));
   process.exit(1);
 });

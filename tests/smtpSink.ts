@@ -1,4 +1,4 @@
-import net from 'net';
+import net from 'node:net';
 
 interface SinkMessage {
   headers: Record<string, string>;
@@ -16,9 +16,7 @@ interface SmtpSink {
   stop(): Promise<unknown>;
 }
 
-function startSmtpSink(
-  { port = 2525, host = '127.0.0.1' }: { port?: number; host?: string } = {}
-): Promise<SmtpSink> {
+function startSmtpSink({ port = 2525, host = '127.0.0.1' }: { port?: number; host?: string } = {}): Promise<SmtpSink> {
   const messages: SinkMessage[] = [];
 
   const server = net.createServer((socket) => {
@@ -27,14 +25,13 @@ function startSmtpSink(
     let dataLines: string[] = [];
     let expecting: string | null = null;
 
-    const say = (line: string) => socket.write(line + '\r\n');
+    const say = (line: string) => socket.write(`${line}\r\n`);
     say('220 smtp-sink ready');
 
     socket.on('data', (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
 
-      let index;
-      while ((index = buffer.indexOf('\r\n')) !== -1) {
+      for (let index = buffer.indexOf('\r\n'); index !== -1; index = buffer.indexOf('\r\n')) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 2);
 
@@ -92,7 +89,7 @@ function startSmtpSink(
       }
     });
 
-    socket.on('error', () => {  });
+    socket.on('error', () => {});
   });
 
   function parseHeaders(headerText: string): Record<string, string> {
@@ -127,7 +124,7 @@ function startSmtpSink(
     let text: string;
 
     if (boundaryMatch) {
-      const marker = '--' + boundaryMatch[1];
+      const marker = `--${boundaryMatch[1]}`;
       text = body
         .split(marker)
         .slice(1, -1)
@@ -158,8 +155,12 @@ function startSmtpSink(
           }
           return null;
         },
-        clear() { messages.length = 0; },
-        stop() { return new Promise((done) => server.close(done)); },
+        clear() {
+          messages.length = 0;
+        },
+        stop() {
+          return new Promise((done) => server.close(done));
+        },
       });
     });
   });

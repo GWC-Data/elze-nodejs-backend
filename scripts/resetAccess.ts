@@ -1,18 +1,29 @@
 import config from '../src/config';
-const { db, withTransaction } = config.database;
-import { T } from '../src/models/rbacModel';
-import { bootstrapAppMeta } from '../src/services/bootstrapService';
-import { issueActivationToken, activationUrl } from '../src/services/activationService';
-import { revokeAllForUser } from '../src/services/tokenService';
-import { sendEmail } from '../src/services/emailService';
-import { accountActivation } from '../src/views/templates/accountActivationTemplate';
-import type { Queryable } from '../src/config/pgPool';
+const { prisma, withTransaction } = config.database;
+import { Prisma } from '../src/generated/prisma/client';
+import { rawRows } from '../src/shared/db/baseRepository';
+import { NOT_DELETED } from '../src/shared/db/softDelete';
+import { bootstrapAppMeta } from '../src/modules/system/bootstrapService';
+import { issueActivationToken, activationUrl } from '../src/modules/auth/activationService';
+import { revokeAllForUser } from '../src/modules/auth/tokenService';
+import { sendEmail } from '../src/shared/email/emailService';
+import { accountActivation } from '../src/modules/auth/accountActivationTemplate';
+import { messageOf } from '../src/shared/errors/AppError';
 const { ACTIVATION_TOKEN_TTL_SECONDS } = config.auth;
 
 interface Args {
   action: 'list' | 'reset' | 'help';
   username: string | null;
   email: string | null;
+}
+
+interface AccountRow {
+  id: string;
+  username: string;
+  email: string;
+  role: string | null;
+  status: string;
+  company: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -47,52 +58,57 @@ prints the token - it is emailed through the configured SMTP relay.
 `;
 
 async function list(): Promise<void> {
-  const { rows } = await db.query(
-    `SELECT u.id, u.username, u.email, r.name AS role, u.status, c.name AS company
-       FROM ${T.users} u
-       LEFT JOIN ${T.companies} c ON c.id = u.company_id
-       LEFT JOIN ${T.userRoles} ur ON ur.user_id = u.id
-       LEFT JOIN ${T.roles} r ON r.id = ur.role_id
+  const rows = await rawRows<AccountRow>(
+    prisma,
+    Prisma.sql`SELECT u.id, u.username, u.email, r.name AS role, u.status, c.name AS company
+       FROM users u
+       LEFT JOIN companies c ON c.id = u.company_id
+       LEFT JOIN access_control.user_roles ur ON ur.user_id = u.id
+       LEFT JOIN access_control.roles r ON r.id = ur.role_id
+      WHERE u.deleted_at IS NULL
       ORDER BY c.name NULLS FIRST, u.username`
   );
   if (!rows.length) {
-    console.log('No accounts yet. Start the server once with BOOTSTRAP_SUPERADMIN_* set.');
+    console.log(
+      'No accounts yet. Start the server once with BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD set.'
+    );
     return;
   }
   console.table(rows.map((r) => ({ ...r, company: r.company || '(platform)' })));
 }
 
 async function reset({ username, email }: Args): Promise<void> {
-  const { rows } = await db.query(
-    `SELECT u.id, u.username, u.email, u.display_name, u.company_id, u.status,
-            c.name AS "companyName"
-       FROM ${T.users} u
-       LEFT JOIN ${T.companies} c ON c.id = u.company_id
-      WHERE u.username = ?`,
-    [username]
-  );
-  const user = rows[0];
-  if (!user) throw new Error(`No account named "${username}"`);
+  const found = await prisma.user.findFirst({
+    where: { username: String(username), ...NOT_DELETED },
+    include: { company: { select: { name: true } } },
+  });
+  if (!found) throw new Error(`No account named "${username}"`);
+  const user = {
+    id: found.id,
+    username: found.username,
+    email: found.email,
+    display_name: found.displayName,
+    status: found.status,
+    companyName: found.company ? found.company.name : null,
+  };
   if (user.status === 'disabled') {
     throw new Error(`"${username}" is deactivated. Reactivate it before sending a link.`);
   }
 
   const target = email || user.email;
 
-  const { token } = await withTransaction(async (conn: Queryable) => {
-    if (email) {
-      await conn.query(`UPDATE ${T.users} SET email = ? WHERE id = ?`, [
-        String(email).trim().toLowerCase(),
-        user.id,
-      ]);
-    }
-    await conn.query(
-      `UPDATE ${T.users} SET status = 'pending', password_hash = NULL, must_change_password = FALSE
-        WHERE id = ?`,
-      [user.id]
-    );
-    await revokeAllForUser(user.id, 'access_reissued_cli', conn);
-    return issueActivationToken(user.id, null, conn);
+  const { token } = await withTransaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        ...(email ? { email: String(email).trim().toLowerCase() } : {}),
+        status: 'pending',
+        passwordHash: null,
+        mustChangePassword: false,
+      },
+    });
+    await revokeAllForUser(user.id, 'access_reissued_cli', tx);
+    return issueActivationToken(user.id, null, tx);
   });
 
   await sendEmail({
@@ -125,7 +141,7 @@ async function reset({ username, email }: Args): Promise<void> {
   else await list();
 })()
   .then(() => process.exit(0))
-  .catch((e: any) => {
-    console.error(`ERROR  ${e.message}`);
+  .catch((e: unknown) => {
+    console.error(`ERROR  ${messageOf(e)}`);
     process.exit(1);
   });

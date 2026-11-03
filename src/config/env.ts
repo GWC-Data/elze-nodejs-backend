@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import dotenv from 'dotenv';
 
 function findBackendRoot(start: string): string {
@@ -20,6 +20,8 @@ dotenv.config({ path: path.join(BACKEND_ROOT, '.env') });
 
 const DIST_DIR = path.join(PROJECT_ROOT, 'frontend', 'dist');
 const DASHBOARD_CONFIG_DIR = path.join(CONFIG_DIR, 'dashboards');
-const RBAC_CONFIG_DIR = path.join(CONFIG_DIR, 'rbac');
+const MIGRATIONS_DIR = path.join(BACKEND_ROOT, 'prisma', 'migrations');
+const OPENAPI_FILE = path.join(BACKEND_ROOT, 'docs', 'openapi.json');
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-export { DIST_DIR, DASHBOARD_CONFIG_DIR, RBAC_CONFIG_DIR };
+export { BACKEND_ROOT, DIST_DIR, DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR, OPENAPI_FILE, IS_PRODUCTION };

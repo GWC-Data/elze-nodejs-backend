@@ -1,5 +1,5 @@
 import './env';
-import path from 'path';
+import path from 'node:path';
 import { optional } from './configError';
 import { DASHBOARD_CONFIG_DIR } from './env';
 

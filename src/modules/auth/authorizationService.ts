@@ -1,0 +1,211 @@
+import { fail } from '../../shared/errors/AppError';
+import { isUuid } from '../../shared/validation/commonValidator';
+import { PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
+import {
+  featureKeys,
+  featureOfPermission,
+  isKnownPermission,
+  isPlatformOnly,
+  levelRank,
+} from '../catalogue/catalogueService';
+import type { Actor } from '../../shared/types/actor';
+
+interface ActorSource {
+  id: string;
+  username: string;
+  email: string;
+  display_name: string | null;
+  role: string | null;
+  company_id: string | null;
+  status: string;
+  must_change_password: boolean;
+  role_id?: string | null;
+  role_name?: string | null;
+}
+
+interface ManagedUser {
+  id: string;
+  role: string | null;
+  company_id: string | null;
+}
+
+function buildActor(
+  userRow: ActorSource | null | undefined,
+  permissions: Iterable<string>,
+  features: readonly string[] = featureKeys()
+): Actor {
+  if (!userRow?.id) {
+    throw new Error('buildActor requires a user row');
+  }
+  const { role } = userRow;
+  const roleScope = scopeOfTier(role);
+  if (!roleScope || role === null) {
+    throw fail('INTERNAL_ERROR', `Account "${userRow.username}" holds unknown role "${userRow.role}".`);
+  }
+  const isPlatform = roleScope === ROLE_SCOPES.platform;
+
+  if (isPlatform && userRow.company_id !== null && userRow.company_id !== undefined) {
+    throw fail('INTERNAL_ERROR', `Platform account "${userRow.username}" must not belong to a company.`);
+  }
+  if (!isPlatform && !userRow.company_id) {
+    throw fail('INTERNAL_ERROR', `Account "${userRow.username}" has no company.`);
+  }
+
+  return {
+    id: userRow.id,
+    username: userRow.username,
+    email: userRow.email,
+    displayName: userRow.display_name || null,
+    role,
+    roleScope,
+    isPlatform,
+    companyId: isPlatform ? null : userRow.company_id,
+    status: userRow.status,
+    mustChangePassword: Boolean(userRow.must_change_password),
+    permissions: Object.freeze([...permissions]),
+    features: Object.freeze(isPlatform ? featureKeys() : [...features]),
+    roleId: userRow.role_id ?? null,
+    roleName: userRow.role_name ?? null,
+  };
+}
+
+function missingFeature(actor: Actor, permission: string): string | null {
+  if (actor.isPlatform) return null;
+  const feature = featureOfPermission(permission);
+  return feature && !actor.features.includes(feature) ? feature : null;
+}
+
+function can(actor: Actor | null | undefined, permission: string): boolean {
+  if (!actor) return false;
+  if (!isKnownPermission(permission)) {
+    throw new Error(`Unknown permission "${permission}". Add it to access_control.permissions with a migration.`);
+  }
+  if (actor.role === SUPER_ADMIN) return true;
+  return actor.permissions.includes(permission);
+}
+
+function assertPermission(actor: Actor | null | undefined, permission: string): void {
+  if (!actor) throw fail('UNAUTHENTICATED', 'Sign in to continue.');
+  if (can(actor, permission)) return;
+
+  console.warn(
+    `[authz] denied "${permission}" for "${actor.username}" (role ${actor.role}, company ${actor.companyId ?? 'platform'})`
+  );
+  const feature = missingFeature(actor, permission);
+  if (feature) {
+    throw fail('FEATURE_NOT_ENABLED', 'This is not available for your account. Ask your administrator.');
+  }
+  throw fail('INSUFFICIENT_PERMISSION', 'You do not have permission to perform this action.');
+}
+
+function resolveTargetCompany(actor: Actor, requestedCompanyId: unknown): string {
+  if (!actor.isPlatform) return actor.companyId as string;
+
+  if (!isUuid(requestedCompanyId)) {
+    throw fail('VALIDATION_ERROR', 'companyId is required: a platform account must say which company this is for.');
+  }
+  return requestedCompanyId.trim().toLowerCase();
+}
+
+function assertCompanyMatch(actor: Actor, resourceCompanyId: unknown, what: string = 'That record'): void {
+  if (actor.isPlatform) return;
+  if (resourceCompanyId !== null && resourceCompanyId === actor.companyId) return;
+
+  console.warn(
+    `[authz] tenant denial: "${actor.username}" (company ${actor.companyId}) reached ` +
+      `a resource in company ${resourceCompanyId ?? 'platform'}`
+  );
+  throw fail('TENANT_ACCESS_DENIED', `${what} does not belong to your company.`);
+}
+
+function strongestLevel(levels: readonly string[] | null | undefined): string | null {
+  let best: string | null = null;
+  for (const level of levels || []) {
+    if (!levelRank('dashboard', level)) continue;
+    if (!best || levelRank('dashboard', level) > levelRank('dashboard', best)) best = level;
+  }
+  return best;
+}
+
+function levelAtLeast(level: string | null | undefined, required: string): boolean {
+  return Boolean(level) && levelRank('dashboard', level) >= levelRank('dashboard', required);
+}
+
+function isPlatformOwner(actor: Actor | null | undefined): boolean {
+  return Boolean(actor) && actor?.role === SUPER_ADMIN;
+}
+
+function seesPlatformAccounts(actor: Actor): boolean {
+  return isPlatformOwner(actor);
+}
+
+function assertCanAssignRole(actor: Actor, targetRole: string) {
+  const scope = scopeOfTier(targetRole);
+  if (!scope) throw fail('VALIDATION_ERROR', `Unknown role: "${targetRole}"`);
+  if (targetRole === SUPER_ADMIN) {
+    throw fail(
+      'VALIDATION_ERROR',
+      'There is only one platform owner. Give the account the PLATFORM_ADMIN role instead.'
+    );
+  }
+  if (targetRole === PLATFORM_ADMIN && !isPlatformOwner(actor)) {
+    throw fail('INSUFFICIENT_PERMISSION', 'Only the platform owner can create or change platform admins.');
+  }
+  if (scope === ROLE_SCOPES.platform && !actor.isPlatform) {
+    throw fail('INSUFFICIENT_PERMISSION', `Only a platform administrator can assign the ${targetRole} role.`);
+  }
+  return scope;
+}
+
+function assertCanManageUser(actor: Actor, target: ManagedUser): void {
+  if (target.id === actor.id) {
+    throw fail('VALIDATION_ERROR', 'Use your profile to change your own account.');
+  }
+
+  const targetScope = scopeOfTier(target.role);
+  if (targetScope === ROLE_SCOPES.platform && !actor.isPlatform) {
+    throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
+  }
+  if (targetScope === ROLE_SCOPES.platform && !seesPlatformAccounts(actor)) {
+    throw fail('TENANT_ACCESS_DENIED', 'Only the platform owner manages platform accounts.');
+  }
+
+  assertCompanyMatch(actor, target.company_id, 'That account');
+
+  if (!actor.isPlatform && target.role !== USER && target.role !== actor.role) {
+    throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
+  }
+  if (!actor.isPlatform && target.role === actor.role) {
+    throw fail(
+      'TENANT_ACCESS_DENIED',
+      'Another administrator of this company can only be managed by the platform owner.'
+    );
+  }
+}
+
+function assertRolePermissionsAllowed(roleScope: string, permissions: readonly string[]): void {
+  if (roleScope === ROLE_SCOPES.platform) return;
+  const escaping = permissions.filter((p) => isPlatformOnly(p));
+  if (escaping.length) {
+    throw fail('VALIDATION_ERROR', `A company role cannot hold platform permissions: ${escaping.join(', ')}`, {
+      permissions: escaping,
+    });
+  }
+}
+
+export {
+  buildActor,
+  missingFeature,
+  can,
+  assertPermission,
+  resolveTargetCompany,
+  assertCompanyMatch,
+  strongestLevel,
+  levelAtLeast,
+  isPlatformOwner,
+  seesPlatformAccounts,
+  assertCanAssignRole,
+  assertCanManageUser,
+  assertRolePermissionsAllowed,
+};
+export type { ActorSource, ManagedUser };

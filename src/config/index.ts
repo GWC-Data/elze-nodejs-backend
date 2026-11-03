@@ -3,9 +3,10 @@ interface Config {
   readonly app: typeof import('./appConfig');
   readonly auth: typeof import('./auth');
   readonly email: typeof import('./email');
-  readonly database: typeof import('./database');
+  readonly database: typeof import('../shared/db/database');
   readonly engine: typeof import('./engine');
   readonly context: typeof import('./context');
+  readonly http: typeof import('./http');
 }
 
 const MODULES: Record<keyof Config, string> = {
@@ -13,9 +14,10 @@ const MODULES: Record<keyof Config, string> = {
   app: './appConfig',
   auth: './auth',
   email: './email',
-  database: './database',
+  database: '../shared/db/database',
   engine: './engine',
   context: './context',
+  http: './http',
 };
 
 const config = {} as Config;

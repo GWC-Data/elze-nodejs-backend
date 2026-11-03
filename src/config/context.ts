@@ -7,12 +7,12 @@ function credentialSecret(): string {
   const value = required(
     'CREDENTIAL_SECRET',
     'the key that encrypts stored warehouse credentials. Generate with: ' +
-    'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64url\'))"'
+      "node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
   );
   if (value.length < MIN_SECRET_LENGTH) {
     throw new ConfigError(
       `CREDENTIAL_SECRET must be at least ${MIN_SECRET_LENGTH} characters. ` +
-      'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64url\'))"'
+        "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\""
     );
   }
   return value;

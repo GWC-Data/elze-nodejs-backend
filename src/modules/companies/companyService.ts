@@ -1,0 +1,232 @@
+import config from '../../config';
+import * as companyRepository from './companyRepository';
+import * as userRepository from '../users/userRepository';
+import { fail, present } from '../../shared/errors/AppError';
+import { slugify } from '../../shared/text/slugify';
+import { bodyOf, requireString } from '../../shared/validation/commonValidator';
+import { shapeCompany, companyOption } from './companySerializer';
+import { publicUser } from '../users/userSerializer';
+import { assertCanAssignRole, assertPermission } from '../auth/authorizationService';
+import { createAccount, prepareInvitation } from '../auth/onboardingService';
+import { sendEmail } from '../../shared/email/emailService';
+import { revokeAllForCompany } from '../auth/tokenService';
+import { audit, EVENTS } from '../audit/auditService';
+import { parseFeatureIds, setInitialFeatures } from './featureService';
+import { seedForCompany } from '../roles/builtInRolesService';
+import { effectiveFeatures, featureIdsOf, systemRoleId, toggleableFeatureKeys } from '../catalogue/catalogueService';
+import { COMPANY_ADMIN } from '../catalogue/roleTiers';
+import { UNIQUE_VIOLATION } from '../../shared/errors/pgErrors';
+import { sqlState } from '../../shared/db/dbError';
+import type { Actor } from '../../shared/types/actor';
+import type { Tx } from '../../shared/db/database';
+import type { ListQuery } from '../../shared/validation/listValidator';
+
+const { withTransaction } = config.database;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
+
+async function listCompanies(actor: Actor, list: ListQuery, { active }: { active?: unknown } = {}) {
+  const filter: companyRepository.CompanyFilter = {};
+  if (!actor.isPlatform) filter.companyId = actor.companyId as string;
+  if (active === 'true' || active === 'false') {
+    filter.active = active === 'true';
+  } else if (active !== undefined && active !== '') {
+    throw fail('VALIDATION_ERROR', 'active must be true or false.');
+  }
+  if (list.search) filter.search = list.search;
+  return companyRepository.listPage(filter, list, shapeCompany);
+}
+
+async function listCompanyOptions(actor: Actor) {
+  const rows = await companyRepository.listOptions(actor.isPlatform ? null : actor.companyId);
+  return rows.map(companyOption);
+}
+
+async function requireCompany(actor: Actor, id: string, { counts = false }: { counts?: boolean } = {}) {
+  if (!actor.isPlatform && id !== actor.companyId) {
+    throw fail('TENANT_ACCESS_DENIED', 'That company is not yours to view.');
+  }
+  const row = counts ? await companyRepository.findWithCounts(id) : await companyRepository.findRow(id);
+  const company = shapeCompany(row);
+  if (!company) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  return company;
+}
+
+async function requireCompanyRow(actor: Actor, id: string, { includeDeleted = false } = {}) {
+  if (!actor.isPlatform && id !== actor.companyId) {
+    throw fail('TENANT_ACCESS_DENIED', 'That company is not yours to view.');
+  }
+  const row = await companyRepository.findRow(id, { includeDeleted });
+  if (!row) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  return row;
+}
+
+async function requireActiveCompany(actor: Actor, id: string, message: string) {
+  const company = await requireCompany(actor, id);
+  if (!company.active) throw fail('VALIDATION_ERROR', message);
+  return company;
+}
+
+async function insertCompany(actor: Actor, { name, slug }: { name: unknown; slug?: unknown }, conn?: Tx) {
+  const cleanName = requireString(name, 'Company name', { max: 150, min: 2 });
+  const cleanSlug = slug ? String(slug).trim().toLowerCase() : slugify(cleanName);
+
+  if (!SLUG_RE.test(cleanSlug)) {
+    throw fail(
+      'VALIDATION_ERROR',
+      'Company slug must be 3-64 characters of lowercase letters, digits and hyphens, and cannot start or end with a hyphen.'
+    );
+  }
+
+  try {
+    return await companyRepository.insert({ name: cleanName, slug: cleanSlug, createdBy: actor.id }, conn);
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail('CONFLICT', 'A company with that name or slug already exists.');
+    }
+    throw err;
+  }
+}
+
+async function createCompany(
+  actor: Actor,
+  { name, slug, admin, featureIds }: { name?: unknown; slug?: unknown; admin?: unknown; featureIds?: unknown }
+) {
+  if (!admin || typeof admin !== 'object') {
+    throw fail(
+      'VALIDATION_ERROR',
+      "A company needs an administrator. Send an 'admin' object with a username and an email address."
+    );
+  }
+
+  assertCanAssignRole(actor, COMPANY_ADMIN);
+  const adminFields = bodyOf(admin);
+
+  const featureKeys = featureIds === undefined ? toggleableFeatureKeys() : parseFeatureIds(featureIds);
+
+  const { company, user, invitation } = await withTransaction(async (conn: Tx) => {
+    const companyRow = await insertCompany(actor, { name, slug }, conn);
+    await setInitialFeatures(actor, companyRow.id, featureKeys, conn);
+    await seedForCompany(companyRow.id, conn);
+    const userRow = await createAccount(
+      {
+        companyId: companyRow.id,
+        username: adminFields.username,
+        email: adminFields.email,
+        displayName: adminFields.displayName,
+        role: COMPANY_ADMIN,
+        roleId: systemRoleId(COMPANY_ADMIN),
+      },
+      conn
+    );
+    return {
+      company: companyRow,
+      user: userRow,
+      invitation: await prepareInvitation(actor, userRow, { conn }),
+    };
+  });
+
+  try {
+    await sendEmail(invitation, {
+      consequence: 'The company and its administrator were not created.',
+    });
+  } catch (err) {
+    await companyRepository.discard(company.id);
+    throw err;
+  }
+
+  audit(EVENTS.COMPANY_CREATED, actor, {
+    companyId: company.id,
+    name: company.name,
+    features: effectiveFeatures(featureKeys),
+    featureIds: featureIdsOf(effectiveFeatures(featureKeys)),
+  });
+  audit(EVENTS.USER_CREATED, actor, {
+    userId: user.id,
+    targetUsername: user.username,
+    targetEmail: user.email,
+    role: user.role,
+    roleId: systemRoleId(COMPANY_ADMIN),
+    companyId: company.id,
+  });
+
+  return { ...shapeCompany(company), features: effectiveFeatures(featureKeys), admin: publicUser(user) };
+}
+
+async function updateCompany(actor: Actor, id: string, { name, active }: { name?: unknown; active?: unknown }) {
+  const before = await requireCompany(actor, id);
+
+  const changes: { name?: string; active?: boolean } = {};
+  if (name !== undefined) changes.name = requireString(name, 'Company name', { max: 150, min: 2 });
+  if (typeof active === 'boolean') changes.active = active;
+  if (!Object.keys(changes).length) throw fail('VALIDATION_ERROR', 'Nothing to update');
+
+  try {
+    await companyRepository.updateColumns(id, changes);
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) throw fail('CONFLICT', 'A company with that name already exists.');
+    throw err;
+  }
+  const company = present(shapeCompany(await companyRepository.findWithCounts(id)), 'The updated company');
+
+  if (before.active && company.active === false) {
+    await revokeAllForCompany(id, 'company_disabled');
+  }
+
+  audit(EVENTS.COMPANY_UPDATED, actor, {
+    companyId: id,
+    name: company.name,
+    activeChanged: before.active !== company.active,
+    active: company.active,
+  });
+  return company;
+}
+
+async function deleteCompany(
+  actor: Actor,
+  id: string,
+  { permanent = false }: { permanent?: boolean } = {}
+): Promise<void> {
+  if (permanent) assertPermission(actor, 'delete.permanent');
+  const company = permanent
+    ? await requireCompanyRow(actor, id, { includeDeleted: true })
+    : await requireCompany(actor, id);
+  const n = await userRepository.countByCompany(id);
+  if (n > 0) {
+    throw fail('CONFLICT', `This company still has ${n} account${n === 1 ? '' : 's'}. Delete them first.`);
+  }
+  if (permanent) {
+    await companyRepository.discard(id);
+  } else if (!(await companyRepository.softDelete(id, actor.id))) {
+    throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  }
+  audit(EVENTS.COMPANY_DELETED, actor, { companyId: id, name: company.name, soft: !permanent, permanent });
+}
+
+async function restoreCompany(actor: Actor, id: string) {
+  const company = await requireCompanyRow(actor, id, { includeDeleted: true });
+  try {
+    if (!(await companyRepository.restore(id))) throw fail('RESOURCE_NOT_FOUND', 'Company not found');
+  } catch (err) {
+    if (sqlState(err) === UNIQUE_VIOLATION) {
+      throw fail('CONFLICT', `Another company now uses the name or slug of ${company.name}. Rename that one first.`);
+    }
+    throw err;
+  }
+  audit(EVENTS.COMPANY_RESTORED, actor, { companyId: id, name: company.name });
+  return requireCompany(actor, id);
+}
+
+const COMPANY_SORTS = companyRepository.COMPANY_SORTS;
+
+export {
+  COMPANY_SORTS,
+  listCompanies,
+  listCompanyOptions,
+  requireCompany,
+  requireActiveCompany,
+  createCompany,
+  updateCompany,
+  deleteCompany,
+  restoreCompany,
+};
