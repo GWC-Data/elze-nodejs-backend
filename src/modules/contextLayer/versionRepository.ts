@@ -9,6 +9,7 @@ import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/so
 import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ContextStep, VersionStatus } from '../../generated/prisma/enums';
+import type { BusinessLayer } from './businessLayerValidator';
 
 const { prisma } = config.database;
 
@@ -17,6 +18,7 @@ interface DraftChanges {
   datasetIds?: readonly string[];
   sessionId?: string | null;
   extraction?: { report: string; mode: string | null; datasetIds: readonly string[] };
+  businessLayer?: BusinessLayer;
 }
 
 interface VersionRow {
@@ -228,9 +230,11 @@ async function insertDraft(
     tx,
     Prisma.sql`INSERT INTO context_layer_versions
        (id, connection_id, company_id, name, version, status, current_step,
-        dataset_ids, based_on_id, created_by)
+        dataset_ids, based_on_id, created_by, business_layer, business_layer_updated_at)
      VALUES (${crypto.randomUUID()}::uuid, ${connectionId}::uuid, ${companyId}::uuid, ${name}, ${version}, 'draft', ${step},
-             ${JSON.stringify(datasetIds)}::jsonb, ${basedOnId}::uuid, ${createdBy}::uuid)
+             ${JSON.stringify(datasetIds)}::jsonb, ${basedOnId}::uuid, ${createdBy}::uuid,
+             COALESCE((SELECT business_layer FROM context_layer_versions WHERE id = ${basedOnId}::uuid), '{}'::jsonb),
+             (SELECT business_layer_updated_at FROM context_layer_versions WHERE id = ${basedOnId}::uuid))
      RETURNING *`
   );
   return row;
@@ -248,6 +252,12 @@ async function updateDraft(tx: Tx, draftId: string, changes: DraftChanges): Prom
       Prisma.sql`extraction_mode = ${changes.extraction.mode}`,
       Prisma.sql`extraction_dataset_ids = ${JSON.stringify(changes.extraction.datasetIds)}::jsonb`,
       Prisma.sql`extracted_at = now()`
+    );
+  }
+  if (changes.businessLayer !== undefined) {
+    sets.push(
+      Prisma.sql`business_layer = ${JSON.stringify(changes.businessLayer)}::jsonb`,
+      Prisma.sql`business_layer_updated_at = now()`
     );
   }
   const rows = await rawRows<DraftRow>(

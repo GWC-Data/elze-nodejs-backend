@@ -91,6 +91,14 @@ async function saveContextProfile(req: Request, res: Response): Promise<void> {
   ok(res, await contextLayer.saveContextProfile(req.actor, req.params.id as string, body(req)));
 }
 
+async function businessLayer(req: Request, res: Response): Promise<void> {
+  ok(res, await contextLayer.businessLayer(req.actor, req.params.id as string, req.query.version));
+}
+
+async function saveBusinessLayer(req: Request, res: Response): Promise<void> {
+  ok(res, await contextLayer.saveBusinessLayer(req.actor, req.params.id as string, body(req)));
+}
+
 async function extraction(req: Request, res: Response): Promise<void> {
   ok(res, await contextLayer.extraction(req.actor, req.params.id as string, req.query.version));
 }
@@ -109,10 +117,6 @@ async function contextObjects(req: Request, res: Response): Promise<void> {
 
 async function factsByTable(req: Request, res: Response): Promise<void> {
   ok(res, await contextLayer.factsByTable(req.actor, req.params.id as string, req.query));
-}
-
-async function model(req: Request, res: Response): Promise<void> {
-  ok(res, await contextLayer.model(req.actor, req.params.id as string, req.query));
 }
 
 async function review(req: Request, res: Response): Promise<void> {
@@ -212,12 +216,13 @@ export {
   trackDraft,
   contextProfile,
   saveContextProfile,
+  businessLayer,
+  saveBusinessLayer,
   extraction,
   recordExtraction,
   understanding,
   contextObjects,
   factsByTable,
-  model,
   review,
   decide,
   editItem,

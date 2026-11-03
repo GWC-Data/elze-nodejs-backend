@@ -10,16 +10,11 @@ import { requireActiveCompany } from '../companies/companyService';
 import * as connections from './connectionService';
 import type { ConnectionRef, ConnectionView, ListedConnection, ProfileOverview } from './connectionService';
 import * as contextService from './contextService';
-import type {
-  ContextObjectList,
-  ModelGraph,
-  ReviewQueue,
-  SnapshotTableProfile,
-  TableView,
-  Understanding,
-} from './contextService';
+import type { ContextObjectList, ReviewQueue, SnapshotTableProfile, TableView, Understanding } from './contextService';
 import * as contextProfiles from './contextProfileService';
 import type { ContextProfileView } from './contextProfileSerializer';
+import * as businessLayers from './businessLayerService';
+import type { BusinessLayerView } from './businessLayerSerializer';
 import * as publish from './publishService';
 import type { Publication, PublishResult, PublishSummary, Blocker } from './publishService';
 import * as versions from './versionService';
@@ -276,6 +271,17 @@ async function saveContextProfile(actor: Actor, id: unknown, body: RequestBody):
   return profile;
 }
 
+async function businessLayer(actor: Actor, id: unknown, versionId: unknown): Promise<BusinessLayerView> {
+  const connection = await connections.requireConnection(actor, id);
+  const version = await versionFor(connection, versionId);
+  return businessLayers.businessLayer(connection, version);
+}
+
+async function saveBusinessLayer(actor: Actor, id: unknown, body: RequestBody): Promise<BusinessLayerView> {
+  const connection = await connections.requireConnection(actor, id, 'edit');
+  return businessLayers.saveBusinessLayer(actor, connection, body);
+}
+
 async function extraction(actor: Actor, id: unknown, versionId: unknown): Promise<Extraction | null> {
   const connection = await connections.requireConnection(actor, id);
   const version = await versionFor(connection, versionId);
@@ -314,12 +320,6 @@ function contextObjects(actor: Actor, id: unknown, query: RequestQuery = {}): Pr
 
 function factsByTable(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<TableView> {
   return readFacts(actor, id, query, (connection) => contextService.tableView(connection.id, query));
-}
-
-function model(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<ModelGraph> {
-  return readFacts(actor, id, query, (connection, version) =>
-    contextService.modelGraph(connection.id, { versionId: version ? version.id : undefined })
-  );
 }
 
 function review(actor: Actor, id: unknown, query: RequestQuery = {}): Promise<ReviewQueue> {
@@ -492,12 +492,13 @@ export {
   trackDraft,
   contextProfile,
   saveContextProfile,
+  businessLayer,
+  saveBusinessLayer,
   extraction,
   recordExtraction,
   understanding,
   contextObjects,
   factsByTable,
-  model,
   review,
   decide,
   editItem,

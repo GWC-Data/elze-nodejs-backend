@@ -679,6 +679,7 @@ database was renamed.
 | `9_04_hidden_features` | `features.hidden`, set for Dashboards and Agents; `dashboard.assign` joins the Dashboards feature |
 | `9_05_restore_audit_events` | the `*_restored` audit event types written when a deleted item is recovered |
 | `9_06_uuid_ids` | `companies.id`, `users.id` and `groups.id`, and the 53 columns that point at them, become UUIDs (`gen_random_uuid()` for new rows). Existing rows get a fresh UUID and every reference follows it; references to rows already purged become NULL, including `userId` / `groupId` / `companyId` inside `audit_logs.detail` and `companyId` in `dashboards.spec`. Foreign keys and the five views are saved from the live database and recreated unchanged; foreign keys from other schemas (`legacy_rbac`) are dropped. `audit_logs.id` stays a BIGINT |
+| `9_09_audit_permission` | the `audit.read` permission, given to the platform owner, platform admin and company admin roles; it decides who reads more of the audit trail than their own activity |
 
 Prisma applies migrations in **folder-name order**, compared as text: `10_…` would run right
 after `1_…`. That is why the migrations after `8_soft_delete` are numbered `9_01_`, `9_02_`, …;
@@ -760,15 +761,17 @@ written by `modules/audit/auditService.ts` in the background so a failed write c
 action. It is also printed to stdout. There are no foreign keys, so an entry outlives the user
 or company it names.
 
-`GET /api/audit` is open to every signed-in account and scoped by role:
+`GET /api/audit` is open to every signed-in account and scoped by the `audit.read` permission:
 
 | Reader | Sees |
 |---|---|
-| `SUPER_ADMIN` | every entry |
-| `COMPANY_ADMIN` | entries for their company (acted on it, or done by someone in it) |
-| `USER` | what they did, and what was done to their account |
+| platform account with `audit.read` | every entry (a platform admin: not those naming other platform accounts) |
+| company account with `audit.read` | what people in their company did, and entries about the company with no signed-in actor (a password reset request); never what platform accounts did |
+| anyone without `audit.read` | what they did, and entries about their account with no signed-in actor; never what an administrator did to it |
 
-The response's `scope` field (`all`, `company`, `self`) says which one applied.
+`audit.read` is held by the platform owner, platform admins and company admins by default. It is
+not admin-only, so a company admin can give it to a custom role or to one member as an extra
+permission. The response's `scope` field (`all`, `company`, `self`) says which one applied.
 
 ## Scripts
 

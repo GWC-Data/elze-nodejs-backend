@@ -12,6 +12,7 @@ import type { Actor } from '../../shared/types/actor';
 import type { ContextStep } from '../../generated/prisma/enums';
 import type { SelectedDataset } from './connectionSerializer';
 import type { DraftTarget, FallbackDataset, PublishedDataset } from './contextTypes';
+import type { BusinessLayer } from './businessLayerValidator';
 
 const { withTransaction } = config.database;
 
@@ -22,6 +23,7 @@ interface DraftPatch {
   extractionReport?: string;
   extractionMode?: string;
   extractionDatasetIds?: string[];
+  businessLayer?: BusinessLayer;
 }
 
 interface VersionState {
@@ -106,6 +108,7 @@ function draftPatch(draft: DraftRow, patch: DraftPatch): versionRepository.Draft
       datasetIds: Array.isArray(patch.extractionDatasetIds) ? patch.extractionDatasetIds : [],
     };
   }
+  if (patch.businessLayer !== undefined) changes.businessLayer = patch.businessLayer;
   return changes;
 }
 

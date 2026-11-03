@@ -6,7 +6,6 @@ import { reviewStatusOf, shapeFact, shapeReviewItem, contextObjectItem } from '.
 import type { ContextObjectItem, Fact, ReviewItem } from './contextSerializer';
 import {
   AI_TEXT_KEYS,
-  GENERIC_COLUMNS,
   TERM_TYPES,
   TYPE_LABELS,
   GLOSSARY_FILTERS,
@@ -16,48 +15,8 @@ import {
 } from './contextConstants';
 import { REVIEW_STATUS, REVIEW_DECISIONS, REVIEW_DECISION_STATUS } from '../../shared/db/statuses';
 import type { Actor } from '../../shared/types/actor';
-import { entry, field, jsonList, strictField } from './contextTypes';
+import { entry, field, jsonList } from './contextTypes';
 import type { DatasetFields, JsonValue, RequestQuery } from './contextTypes';
-
-interface GraphColumn {
-  name: JsonValue;
-  dataType: JsonValue;
-  isPrimaryKey: boolean;
-  isForeignKey: boolean;
-}
-
-interface GraphNode {
-  id: JsonValue;
-  label: JsonValue;
-  datasetId: null;
-  kind: string;
-  columns: GraphColumn[];
-  position: null;
-}
-
-interface GraphEdge {
-  id: string;
-  source: JsonValue;
-  target: JsonValue;
-  sourceColumn: JsonValue;
-  targetColumn: JsonValue;
-  relationshipType: JsonValue;
-  confidence: number | null;
-  status: string;
-  rule?: string;
-  joinCondition: string;
-  suggestion: JsonValue;
-}
-
-interface ModelGraph {
-  connectionId: string;
-  status: string;
-  generatedAt: Date | null;
-  error: null;
-  versionId: string | null;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
 
 interface SnapshotColumn {
   name: JsonValue | undefined;
@@ -161,7 +120,6 @@ const identifierKey = (name: unknown): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '');
-const isSystemColumn = (name: unknown): boolean => /^_.*_$/.test(String(name).trim());
 
 function keyColumns(primaryKey: unknown): ReadonlySet<unknown> {
   return new Set(
@@ -209,235 +167,6 @@ async function listContextObjects(connectionId: string, query: RequestQuery = {}
     counts: result.counts,
     matched: result.matched,
     objects: result.rows.map(contextObjectItem),
-  };
-}
-
-function inferredEdges(nodes: GraphNode[], tableFacts: Map<string, JsonValue>, joinEdges: GraphEdge[]): GraphEdge[] {
-  const covered = new Set(joinEdges.map((e) => [e.source, e.target].sort().join('\u0000')));
-  const out: GraphEdge[] = [];
-  const seen = new Set<string>();
-  const byKey = nodes.map((n) => ({
-    node: n,
-    cols: new Map<string, GraphColumn>(n.columns.map((c) => [identifierKey(c.name), c])),
-  }));
-  const add = (
-    from: JsonValue,
-    fromCol: JsonValue,
-    to: JsonValue,
-    toCol: JsonValue,
-    rule: string,
-    relationshipType: string,
-    confidence: number,
-    basis: string
-  ): void => {
-    if (from === to) return;
-    const pair = [from, to].sort().join('\u0000');
-    if (covered.has(pair)) return;
-    const id = `inferred:${[`${from}.${fromCol}`, `${to}.${toCol}`].sort().join('|')}`;
-    if (seen.has(id)) return;
-    seen.add(id);
-    out.push({
-      id,
-      source: from,
-      target: to,
-      sourceColumn: fromCol,
-      targetColumn: toCol,
-      relationshipType,
-      confidence,
-      status: 'inferred',
-      rule,
-      joinCondition: `${from}.${fromCol} = ${to}.${toCol}`,
-      suggestion: basis,
-    });
-  };
-
-  for (const [table, payload] of tableFacts) {
-    for (const fk of jsonList(field(payload, 'foreign_keys'))) {
-      const column = field(fk, 'column');
-      const references = field(fk, 'references');
-      if (!column || typeof references !== 'string') continue;
-      const dot = references.lastIndexOf('.');
-      if (dot <= 0) continue;
-      const target = references.slice(0, dot);
-      const targetCol = references.slice(dot + 1);
-      if (!nodes.some((n) => n.id === target)) continue;
-      add(
-        table,
-        column,
-        target,
-        targetCol,
-        'declared',
-        'many-to-one',
-        1,
-        `Declared foreign key: ${table}.${column} references ${references}.`
-      );
-    }
-  }
-
-  for (const a of byKey) {
-    for (const pk of a.node.columns.filter((c) => c.isPrimaryKey)) {
-      const key = identifierKey(pk.name);
-      if (!key || isSystemColumn(pk.name)) continue;
-      for (const b of byKey) {
-        if (b === a) continue;
-        const match = b.cols.get(key);
-        if (!match) continue;
-        add(
-          b.node.id,
-          match.name,
-          a.node.id,
-          pk.name,
-          'primary_key',
-          'many-to-one',
-          0.8,
-          `${b.node.id}.${match.name} has the same name as the primary key of ${a.node.id}.`
-        );
-      }
-    }
-  }
-
-  for (let i = 0; i < byKey.length; i += 1) {
-    for (let j = i + 1; j < byKey.length; j += 1) {
-      const a = byKey[i];
-      const b = byKey[j];
-      for (const [key, col] of a.cols) {
-        if (!key || GENERIC_COLUMNS.has(key) || isSystemColumn(col.name)) continue;
-        const match = b.cols.get(key);
-        if (!match) continue;
-        add(
-          a.node.id,
-          col.name,
-          b.node.id,
-          match.name,
-          'same_name',
-          'many-to-many',
-          0.5,
-          `Both tables have a column named "${col.name}". Detected from the name only - check the values match before relying on it.`
-        );
-      }
-    }
-  }
-  return out;
-}
-
-function joinEdge(row: ObjectRow, left: JsonValue, right: JsonValue, keys: JsonValue[], payload: JsonValue): GraphEdge {
-  return {
-    id: row.id,
-    source: left,
-    target: right,
-    sourceColumn: strictField(keys[0], 'left') ?? '',
-    targetColumn: strictField(keys[0], 'right') ?? '',
-    relationshipType: field(payload, 'cardinality') || 'related',
-    confidence: row.confidence === null ? null : Number(row.confidence),
-    status: reviewStatusOf(row) === REVIEW_STATUS.REJECTED ? 'rejected' : row.verified ? 'accepted' : 'suggested',
-    joinCondition: keys
-      .map((k) => `${left}.${strictField(k, 'left')} = ${right}.${strictField(k, 'right')}`)
-      .join(' AND '),
-    suggestion: field(payload, 'basis') || null,
-  };
-}
-
-async function modelGraph(
-  connectionId: string,
-  { versionId }: { versionId?: string | null } = {}
-): Promise<ModelGraph> {
-  const rows = await guarded(() => loadObjects(connectionId, undefined, { versionId }));
-
-  const runVersionId = rows.length ? rows[0].version_id : null;
-
-  const split = columnSplitter(rows);
-  const columnsByTable = new Map<JsonValue, Map<JsonValue, GraphColumn>>();
-  const tableFacts = new Map<string, JsonValue>(
-    rows.filter((r) => r.object_type === 'table').map((r) => [r.qualified_name, r.payload || {}])
-  );
-  const addColumn = (table: string, column: GraphColumn): void => {
-    let list = columnsByTable.get(table);
-    if (!list) {
-      list = new Map();
-      columnsByTable.set(table, list);
-    }
-    const prev = list.get(column.name);
-    list.set(
-      column.name,
-      prev
-        ? {
-            ...prev,
-            ...column,
-            dataType: prev.dataType || column.dataType,
-            isPrimaryKey: prev.isPrimaryKey || column.isPrimaryKey,
-            isForeignKey: prev.isForeignKey || column.isForeignKey,
-          }
-        : column
-    );
-  };
-  for (const [table, payload] of tableFacts) {
-    const keys = keyColumns(field(payload, 'primary_key'));
-    const foreign = foreignKeyColumns(payload);
-    for (const col of jsonList(field(payload, 'columns'))) {
-      const name = field(col, 'name');
-      if (!name) continue;
-      addColumn(table, {
-        name,
-        dataType: field(col, 'type') ?? null,
-        isPrimaryKey: keys.has(name),
-        isForeignKey: foreign.has(name),
-      });
-    }
-  }
-  for (const row of rows) {
-    if (row.object_type !== 'column_stats') continue;
-    const { table, column } = split(row.qualified_name);
-    if (!table) continue;
-    const payload = row.payload || {};
-    addColumn(table, {
-      name: column,
-      dataType: field(payload, 'data_type') ?? null,
-      isPrimaryKey: /candidate primary key/i.test(String(field(payload, 'note') || '')),
-      isForeignKey: false,
-    });
-  }
-
-  const nodes = new Map<JsonValue, GraphNode>();
-  const addNode = (name: JsonValue, kind: string): void => {
-    if (!name || nodes.has(name)) return;
-    nodes.set(name, {
-      id: name,
-      label: name,
-      datasetId: null,
-      kind,
-      columns: [...(columnsByTable.get(name) || new Map<JsonValue, GraphColumn>()).values()],
-      position: null,
-    });
-  };
-
-  for (const row of rows) {
-    if (row.object_type === 'table') addNode(row.qualified_name, 'table');
-  }
-
-  const edges: GraphEdge[] = [];
-  for (const row of rows) {
-    if (row.object_type !== 'join') continue;
-    const payload = row.payload || {};
-    const tables = jsonList(field(payload, 'tables'));
-    const keys = jsonList(field(payload, 'join_keys'));
-    if (tables.length < 2 || keys.length === 0) continue;
-
-    const [left, right] = tables;
-    addNode(left, 'table');
-    addNode(right, 'table');
-    edges.push(joinEdge(row, left, right, keys, payload));
-  }
-
-  edges.push(...inferredEdges([...nodes.values()], tableFacts, edges));
-
-  return {
-    connectionId,
-    status: rows.length ? 'ready' : 'pending',
-    generatedAt: rows.length ? rows[0].created_at : null,
-    error: null,
-    versionId: runVersionId,
-    nodes: [...nodes.values()],
-    edges,
   };
 }
 
@@ -844,7 +573,6 @@ export {
   loadObjects,
   columnSplitter,
   listContextObjects,
-  modelGraph,
   snapshotTableProfile,
   tableView,
   reviewQueue,
@@ -855,10 +583,6 @@ export {
   understanding,
 };
 export type {
-  GraphColumn,
-  GraphNode,
-  GraphEdge,
-  ModelGraph,
   SnapshotColumn,
   SnapshotTableProfile,
   ContextObjectList,

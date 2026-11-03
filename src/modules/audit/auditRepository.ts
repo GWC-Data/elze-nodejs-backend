@@ -69,10 +69,12 @@ function whereFor(filter: AuditFilter): Prisma.Sql {
   const { scope } = filter;
   if (scope.kind === 'company') {
     conditions.push(
-      Prisma.sql`(a.company_id = ${scope.companyId}::uuid OR a.actor_company_id = ${scope.companyId}::uuid)`
+      Prisma.sql`(a.actor_company_id = ${scope.companyId}::uuid OR (a.actor_id IS NULL AND a.company_id = ${scope.companyId}::uuid))`
     );
   } else if (scope.kind === 'self') {
-    conditions.push(Prisma.sql`(a.actor_id = ${scope.userId}::uuid OR a.target_user_id = ${scope.userId}::uuid)`);
+    conditions.push(
+      Prisma.sql`(a.actor_id = ${scope.userId}::uuid OR (a.actor_id IS NULL AND a.target_user_id = ${scope.userId}::uuid))`
+    );
   } else if (scope.hidePlatformTargetsExcept !== undefined) {
     conditions.push(Prisma.sql`(a.target_user_id IS NULL OR a.target_user_id = ${scope.hidePlatformTargetsExcept}::uuid
       OR NOT EXISTS (SELECT 1 FROM access_control.user_roles pur

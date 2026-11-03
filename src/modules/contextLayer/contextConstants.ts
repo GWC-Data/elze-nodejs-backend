@@ -1,35 +1,5 @@
 const AI_TEXT_KEYS = new Set(['description', 'note', 'logic_summary', 'definition', 'basis']);
 
-const GENERIC_COLUMNS = new Set([
-  'id',
-  'name',
-  'description',
-  'status',
-  'type',
-  'title',
-  'notes',
-  'comment',
-  'comments',
-  'created_at',
-  'updated_at',
-  'created_date',
-  'updated_date',
-  'created',
-  'updated',
-  'modified',
-  'modified_at',
-  'last_modified',
-  'last_updated',
-  'date',
-  'timestamp',
-  'created_by',
-  'updated_by',
-  'modified_by',
-  'is_active',
-  'active',
-  'deleted',
-]);
-
 const TERM_TYPES: Record<string, string> = {
   table: 'entity',
   metric: 'metric',
@@ -74,7 +44,6 @@ type GeneralAccess = (typeof GENERAL_ACCESS)[number];
 
 export {
   AI_TEXT_KEYS,
-  GENERIC_COLUMNS,
   TERM_TYPES,
   TYPE_LABELS,
   TERM_ORDER,

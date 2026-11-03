@@ -25,6 +25,7 @@ const ADK_RULES: Rule[] = [
   { match: /^\/playbook-builder(\/|$)/, anyOf: () => ['playbook.create', 'playbook.update'] },
   { match: /^\/playbooks(\/|$)/, anyOf: (m) => (READS.has(m) ? ['playbook.read'] : ['playbook.update']) },
   { match: /^\/context-(objects|versions)(\/|$)/, anyOf: () => ['context.read'], level: VIEW_OR_EDIT },
+  { match: /^\/relationships(\/|$)/, anyOf: () => ['context.read'], level: VIEW_OR_EDIT },
 ];
 
 function splitUri(uri: string): { service: string; path: string } | null {

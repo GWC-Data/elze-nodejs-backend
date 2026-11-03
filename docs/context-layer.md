@@ -9,7 +9,7 @@ modules/contextLayer/contextRoutes.ts         route definitions, mounted at /api
 modules/contextLayer/contextController.ts     request parsing and responses
 modules/contextLayer/contextLayerService.ts   orchestration: drafts, versions, audit per endpoint
 modules/contextLayer/connectionService.ts     company-scoped connection logic; the token never leaves it
-modules/contextLayer/contextService.ts        facts, review, glossary, model graph, snapshot profiles
+modules/contextLayer/contextService.ts        facts, review, glossary, snapshot profiles
 modules/contextLayer/versionService.ts        draft -> published -> next draft lifecycle
 modules/contextLayer/publishService.ts        publish = flip the draft to published + store the snapshot
 modules/contextLayer/mcpService.ts            how an MCP client reaches a published context
@@ -85,7 +85,9 @@ repository, and nothing in this build will catch it.
 | `GET` | `/api/context/connections/:id/context-objects/by-table` | `context.read` — facts grouped per table (table, columns, related), paged by table |
 | `GET` | `/api/context/connections/:id/understanding` | `context.read` (glossary for step 4) |
 
-Model, Review and Publish routes (`/model`, `/review…`, `/publish…`) are in `modules/contextLayer/contextRoutes.ts`.
+Review and Publish routes (`/review…`, `/publish…`) are in `modules/contextLayer/contextRoutes.ts`. There is no
+relationship route here: the Model step calls the ADK API's `/contexts/{id}/relationships/detect` through the
+agent gate (`/svc/adk`), and that detection saves nothing.
 
 A connection belongs to exactly one company. A platform account must name the
 company on create; a company account gets its own and a `companyId` in the body
@@ -263,7 +265,7 @@ count, data type, null rate, distinct count, formulas) and structure (`columns`,
 "Analyse with AI" runs the `context_layer_extractor` agent on the ADK API
 (`Elze-backend/adk_agents/api`); the browser calls it directly and the agent writes
 `context_objects` in the shared database. This module only reads those rows back
-(`/context-objects`, `/understanding`, Model, Review, Publish). Nothing here records the
+(`/context-objects`, `/understanding`, Review, Publish). Nothing here records the
 run: no version-row extraction fields, no `context_extraction_run` audit event (by
 decision). The demo generator that used to stand in for the agent
 (`CONTEXT_EXTRACTION_MODE=demo`, `demoExtraction.ts`, `/settings`, `/extraction`) was

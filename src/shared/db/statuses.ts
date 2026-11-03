@@ -14,7 +14,17 @@ const REVIEW_DECISION_STATUS: Record<string, string> = { approve: 'approved', re
 
 const VERSION_STATUS = { DRAFT: 'draft', PUBLISHED: 'published' };
 
-const CONTEXT_STEPS = ['connect', 'context', 'discover', 'profile', 'understand', 'model', 'review', 'publish'];
+const CONTEXT_STEPS = [
+  'connect',
+  'context',
+  'discover',
+  'profile',
+  'business',
+  'understand',
+  'model',
+  'review',
+  'publish',
+];
 
 const USER_STATUSES: readonly string[] = Object.values(USER_STATUS);
 const REVIEW_DECISIONS = new Set(Object.keys(REVIEW_DECISION_STATUS));

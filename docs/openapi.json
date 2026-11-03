@@ -2231,7 +2231,7 @@
         ],
         "operationId": "checkAgentGate",
         "summary": "Authorize an agent-service request",
-        "description": "Authorization sub-request for a reverse proxy (auth_request style) placed in front of the agent service at `/svc/adk/...`. The proxy forwards the browser's cookies plus the original URI and method in headers. Allowed: `/svc/adk/health` and `/svc/adk/models` for any signed-in account, and `/svc/adk/contexts/{contextId}/...` where the sub-path decides the rule: `/context-layer`, `/description-editor`, `/context-objects`, `/context-versions` need `context.read` plus view access to the context (edit access for non-GET/HEAD/OPTIONS); `/data-analyst` needs `analyst.use` or `playbook.run`; `/playbook-builder` needs `playbook.create` or `playbook.update`; `/playbooks` needs `playbook.read` (reads) or `playbook.update` (writes); the last three also need view access to the context. Any other path is refused. Responses carry no body: 204 when allowed; 401 for authentication failures (`UNAUTHENTICATED`, `TOKEN_EXPIRED`); 403 for everything else (including permission, context-access, not-found, `PASSWORD_CHANGE_REQUIRED` and `SERVICE_UNAVAILABLE` errors). Billable requests are charged here, before the agent runs: POST `.../context-layer/sessions/{id}/messages` (price `context.build`), `.../description-editor/sessions/{id}/messages` (`context.chat`) and `.../data-analyst/sessions/{id}/messages` (`analyst.question`), against the company that owns the context. A charge returns a signed `X-Credit-Charge` header for a refund; platform accounts are logged but not charged. Without enough credits the request is refused with 403 and reason `INSUFFICIENT_CREDITS` (company pool) or `CREDIT_LIMIT_REACHED` (the member's limit); these refusals are not audited as denials. The error code is reported in the `X-Gate-Reason` response header and 403 denials are audited.",
+        "description": "Authorization sub-request for a reverse proxy (auth_request style) placed in front of the agent service at `/svc/adk/...`. The proxy forwards the browser's cookies plus the original URI and method in headers. Allowed: `/svc/adk/health` and `/svc/adk/models` for any signed-in account, and `/svc/adk/contexts/{contextId}/...` where the sub-path decides the rule: `/context-layer`, `/description-editor`, `/context-objects`, `/context-versions`, `/relationships` need `context.read` plus view access to the context (edit access for non-GET/HEAD/OPTIONS); `/data-analyst` needs `analyst.use` or `playbook.run`; `/playbook-builder` needs `playbook.create` or `playbook.update`; `/playbooks` needs `playbook.read` (reads) or `playbook.update` (writes); the last three also need view access to the context. Any other path is refused. Responses carry no body: 204 when allowed; 401 for authentication failures (`UNAUTHENTICATED`, `TOKEN_EXPIRED`); 403 for everything else (including permission, context-access, not-found, `PASSWORD_CHANGE_REQUIRED` and `SERVICE_UNAVAILABLE` errors). Billable requests are charged here, before the agent runs: POST `.../context-layer/sessions/{id}/messages` (price `context.build`), `.../description-editor/sessions/{id}/messages` (`context.chat`) and `.../data-analyst/sessions/{id}/messages` (`analyst.question`), against the company that owns the context. A charge returns a signed `X-Credit-Charge` header for a refund; platform accounts are logged but not charged. Without enough credits the request is refused with 403 and reason `INSUFFICIENT_CREDITS` (company pool) or `CREDIT_LIMIT_REACHED` (the member's limit); these refusals are not audited as denials. The error code is reported in the `X-Gate-Reason` response header and 403 denials are audited.",
         "security": [
           {
             "cookieAuth": []
@@ -5175,7 +5175,7 @@
         ],
         "operationId": "listAuditEntries",
         "summary": "List audit trail entries",
-        "description": "Returns one page of the audit trail. No permission is needed; what the caller sees depends on their role: the platform owner sees everything, a company admin sees entries of their company, and anyone else sees entries they made or that target them (reported in `scope`). Defaults: pageSize 25 (max 100), sort ts, dir desc. Search matches event, actor, detail text and company name. 400 VALIDATION_ERROR for bad paging or sort values, an unknown category or action, a malformed date, or from after to.\n\nNo route-level permission is required (any signed-in account).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "description": "Returns one page of the audit trail. No permission is needed; what the caller sees depends on the `audit.read` permission: a platform account holding it sees everything (a platform admin not entries naming other platform accounts), a company account holding it sees what people in their company did (never what platform accounts did to the company), and anyone without it sees only what they did (reported in `scope`). Entries with no signed-in actor, such as a password reset request, show to the company and the account they are about. Platform owner, platform admins and company admins hold `audit.read` by default; a company admin can give it to a custom role or one member. Defaults: pageSize 25 (max 100), sort ts, dir desc. Search matches event, actor, detail text and company name. 400 VALIDATION_ERROR for bad paging or sort values, an unknown category or action, a malformed date, or from after to.\n\nNo route-level permission is required (any signed-in account).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
         "x-permissions": [],
         "security": [
           {
@@ -7495,6 +7495,164 @@
         }
       }
     },
+    "/api/context/connections/{id}/business-layer": {
+      "get": {
+        "tags": [
+          "Context layer"
+        ],
+        "operationId": "getBusinessLayer",
+        "summary": "Get the business layer",
+        "description": "Returns the business layer of the draft version, or of the latest published version when there is no draft (empty fields when none was saved). With `version`, returns the one stored on that published version. `organizationName` is the owning company's name. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "x-permissions": [
+          "context.read"
+        ],
+        "x-context-access": "view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Connection id (also the context / workspace id). A value that is not a UUID is answered with 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "Id of a published version of this connection. When given, the business layer stored on that version is returned. Unknown, unpublished or malformed ids return 404 RESOURCE_NOT_FOUND (\"Published version not found\").",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The business layer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BusinessLayerState"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Context layer"
+        ],
+        "operationId": "saveBusinessLayer",
+        "summary": "Save the business layer",
+        "description": "Replaces the business layer on the draft version, opening a draft when there is none. Published versions are never changed; a new draft starts with the business layer of the published version it is based on. `organizationName` in the body is ignored. 400 VALIDATION_ERROR when the body is not an object, an overview is over its limit or more than 500 are sent. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `edit` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"); a visible connection with a lower level returns 403 INSUFFICIENT_PERMISSION (\"Your access to this context does not let you change it.\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). State-changing call: the CSRF header must match the CSRF cookie (403 CSRF_TOKEN_INVALID). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "x-permissions": [
+          "context.update"
+        ],
+        "x-context-access": "edit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Connection id (also the context / workspace id). A value that is not a UUID is answered with 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessLayer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved business layer, read back from the draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/BusinessLayerState"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/context/connections/{id}/extraction": {
       "get": {
         "tags": [
@@ -7975,84 +8133,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
-    "/api/context/connections/{id}/model": {
-      "get": {
-        "tags": [
-          "Context layer"
-        ],
-        "security": [
-          {
-            "cookieAuth": []
-          }
-        ],
-        "operationId": "getContextModelGraph",
-        "summary": "Data model graph (Model step)",
-        "description": "Builds the relationship graph from the facts of the latest extraction run (or a published version): one node per table fact (columns from the table payload and column_stats facts), one edge per join fact, plus inferred edges for declared foreign keys (confidence 1), columns named like another table's primary key (0.8) and same-named non-generic columns (0.5) between tables not already joined. status is \"pending\" when no facts exist yet. Requires view access to the context: owner, platform account or context.manage_all holder (full), a user or group grant, or general access `company` (view for everyone in the company). A context the caller cannot see is reported as 404.",
-        "x-permissions": [
-          "context.read"
-        ],
-        "x-context-access": "view",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Connection id. A connection is the context: sharing, versions and facts all hang off it. A malformed or unknown id, or one the caller cannot see, returns 404.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": false,
-            "description": "Id of a published version of this connection. When given, the frozen snapshot stored with that version is read (every fact in it counts as approved) instead of the latest extraction run. An id that is not a published version of this connection returns 404.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Model graph.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "success",
-                    "data"
-                  ],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "const": true
-                    },
-                    "data": {
-                      "$ref": "#/components/schemas/ContextModel"
-                    }
-                  }
-                }
-              }
-            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15744,6 +15824,7 @@
               "context",
               "discover",
               "profile",
+              "business",
               "understand",
               "model",
               "review",
@@ -16803,6 +16884,7 @@
               "context",
               "discover",
               "profile",
+              "business",
               "understand",
               "model",
               "review",
@@ -17076,6 +17158,7 @@
               "context",
               "discover",
               "profile",
+              "business",
               "understand",
               "model",
               "review",
@@ -17474,204 +17557,6 @@
           }
         }
       },
-      "ContextModelColumn": {
-        "type": "object",
-        "required": [
-          "name",
-          "dataType",
-          "isPrimaryKey",
-          "isForeignKey"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "dataType": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "isPrimaryKey": {
-            "type": "boolean"
-          },
-          "isForeignKey": {
-            "type": "boolean"
-          }
-        }
-      },
-      "ContextModelNode": {
-        "type": "object",
-        "required": [
-          "id",
-          "label",
-          "datasetId",
-          "kind",
-          "columns",
-          "position"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Table qualified name."
-          },
-          "label": {
-            "type": "string",
-            "description": "Same as id."
-          },
-          "datasetId": {
-            "type": "null",
-            "description": "Always null."
-          },
-          "kind": {
-            "type": "string",
-            "const": "table"
-          },
-          "columns": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContextModelColumn"
-            }
-          },
-          "position": {
-            "type": "null",
-            "description": "Always null; layout is left to the client."
-          }
-        }
-      },
-      "ContextModelEdge": {
-        "type": "object",
-        "required": [
-          "id",
-          "source",
-          "target",
-          "sourceColumn",
-          "targetColumn",
-          "relationshipType",
-          "confidence",
-          "status",
-          "joinCondition",
-          "suggestion"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Join fact id, or \"inferred:...\" for inferred edges."
-          },
-          "source": {
-            "type": "string",
-            "description": "Source table (node id)."
-          },
-          "target": {
-            "type": "string",
-            "description": "Target table (node id)."
-          },
-          "sourceColumn": {
-            "type": "string"
-          },
-          "targetColumn": {
-            "type": "string"
-          },
-          "relationshipType": {
-            "type": "string",
-            "description": "payload.cardinality or \"related\" for join facts; \"many-to-one\" or \"many-to-many\" for inferred edges."
-          },
-          "confidence": {
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "description": "accepted (verified join), suggested (unverified join), rejected (rejected in review) or inferred.",
-            "enum": [
-              "accepted",
-              "suggested",
-              "rejected",
-              "inferred"
-            ]
-          },
-          "rule": {
-            "type": "string",
-            "description": "Only on inferred edges: how the edge was inferred.",
-            "enum": [
-              "declared",
-              "primary_key",
-              "same_name"
-            ]
-          },
-          "joinCondition": {
-            "type": "string",
-            "description": "SQL-like join condition, e.g. \"a.x = b.x AND a.y = b.y\"."
-          },
-          "suggestion": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Why the relationship exists (payload.basis for joins, an explanation for inferred edges)."
-          }
-        }
-      },
-      "ContextModel": {
-        "type": "object",
-        "required": [
-          "connectionId",
-          "status",
-          "generatedAt",
-          "error",
-          "versionId",
-          "nodes",
-          "edges"
-        ],
-        "properties": {
-          "connectionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string",
-            "description": "ready when facts exist, otherwise pending.",
-            "enum": [
-              "ready",
-              "pending"
-            ]
-          },
-          "generatedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "Creation time of the first fact read; null when none."
-          },
-          "error": {
-            "type": "null",
-            "description": "Always null."
-          },
-          "versionId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Version id of the facts read.",
-            "format": "uuid"
-          },
-          "nodes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContextModelNode"
-            }
-          },
-          "edges": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ContextModelEdge"
-            }
-          }
-        }
-      },
       "ReviewItem": {
         "type": "object",
         "description": "A fact as shown in the review queue.",
@@ -17990,6 +17875,7 @@
               "context",
               "discover",
               "profile",
+              "business",
               "understand",
               "model",
               "review",
@@ -19826,6 +19712,69 @@
           },
           "credits": {
             "type": "number"
+          }
+        }
+      },
+      "BusinessLayer": {
+        "type": "object",
+        "description": "The business layer of a context version: one overview per selected dataset. Missing fields read as empty and unknown fields are ignored. An overview longer than its limit, or more than 500 of them, is refused with 400 VALIDATION_ERROR.",
+        "properties": {
+          "tables": {
+            "type": "object",
+            "description": "Dataset overviews keyed by table id (the dataset id from the profile), at most 500, ids up to 190 characters. Blank overviews are dropped.",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        }
+      },
+      "BusinessLayerState": {
+        "type": "object",
+        "required": [
+          "organizationName",
+          "versionId",
+          "status",
+          "businessLayer",
+          "updatedAt"
+        ],
+        "properties": {
+          "organizationName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the company that owns the connection. Read-only: it is never taken from the request."
+          },
+          "versionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The version read; null when the context has no version yet."
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "draft",
+              "published",
+              null
+            ]
+          },
+          "businessLayer": {
+            "$ref": "#/components/schemas/BusinessLayer"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the business layer was last saved; null if never."
           }
         }
       }

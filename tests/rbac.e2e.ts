@@ -898,7 +898,7 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
     JSON.stringify(r.body?.data?.user?.permissions)
   );
 
-  section('Audit trail: stored in the database, scoped by role');
+  section('Audit trail: stored in the database, scoped by audit.read');
 
   await new Promise((done) => setTimeout(done, 500));
 
@@ -1004,6 +1004,12 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
     alphaItems.length > 0 && alphaItems.every((i) => inCompany(i, companyA)),
     JSON.stringify(alphaItems.find((i) => !inCompany(i, companyA)))
   );
+  check(
+    'without what platform accounts did to the company',
+    alphaItems.every((i) => i.actorCompanyId === companyA || !i.actorId) &&
+      ownerItems.some((i) => i.actor === 'platformowner' && i.companyId === companyA),
+    JSON.stringify(alphaItems.find((i) => i.actorId && i.actorCompanyId !== companyA))
+  );
 
   r = await betaAdmin.call('GET', '/api/audit?pageSize=100');
   check(
@@ -1019,18 +1025,44 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
     `${r.status} ${r.body?.data?.scope}`
   );
   check(
-    'what they did and what was done to their account',
-    selfItems.length > 0 && selfItems.every((i) => i.actorId === alphaUserId || i.detail?.userId === alphaUserId),
-    JSON.stringify(selfItems.find((i) => i.actorId !== alphaUserId && i.detail?.userId !== alphaUserId))
+    'only what they did themselves',
+    selfItems.length > 0 &&
+      selfItems.every((i) => i.actorId === alphaUserId || (!i.actorId && i.detail?.userId === alphaUserId)),
+    JSON.stringify(selfItems.find((i) => i.actorId !== alphaUserId))
   );
+  r = await alphaAdmin.call('GET', '/api/audit?pageSize=100');
   check(
-    'including a change made to their account by their administrator',
-    selfItems.some((i) => i.actor === 'alpha.admin' && i.detail?.userId === alphaUserId)
+    'not what their administrator did to their account',
+    !selfItems.some((i) => i.actor === 'alpha.admin') &&
+      (r.body?.data?.items || []).some((i: any) => i.actor === 'alpha.admin' && i.detail?.userId === alphaUserId),
+    JSON.stringify(selfItems.filter((i) => i.actor === 'alpha.admin').map((i) => i.event))
   );
   check(
     'but no dashboard events, which are hidden',
     !selfItems.some((i) => /^(dashboard_|access_granted|access_revoked)/.test(i.event)),
     JSON.stringify(selfItems.map((i) => i.event))
+  );
+
+  r = await alphaAdmin.call('PUT', `/api/users/${alphaUserId}/permissions`, { permissionIds: pids('audit.read') });
+  check('a company admin can give a member audit.read', r.status === 200, JSON.stringify(r.body));
+  r = await alphaUser.call('GET', '/api/audit?pageSize=100');
+  const widenedItems: any[] = r.body?.data?.items || [];
+  check(
+    'audit.read opens the company trail to that member',
+    r.status === 200 && r.body?.data?.scope === 'company' && widenedItems.some((i) => i.actorId !== alphaUserId),
+    `${r.status} ${r.body?.data?.scope}`
+  );
+  check(
+    'and still only their company',
+    widenedItems.every((i) => inCompany(i, companyA)),
+    JSON.stringify(widenedItems.find((i) => !inCompany(i, companyA)))
+  );
+  await alphaAdmin.call('PUT', `/api/users/${alphaUserId}/permissions`, { permissionIds: [] });
+  r = await alphaUser.call('GET', '/api/audit?pageSize=1');
+  check(
+    'taking audit.read away leaves them their own activity',
+    r.status === 200 && r.body?.data?.scope === 'self',
+    `${r.status} ${r.body?.data?.scope}`
   );
 
   section('Token lifecycle');

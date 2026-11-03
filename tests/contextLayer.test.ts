@@ -426,6 +426,9 @@ async function cleanup(): Promise<void> {
   );
   const viewerChats = await gate(memberA, '/description-editor/sessions', 'POST');
   check('the gate keeps view out of description edits', viewerChats === 'INSUFFICIENT_PERMISSION', viewerChats);
+  check('the gate lets view poll a relationship job', (await gate(memberA, '/relationships/jobs/j1', 'GET')) === null);
+  const viewerDetects = await gate(memberA, '/relationships/detect', 'POST');
+  check('the gate keeps view from starting detection', viewerDetects === 'INSUFFICIENT_PERMISSION', viewerDetects);
 
   shared = await sharing.shareWithUser(adminA, connectionId, memberA.id, level('edit'));
   check('changing the level replaces it', shared.people.length === 1 && shared.people[0].level === 'edit');
@@ -437,6 +440,7 @@ async function cleanup(): Promise<void> {
     'the gate lets edit use the description editor',
     (await gate(memberA, '/description-editor/sessions/s1/messages', 'POST')) === null
   );
+  check('the gate lets edit detect relationships', (await gate(memberA, '/relationships/detect', 'POST')) === null);
   const editorDeletes = await codeOf(() => service.requireConnection(memberA, connectionId, 'full'));
   check('edit still cannot delete', editorDeletes === 'INSUFFICIENT_PERMISSION', editorDeletes);
   await sharing.shareWithUser(adminA, connectionId, memberA.id, level('full'));
@@ -879,7 +883,7 @@ async function cleanup(): Promise<void> {
   global.fetch = realFetch;
   installFakeDomo();
 
-  section('Model, review and publish');
+  section('Review and publish');
 
   await db.raw(`
     CREATE TABLE IF NOT EXISTS context_objects (
@@ -978,35 +982,6 @@ async function cleanup(): Promise<void> {
     },
     { confidence: 0.6, order: 6 }
   );
-
-  const graph = await store.modelGraph(ws);
-  check(
-    'only the latest run is read',
-    !graph.nodes.some((n: any) => n.id === 'stale_table'),
-    graph.nodes.map((n: any) => n.id).join(',')
-  );
-  check('a node per table', graph.nodes.length === 3, String(graph.nodes.length));
-  check(
-    'a join to an unrecorded table still makes a node',
-    graph.nodes.some((n: any) => n.id === 'regions')
-  );
-  check(
-    'columns hang off their table',
-    graph.nodes.find((n: any) => n.id === 'orders')!.columns.length === 2,
-    String(graph.nodes.find((n: any) => n.id === 'orders')!.columns.length)
-  );
-  check(
-    'a candidate key is read from the note, not guessed',
-    graph.nodes.find((n: any) => n.id === 'orders')!.columns.find((c: any) => c.name === 'customer_id')!.isPrimaryKey
-  );
-  check('an edge per join', graph.edges.length === 2, String(graph.edges.length));
-  check(
-    'the join condition is built from join_keys',
-    graph.edges[0].joinCondition === 'orders.customer_id = customers.id',
-    graph.edges[0].joinCondition
-  );
-  check('confidence comes through', graph.edges[0].confidence === 0.97, String(graph.edges[0].confidence));
-  check('an unverified join is suggested', graph.edges[0].status === 'suggested', graph.edges[0].status);
 
   const queue = await store.reviewQueue(ws);
   check('every object is reviewable', queue.total === 6, String(queue.total));
@@ -1214,6 +1189,100 @@ async function cleanup(): Promise<void> {
   await contextLayer.deleteVersion(adminA, connectionId, v2.id, { permanent: true });
   const purgedVersion = await db.query(`SELECT 1 FROM ${CT.versions} WHERE id = ?::uuid`, [v2.id]);
   check('an admin removes a deleted version for good', purgedVersion.rows.length === 0);
+
+  section('Business layer');
+
+  const blankLayer = await contextLayer.businessLayer(adminA, connectionId, undefined);
+  check(
+    'with no draft it reads the latest published version',
+    blankLayer.status === 'published' && blankLayer.versionId === v3.id,
+    JSON.stringify({ status: blankLayer.status, versionId: blankLayer.versionId })
+  );
+  check(
+    'a version that never had one reads as empty',
+    Object.keys(blankLayer.businessLayer.tables).length === 0 && !blankLayer.updatedAt
+  );
+  check(
+    'the organization is the company that owns the context',
+    blankLayer.organizationName === 'Ctx Alpha',
+    blankLayer.organizationName
+  );
+
+  const savedLayer = await contextLayer.saveBusinessLayer(adminA, connectionId, {
+    organizationName: 'Somebody Else',
+    domain: 'Operations',
+    tables: {
+      'ds-1': 'Every order placed in a store, one row per order.',
+      'ds-2': '   ',
+    },
+  });
+  check(
+    'saving opens a new draft',
+    savedLayer.status === 'draft' && savedLayer.versionId !== v3.id,
+    JSON.stringify({ status: savedLayer.status, versionId: savedLayer.versionId })
+  );
+  check(
+    'the organization name cannot be overridden',
+    savedLayer.organizationName === 'Ctx Alpha',
+    savedLayer.organizationName
+  );
+  check(
+    'fields other than the dataset overviews are not stored',
+    JSON.stringify(Object.keys(savedLayer.businessLayer)) === '["tables"]',
+    JSON.stringify(savedLayer.businessLayer)
+  );
+  check(
+    'blank dataset overviews are dropped',
+    JSON.stringify(Object.keys(savedLayer.businessLayer.tables)) === '["ds-1"]',
+    JSON.stringify(savedLayer.businessLayer.tables)
+  );
+  check('the save time is recorded', Boolean(savedLayer.updatedAt));
+
+  const longTable = await codeOf(() =>
+    contextLayer.saveBusinessLayer(adminA, connectionId, { tables: { 'ds-1': 'x'.repeat(2001) } })
+  );
+  check('an over-long dataset overview is refused', longTable === 'VALIDATION_ERROR', longTable);
+  const notAnObject = await codeOf(() =>
+    contextLayer.saveBusinessLayer(adminA, connectionId, ['tables'] as unknown as Record<string, unknown>)
+  );
+  check('a body that is not an object is refused', notAnObject === 'VALIDATION_ERROR', notAnObject);
+
+  const publishedLayer = await contextLayer.businessLayer(adminA, connectionId, v3.id);
+  check('the published version keeps what it had', Object.keys(publishedLayer.businessLayer.tables).length === 0);
+
+  await sharing.shareWithUser(adminA, connectionId, memberA.id, level('view'));
+  const viewerLayer = await contextLayer.businessLayer(memberA, connectionId, undefined);
+  check('view can read the draft business layer', Boolean(viewerLayer.businessLayer.tables['ds-1']));
+  const viewerSaves = await codeOf(() =>
+    contextLayer.saveBusinessLayer(memberA, connectionId, { tables: { 'ds-1': 'Mine' } })
+  );
+  check('view cannot change it', viewerSaves === 'INSUFFICIENT_PERMISSION', viewerSaves);
+  await sharing.unshareWithUser(adminA, connectionId, memberA.id);
+  const crossLayer = await codeOf(() => contextLayer.businessLayer(adminB, connectionId, undefined));
+  check('another company cannot read it', crossLayer === 'RESOURCE_NOT_FOUND', crossLayer);
+
+  await contextLayer.trackDraft(adminA, connectionId, 'business');
+  const businessStep = await db.query(`SELECT current_step FROM ${CT.versions} WHERE id = ?::uuid`, [
+    savedLayer.versionId,
+  ]);
+  check('the draft can stop at the business step', businessStep.rows[0]?.current_step === 'business');
+
+  const v4 = await publish.publishContext(adminA, connectionRow, { name: 'Revenue' });
+  const nextDraft = await contextLayer.createVersion(adminA, connectionId);
+  const carried = await contextLayer.businessLayer(adminA, connectionId, undefined);
+  check(
+    'the next draft starts from the published business layer',
+    nextDraft.draft?.id === carried.versionId &&
+      JSON.stringify(carried.businessLayer) === JSON.stringify(savedLayer.businessLayer),
+    JSON.stringify({ draft: nextDraft.draft?.id, carried: carried.versionId })
+  );
+  check(
+    'and keeps when it was last edited',
+    carried.updatedAt?.getTime() === savedLayer.updatedAt?.getTime(),
+    `${carried.updatedAt} vs ${savedLayer.updatedAt}`
+  );
+  await db.query(`DELETE FROM ${CT.versions} WHERE id = ?::uuid`, [carried.versionId]);
+  await contextLayer.deleteVersion(adminA, connectionId, v4.id, { permanent: true });
 
   section('Deleting');
 

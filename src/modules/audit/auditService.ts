@@ -2,8 +2,7 @@ import * as auditRepository from './auditRepository';
 import { EVENTS, FORBIDDEN_DETAIL_KEYS } from './auditEvents';
 import { fail, messageOf } from '../../shared/errors/AppError';
 import { isUuid } from '../../shared/validation/commonValidator';
-import { COMPANY_ADMIN } from '../catalogue/roleTiers';
-import { seesPlatformAccounts } from '../auth/authorizationService';
+import { can, seesPlatformAccounts } from '../auth/authorizationService';
 import { shapeEntry } from './auditSerializer';
 import {
   auditActions,
@@ -91,12 +90,11 @@ function audit(event: string, actor: AuditActor, detail: AuditDetail = {}): void
 }
 
 function scopeFor(actor: Actor): AuditScope {
+  if (!can(actor, 'audit.read')) return { kind: 'self', userId: actor.id };
   if (actor.isPlatform) {
     return seesPlatformAccounts(actor) ? { kind: 'all' } : { kind: 'all', hidePlatformTargetsExcept: actor.id };
   }
-  if (actor.role === COMPANY_ADMIN && actor.companyId) {
-    return { kind: 'company', companyId: actor.companyId };
-  }
+  if (actor.companyId) return { kind: 'company', companyId: actor.companyId };
   return { kind: 'self', userId: actor.id };
 }
 
