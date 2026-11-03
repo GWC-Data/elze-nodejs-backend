@@ -4,12 +4,16 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import config from './config';
 import apiRoutes from './routes';
+import { requestLimit } from './shared/http/rateLimitMiddleware';
 
 const { DIST_DIR } = config.env;
 const { APPLICATION_URL } = config.auth;
+const { TRUST_PROXY } = config.http;
 
 const app = express();
 
+app.set('trust proxy', TRUST_PROXY);
+app.use(requestLimit);
 app.use(cors({ origin: APPLICATION_URL, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());

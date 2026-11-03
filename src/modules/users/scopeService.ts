@@ -17,7 +17,7 @@ async function scopeOptions() {
       out.push({ dimension: dimension.dimension, label, values: await scopeRepository.distinctValues(dimension) });
     } catch (err) {
       console.warn(`[rbac] scope dimension "${dimension.dimension}" is unreadable: ${messageOf(err)}`);
-      out.push({ dimension: dimension.dimension, label, values: [], error: messageOf(err) });
+      out.push({ dimension: dimension.dimension, label, values: [], error: 'These values could not be loaded.' });
     }
   }
   return { enforced: ENFORCED, dimensions: out };

@@ -109,12 +109,15 @@ function errorMessageOf(err: unknown): unknown {
   return typeof err === 'object' && err !== null && 'message' in err ? err.message : undefined;
 }
 
+const RUNTIME_STAGES = new Set(['execute', 'format']);
+const QUERY_FAILED = "This card's query failed. The server log has the details.";
+
 function describeError(err: unknown, stage: string): StageError {
   const message = errorMessageOf(err);
-  return {
-    stage,
-    message: typeof message === 'string' && message ? message : String(err),
-  };
+  if (RUNTIME_STAGES.has(stage) || typeof message !== 'string' || !message) {
+    return { stage, message: QUERY_FAILED };
+  }
+  return { stage, message };
 }
 
 async function runQueryWithCache(query: GeneratedSql, dashKey: string, ttl?: number): Promise<CachedQueryResult> {

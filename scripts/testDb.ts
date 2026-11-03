@@ -46,6 +46,8 @@ function suiteEnv(): NodeJS.ProcessEnv {
     REDIS_URL: '',
     PORT: String(serverPort),
     APPLICATION_URL: serverUrl,
+    RATE_LIMIT_PER_MINUTE: '100000',
+    AUTH_RATE_LIMIT_PER_15_MIN: '100000',
     JWT_ACCESS_SECRET: 'test-only-access-token-secret',
     JWT_REFRESH_SECRET: 'test-only-refresh-token-secret',
     CREDENTIAL_SECRET: 'test-only-credential-secret-at-least-32-chars',

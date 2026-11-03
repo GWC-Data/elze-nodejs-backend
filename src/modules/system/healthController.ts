@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ok } from '../../shared/http/apiResponse';
-import { isRbacReady, rbacError } from './bootstrapService';
+import { isRbacReady } from './bootstrapService';
 import { describeTransport } from '../../shared/email/emailService';
 
 function health(_req: Request, res: Response): void {
@@ -9,7 +9,7 @@ function health(_req: Request, res: Response): void {
     res,
     {
       status: ready ? 'ok' : 'starting',
-      detail: ready ? null : rbacError(),
+      detail: ready ? null : 'The access catalogue is still loading.',
       email: describeTransport().provider,
     },
     ready ? 200 : 503

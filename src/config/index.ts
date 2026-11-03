@@ -6,6 +6,7 @@ interface Config {
   readonly database: typeof import('../shared/db/database');
   readonly engine: typeof import('./engine');
   readonly context: typeof import('./context');
+  readonly http: typeof import('./http');
 }
 
 const MODULES: Record<keyof Config, string> = {
@@ -16,6 +17,7 @@ const MODULES: Record<keyof Config, string> = {
   database: '../shared/db/database',
   engine: './engine',
   context: './context',
+  http: './http',
 };
 
 const config = {} as Config;

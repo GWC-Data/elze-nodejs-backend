@@ -18,14 +18,9 @@ const { DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR } = config.env;
 const HOUSEKEEPING_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 let ready = false;
-let readyError: string | null = null;
 
 function isRbacReady(): boolean {
   return ready;
-}
-
-function rbacError(): string | null {
-  return readyError;
 }
 
 async function seedSuperAdmin(): Promise<boolean> {
@@ -99,11 +94,9 @@ async function bootstrapAppMeta(): Promise<boolean> {
       console.warn(`[rbac] ${roleless} account(s) have no role in access_control.user_roles and cannot sign in`);
 
     ready = true;
-    readyError = null;
     return true;
   } catch (err) {
     ready = false;
-    readyError = messageOf(err);
     throw err;
   }
 }
@@ -154,4 +147,4 @@ function startHousekeeping(): NodeJS.Timeout {
   return setInterval(runOnce, HOUSEKEEPING_INTERVAL_MS).unref();
 }
 
-export { isRbacReady, rbacError, bootstrapAppMeta, bootstrapWithRetry, verifyEmailTransport, startHousekeeping };
+export { isRbacReady, bootstrapAppMeta, bootstrapWithRetry, verifyEmailTransport, startHousekeeping };

@@ -3,7 +3,7 @@
   "info": {
     "title": "Elze Backend API",
     "version": "1.0.0",
-    "description": "REST API of the Elze Node.js backend: authentication, platform administration, company workspaces, people and groups, roles and permissions, dashboard access, the audit trail, the Metadata Lakehouse (context layer) and the BI dashboard engine.\n\n**Responses.** Every JSON response uses one envelope. Success: `{ \"success\": true, \"data\": ... }`. Failure: `{ \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"...\", \"details\": ... } }`. The `code` is stable and meant for programs; the `message` is meant for people. 5xx messages are generic unless the code is one the API chooses to disclose.\n\n**Signing in.** `POST /api/auth/login` sets three cookies: `da_access` (short-lived access token, HTTP-only, sent on every request), `da_refresh` (long-lived refresh token, HTTP-only, only sent to `/api/auth`) and `da_csrf` (readable by the web app). There is no bearer header.\n\n**CSRF.** Every request that changes something (POST, PUT, PATCH, DELETE) on a signed-in route must send the `x-csrf-token` header with the value of the `da_csrf` cookie.\n\n**Origin.** The API only serves the web app at `APPLICATION_URL`. A request whose `Origin` header (or, without one, the origin of its `Referer`) is anything else - another port, host or scheme - is refused with 403 `ORIGIN_NOT_ALLOWED`. Requests without either header (scripts, server-to-server calls) are not affected, and `/api/health` is always open. Outside production the backend's own address is also accepted, so this page keeps working.\n\n**Permissions.** Each operation lists the permission it requires in `x-permissions`. A company account holds a permission through its role, limited by the features switched on for its company; the platform owner holds every permission. `x-platform-only` marks routes only the platform owner can call.\n\n**Lists.** Paged lists accept `page`, `pageSize` (at most 100), `search`, `sort` and `dir`, and return the items with the total count.",
+    "description": "REST API of the Elze Node.js backend: authentication, platform administration, company workspaces, people and groups, roles and permissions, dashboard access, the audit trail, the Metadata Lakehouse (context layer) and the BI dashboard engine.\n\n**Responses.** Every JSON response uses one envelope. Success: `{ \"success\": true, \"data\": ... }`. Failure: `{ \"success\": false, \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"...\", \"details\": ... } }`. The `code` is stable and meant for programs; the `message` is meant for people. 5xx messages are generic unless the code is one the API chooses to disclose.\n\n**Signing in.** `POST /api/auth/login` sets three cookies: `da_access` (short-lived access token, HTTP-only, sent on every request), `da_refresh` (long-lived refresh token, HTTP-only, only sent to `/api/auth`) and `da_csrf` (readable by the web app). There is no bearer header.\n\n**CSRF.** Every request that changes something (POST, PUT, PATCH, DELETE) on a signed-in route must send the `x-csrf-token` header with the value of the `da_csrf` cookie.\n\n**Origin.** The API only serves the web app at `APPLICATION_URL`. A request whose `Origin` header (or, without one, the origin of its `Referer`) is anything else - another port, host or scheme - is refused with 403 `ORIGIN_NOT_ALLOWED`. Requests without either header (scripts, server-to-server calls) are not affected, and `/api/health` is always open. Outside production the backend's own address is also accepted, so this page keeps working.\n\n**Permissions.** Each operation lists the permission it requires in `x-permissions`. A company account holds a permission through its role, limited by the features switched on for its company; the platform owner holds every permission. `x-platform-only` marks routes only the platform owner can call.\n\n**Lists.** Paged lists accept `page`, `pageSize` (at most 100), `search`, `sort` and `dir`, and return the items with the total count.\n\n**Rate limits.** Every request counts towards RATE_LIMIT_PER_MINUTE (default 1000) per client IP; `POST /api/auth/login`, `/forgot-password`, `/activation` and `/reset-password` also count towards AUTH_RATE_LIMIT_PER_15_MIN (default 20) per `identifier`, or per client IP when the body has none. Over a limit the answer is 429 `RATE_LIMITED` with a `Retry-After` header and `RateLimit` headers. Behind a proxy, TRUST_PROXY (Express `trust proxy` syntax) decides which IP counts.",
     "contact": {
       "name": "Elze backend team"
     }
@@ -96,7 +96,7 @@
         ],
         "operationId": "getHealth",
         "summary": "Service health",
-        "description": "Reports whether the access-control catalogue (RBAC bootstrap) has loaded and which email transport is configured. No authentication. Note: the handler sets 503 while starting, but the shared `ok()` response helper resets the status to 200, so the endpoint always answers HTTP 200; read `data.status` (`ok` or `starting`) to tell readiness.",
+        "description": "Reports whether the access-control catalogue (RBAC bootstrap) has loaded and which email transport is configured. No authentication. Answers 200 with `data.status` `ok` once ready, and 503 with `starting` and a fixed `detail` while the catalogue is still loading; the underlying error is only written to the server log.",
         "security": [],
         "responses": {
           "200": {
@@ -132,7 +132,7 @@
         ],
         "operationId": "authLogin",
         "summary": "Sign in",
-        "description": "Signs in with a username or email address and a password, and starts a new session (a new refresh-token family). On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). `data.state` is `PASSWORD_CHANGE_REQUIRED` when the account must change its password before using the rest of the API. Errors: 400 `VALIDATION_ERROR` (missing identifier or password), 401 `INVALID_CREDENTIALS`, 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 429 `RATE_LIMITED` (too many failed attempts for this identifier; locked for LOGIN_LOCKOUT_SECONDS), 503 `SERVICE_UNAVAILABLE`. No CSRF token is needed.",
+        "description": "Signs in with a username or email address and a password, and starts a new session (a new refresh-token family). On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). `data.state` is `PASSWORD_CHANGE_REQUIRED` when the account must change its password before using the rest of the API. Errors: 400 `VALIDATION_ERROR` (missing identifier or password), 401 `INVALID_CREDENTIALS`, 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 429 `RATE_LIMITED` (too many failed attempts for this identifier; locked for LOGIN_LOCKOUT_SECONDS), 503 `SERVICE_UNAVAILABLE`. No CSRF token is needed. Also limited to AUTH_RATE_LIMIT_PER_15_MIN (20) requests per 15 minutes per `identifier` (429 `RATE_LIMITED`, `Retry-After`).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -547,7 +547,7 @@
         ],
         "operationId": "authActivate",
         "summary": "Activate an account",
-        "description": "Consumes an activation token, sets the account's first password, marks the account active, revokes any earlier sessions and signs the user in. On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (token missing or over 200 characters; password policy: at least MIN_PASSWORD_LENGTH characters (default 8), at most 200, with at least one digit or symbol), 400 `INVALID_ACTIVATION_TOKEN` (unknown, used or expired), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`.",
+        "description": "Consumes an activation token, sets the account's first password, marks the account active, revokes any earlier sessions and signs the user in. On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (token missing or over 200 characters; password policy: at least MIN_PASSWORD_LENGTH characters (default 8), at most 200, with at least one digit or symbol), 400 `INVALID_ACTIVATION_TOKEN` (unknown, used or expired), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`. Also limited to AUTH_RATE_LIMIT_PER_15_MIN (20) requests per 15 minutes per client IP (429 `RATE_LIMITED`, `Retry-After`).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -597,6 +597,9 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -610,7 +613,7 @@
         ],
         "operationId": "authForgotPassword",
         "summary": "Ask for a password reset link",
-        "description": "Starts a self-service password reset for the account whose username or email matches `identifier`. The answer is the same whether or not an account matches, and the email is sent after the response, so neither the body nor the timing tells the caller which accounts exist; a delivery failure is only logged. A link is emailed only to an active account that has a password and whose company is active (a pending account still needs a new activation link from an administrator). The link opens `APPLICATION_URL/reset-password?token=...`, works once, expires after PASSWORD_RESET_TOKEN_TTL_SECONDS (1 hour) and replaces any earlier reset link of the account. At most PASSWORD_RESET_MAX_REQUESTS (3) requests per username or email are accepted in PASSWORD_RESET_WINDOW_SECONDS (1 hour), whether or not an account matches; the next one answers 429 `RATE_LIMITED` with a message saying how many minutes to wait. An account is also sent at most 3 links an hour in total. No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (identifier missing or over 254 characters), 429 `RATE_LIMITED`, 503 `SERVICE_UNAVAILABLE`.",
+        "description": "Starts a self-service password reset for the account whose username or email matches `identifier`. The answer is the same whether or not an account matches, and the email is sent after the response, so neither the body nor the timing tells the caller which accounts exist; a delivery failure is only logged. A link is emailed only to an active account that has a password and whose company is active (a pending account still needs a new activation link from an administrator). The link opens `APPLICATION_URL/reset-password?token=...`, works once, expires after PASSWORD_RESET_TOKEN_TTL_SECONDS (1 hour) and replaces any earlier reset link of the account. At most PASSWORD_RESET_MAX_REQUESTS (3) requests per username or email are accepted in PASSWORD_RESET_WINDOW_SECONDS (1 hour), whether or not an account matches; the next one answers 429 `RATE_LIMITED` with a message saying how many minutes to wait. An account is also sent at most 3 links an hour in total. No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (identifier missing or over 254 characters), 429 `RATE_LIMITED`, 503 `SERVICE_UNAVAILABLE`. Also limited to AUTH_RATE_LIMIT_PER_15_MIN (20) requests per 15 minutes per `identifier` (429 `RATE_LIMITED`, `Retry-After`).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -719,7 +722,7 @@
         ],
         "operationId": "authResetPassword",
         "summary": "Set a new password with a reset link",
-        "description": "Consumes a password reset token, sets the account's new password, revokes every earlier session of the account, clears any sign-in lockout on its username and email, and signs the user in. On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (token missing or over 200 characters; password policy: at least MIN_PASSWORD_LENGTH characters (default 8), at most 200, with at least one digit or symbol), 400 `INVALID_RESET_TOKEN` (unknown, used, replaced, expired, or the account is no longer active), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`.",
+        "description": "Consumes a password reset token, sets the account's new password, revokes every earlier session of the account, clears any sign-in lockout on its username and email, and signs the user in. On success it sets the session cookies: `da_access` (HttpOnly access JWT, path `/`), `da_refresh` (HttpOnly refresh token, path `/api/auth`) and `da_csrf` (non-HttpOnly CSRF token, path `/`; echo its value in the `X-CSRF-Token` header on state-changing requests). No authentication or CSRF token needed. Errors: 400 `VALIDATION_ERROR` (token missing or over 200 characters; password policy: at least MIN_PASSWORD_LENGTH characters (default 8), at most 200, with at least one digit or symbol), 400 `INVALID_RESET_TOKEN` (unknown, used, replaced, expired, or the account is no longer active), 403 `ACCOUNT_DISABLED` or `COMPANY_DISABLED`, 503 `SERVICE_UNAVAILABLE`. Also limited to AUTH_RATE_LIMIT_PER_15_MIN (20) requests per 15 minutes per client IP (429 `RATE_LIMITED`, `Retry-After`).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -768,6 +771,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -13372,7 +13378,8 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "For `plan` and `sql` the reason the card configuration was refused; for `execute` and `format` a fixed message (the database error is only written to the server log)."
           }
         }
       },
