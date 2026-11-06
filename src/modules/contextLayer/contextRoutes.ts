@@ -56,5 +56,8 @@ router.delete('/connections/:id/access/users/:userId', update, context.unshareWi
 router.get('/connections/:id/access/groups', read, context.accessGroups);
 router.put('/connections/:id/access/groups/:groupId', update, context.shareWithGroup);
 router.delete('/connections/:id/access/groups/:groupId', update, context.unshareWithGroup);
+router.get('/connections/:id/access/companies', read, context.accessCompanies);
+router.put('/connections/:id/access/companies/:companyId', update, context.shareWithCompany);
+router.delete('/connections/:id/access/companies/:companyId', update, context.unshareWithCompany);
 
 export = router;

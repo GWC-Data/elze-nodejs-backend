@@ -66,15 +66,16 @@ const DELETED_ITEMS = Prisma.sql`(
   SELECT 'context', cn.id::text, cn.name::text, cn.provider::text, cn.company_id, c.name::text, NULL, NULL,
          cn.deleted_at, cn.deleted_by
     FROM connections cn
-    JOIN companies c ON c.id = cn.company_id
-   WHERE cn.deleted_at IS NOT NULL AND c.deleted_at IS NULL
+    LEFT JOIN companies c ON c.id = cn.company_id
+   WHERE cn.deleted_at IS NOT NULL AND (cn.company_id IS NULL OR c.deleted_at IS NULL)
   UNION ALL
   SELECT 'version', v.id::text, v.name::text, ('v' || v.version)::text, v.company_id, c.name::text,
          cn.id::text, cn.name::text, v.deleted_at, v.deleted_by
     FROM context_layer_versions v
     JOIN connections cn ON cn.id = v.connection_id
-    JOIN companies c ON c.id = v.company_id
-   WHERE v.status = 'published' AND v.deleted_at IS NOT NULL AND cn.deleted_at IS NULL AND c.deleted_at IS NULL
+    LEFT JOIN companies c ON c.id = v.company_id
+   WHERE v.status = 'published' AND v.deleted_at IS NOT NULL AND cn.deleted_at IS NULL
+     AND (v.company_id IS NULL OR c.deleted_at IS NULL)
 ) t
   LEFT JOIN users du ON du.id = t.deleted_by`;
 

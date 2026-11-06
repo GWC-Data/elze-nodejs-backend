@@ -4,7 +4,7 @@ import type { DatasetFields } from './contextTypes';
 
 interface ShapedConnection<D, A> {
   id: string;
-  companyId: string;
+  companyId: string | null;
   provider: string;
   name: string;
   host: string;

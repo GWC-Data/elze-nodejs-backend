@@ -75,6 +75,7 @@ backend/
 ├── prisma.config.ts                 Prisma CLI settings; builds the database URL from DB_*
 ├── prisma/schema.prisma             the application tables, as Prisma models
 ├── prisma/migrations/               every schema change, applied by `npm run db:migrate`
+├── prisma/seed.ts                   the seed data (catalogue + platform owner), run at every start and by `npm run db:seed`
 ├── docs/context-layer.md            read before touching warehouse connections
 ├── docs/openapi.json                the API reference (OpenAPI 3.1), served at /api/docs outside production
 │
@@ -189,7 +190,9 @@ SUPER_ADMIN              the one platform owner: every company, user, role and a
    +-- PLATFORM_ADMIN    created by the owner: companies and their accounts, nothing about
    |                     platform accounts and no editing of the built-in role defaults
    |
-   +-- COMPANY_ADMIN     one company: its users, groups and access
+   +-- COMPANY_ADMIN     one company: its users, groups and access. The admin created with
+          |              the company is its default admin (companies.primary_admin_id), the
+          |              only company account that manages the other company admins
           |
           +-- USER       one company: only what has been granted to them
 ```
@@ -411,7 +414,7 @@ message is replaced with a generic one before it leaves the process.
 | `GET`/`POST` | `/api/auth/activation` | the activation token itself |
 | `POST` | `/api/auth/forgot-password` | — (throttled per username/email) |
 | `GET`/`POST` | `/api/auth/reset-password` | the reset token itself |
-| `GET` | `/api/auth/me`, `/api/auth/sessions` | signed in |
+| `GET` | `/api/auth/me` | signed in |
 | `POST` | `/api/auth/change-password` | signed in |
 | `GET` | `/api/companies`, `/api/companies/:id` | `company.read` |
 | `POST`/`PATCH`/`DELETE` | `/api/companies…` | `company.create` / `.update` / `.delete` |
@@ -471,7 +474,8 @@ run it are created by the same request:
 
 ```
 SUPER_ADMIN creates a company, naming its administrator
-   -> company row, COMPANY_ADMIN account and activation token: one transaction
+   -> company row, COMPANY_ADMIN account (recorded as the company's default admin) and
+      activation token: one transaction
    -> invitation emailed after it commits
    -> they open the link, choose a password, and are signed in as COMPANY_ADMIN
    -> from there they add their own users, by the same route
@@ -604,12 +608,33 @@ a new database before its first start, and again after pulling a change that add
 migration. The server checks at startup and refuses to start while a migration is missing,
 naming it.
 
-`bootstrapAppMeta()` then runs on every start: it loads the catalogue and — only when the
-users table is empty — creates the platform owner from `BOOTSTRAP_ADMIN_USERNAME`,
-`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, flagged to change its password at
-first sign-in. Those three variables are read at no other time; once the owner exists they can
-be removed. There is no database to create: the tables go into `DB_NAME`, beside the
-reporting data.
+`bootstrapAppMeta()` then runs on every start: it runs the seed in `prisma/seed.ts`, loads the
+catalogue and adds the dashboards in `src/config/dashboards` that are missing. There is no
+database to create: the tables go into `DB_NAME`, beside the reporting data.
+
+### Seed data (`prisma/seed.ts`)
+
+One file holds everything the application needs before anyone signs in: features,
+permissions, access levels, the four system roles with their default permissions, connectors,
+credit rates and audit event types, plus the platform owner. The default dashboard is not part
+of it (it stays in `src/config/dashboards`).
+
+- **It runs by itself at every server start**, and by hand with `npm run db:seed`
+  (`prisma db seed`).
+- **It only inserts what is missing.** It never changes or deletes a row, so a role's
+  permissions or a credit price changed in the app stay as they are; a deleted catalogue row
+  comes back.
+- **The platform owner is created only while the users table is empty**, from
+  `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`, flagged to
+  change its password at first sign-in. Those three variables are read at no other time; once
+  the owner exists they can be removed.
+- **`npm run db:seed:check`** lists every difference between the database and the file
+  (changed in the app, missing, or not in the file). The integration runner runs it on each
+  fresh test database and fails on any difference.
+
+The same rows are also inserted by the migrations that introduced them (with fixed ids), and
+applied migrations are never edited. So a new catalogue row goes into **both** its migration
+and `prisma/seed.ts`; the check fails until they agree.
 
 Bootstrap failure **is fatal**. Every endpoint now resolves an actor and checks a grant, so
 a process that cannot reach the database cannot authorize anything; staying up would mean
@@ -680,6 +705,7 @@ database was renamed.
 | `9_05_restore_audit_events` | the `*_restored` audit event types written when a deleted item is recovered |
 | `9_06_uuid_ids` | `companies.id`, `users.id` and `groups.id`, and the 53 columns that point at them, become UUIDs (`gen_random_uuid()` for new rows). Existing rows get a fresh UUID and every reference follows it; references to rows already purged become NULL, including `userId` / `groupId` / `companyId` inside `audit_logs.detail` and `companyId` in `dashboards.spec`. Foreign keys and the five views are saved from the live database and recreated unchanged; foreign keys from other schemas (`legacy_rbac`) are dropped. `audit_logs.id` stays a BIGINT |
 | `9_09_audit_permission` | the `audit.read` permission, given to the platform owner, platform admin and company admin roles; it decides who reads more of the audit trail than their own activity |
+| `9_11_company_default_admin` | `companies.primary_admin_id` (FK to `users`, `ON DELETE SET NULL`): the company's default admin, set by `createCompany`; existing companies get their earliest-created live company admin. `assertCanManageUser` lets only that admin (and platform accounts) manage the other company admins |
 
 Prisma applies migrations in **folder-name order**, compared as text: `10_…` would run right
 after `1_…`. That is why the migrations after `8_soft_delete` are numbered `9_01_`, `9_02_`, …;
@@ -793,6 +819,8 @@ npm run setup:indexes     # create indexes from dashboard metadata (--dry-run su
 npm run reset:access      # email an account a new activation link, without a token
 npm run db:migrate        # apply pending migrations to the database .env points at
 npm run db:status         # list applied and pending migrations
+npm run db:seed           # insert the missing seed rows from prisma/seed.ts (also runs at every start)
+npm run db:seed:check     # list the differences between the database and prisma/seed.ts
 npm run db:generate       # regenerate the Prisma client after editing schema.prisma
 npm run docs:check        # compare docs/openapi.json with the routes in src/routes
 npm test                  # unit tests, then the integration suites

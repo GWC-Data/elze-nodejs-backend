@@ -5,6 +5,7 @@ import { likePattern, orderBy } from '../../shared/db/listQuery';
 import { DELETED, NOT_DELETED, RESTORED, notDeleted, notDeletedRef, softDeletion } from '../../shared/db/softDelete';
 import type { Tx } from '../../shared/db/database';
 import type { ListWindow } from '../../shared/db/baseRepository';
+import { COMPANY_ADMIN } from '../catalogue/roleTiers';
 
 const { prisma, withTransaction } = config.database;
 
@@ -26,6 +27,10 @@ interface CompanyListRow extends CompanyRow {
   userCount: number;
   dashboardCount: number;
   feature_ids: string[];
+  admin_id: string | null;
+  admin_username: string | null;
+  admin_display_name: string | null;
+  admin_email: string | null;
 }
 
 interface CompanyCountsRow extends CompanyListRow {
@@ -46,11 +51,19 @@ const COUNTED_FROM = Prisma.sql`
     LEFT JOIN (SELECT cd.company_id, COUNT(*)::int AS n
                  FROM access_control.company_dashboards cd
                 WHERE ${notDeletedRef('dashboards', 'cd.dashboard_id')}
-                GROUP BY cd.company_id) dc ON dc.company_id = c.id`;
+                GROUP BY cd.company_id) dc ON dc.company_id = c.id
+    LEFT JOIN LATERAL (SELECT au.id, au.username, au.display_name, au.email
+                         FROM users au
+                         JOIN access_control.user_roles aur ON aur.user_id = au.id
+                         JOIN access_control.roles ar ON ar.id = aur.role_id
+                        WHERE au.company_id = c.id AND au.deleted_at IS NULL AND ar.tier::text = ${COMPANY_ADMIN}
+                        ORDER BY COALESCE(au.id = c.primary_admin_id, FALSE) DESC, au.created_at, au.id
+                        LIMIT 1) pa ON TRUE`;
 
 const COUNTED_COLUMNS = Prisma.sql`c.id, c.name, c.slug, c.active, c.created_at,
          COALESCE(uc.n, 0) AS "userCount", COALESCE(dc.n, 0) AS "dashboardCount",
-         COALESCE((SELECT f.feature_ids FROM access_control.company_features f WHERE f.company_id = c.id), '{}') AS feature_ids`;
+         COALESCE((SELECT f.feature_ids FROM access_control.company_features f WHERE f.company_id = c.id), '{}') AS feature_ids,
+         pa.id AS admin_id, pa.username AS admin_username, pa.display_name AS admin_display_name, pa.email AS admin_email`;
 
 const COMPANY_SORTS: Record<string, string> = {
   name: 'lower(c.name)',
@@ -128,6 +141,10 @@ async function insert(
   return asRow(await tx.company.create({ data: { name, slug, active: true, createdBy } }));
 }
 
+async function setPrimaryAdmin(id: string, userId: string, tx: Tx = prisma): Promise<void> {
+  await tx.company.update({ where: { id }, data: { primaryAdminId: userId } });
+}
+
 async function updateColumns(id: string, changes: { name?: string; active?: boolean }): Promise<void> {
   await prisma.company.update({ where: { id }, data: changes });
 }
@@ -197,6 +214,7 @@ export {
   findWithCounts,
   findRow,
   insert,
+  setPrimaryAdmin,
   updateColumns,
   softDelete,
   discard,

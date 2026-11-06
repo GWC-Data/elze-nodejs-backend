@@ -10,7 +10,7 @@ async function contextProfile(connectionId: string): Promise<ContextProfileView 
 }
 
 async function saveContextProfile(
-  connection: { id: string; companyId: string },
+  connection: { id: string; companyId: string | null },
   actor: Actor,
   body: RequestBody
 ): Promise<ContextProfileView> {

@@ -14,13 +14,12 @@ interface AccessTokenUser {
   role: string | null;
 }
 
-function signAccessToken(user: AccessTokenUser, familyId: string): string {
+function signAccessToken(user: AccessTokenUser): string {
   return jwt.sign(
     {
       sub: String(user.id),
       cid: user.company_id ?? null,
       rol: user.role,
-      fam: familyId,
       typ: ACCESS_TOKEN_TYPE,
       jti: crypto.randomUUID(),
     },

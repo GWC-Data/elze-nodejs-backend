@@ -61,7 +61,7 @@ async function sessionPayload(user: UserSource) {
 
 function sessionTokens(user: UserSource, refresh: IssuedRefreshToken) {
   return {
-    accessToken: tokens.issueAccessToken(user, refresh.familyId),
+    accessToken: tokens.issueAccessToken(user),
     refreshToken: refresh.token,
     refreshExpiresAt: refresh.expiresAt,
   };
@@ -158,11 +158,6 @@ async function me(actor: Actor, account: PublicUser) {
     state: actor.mustChangePassword ? AUTH_STATE.PASSWORD_CHANGE_REQUIRED : AUTH_STATE.AUTHENTICATED,
     user: { ...account, ...shownAccess(actor.features, actor.permissions) },
   };
-}
-
-async function sessions(actor: Actor) {
-  const list = await tokens.listSessions(actor.id);
-  return list.map((s) => ({ ...s, current: s.familyId === actor.familyId }));
 }
 
 async function changePassword(
@@ -319,7 +314,6 @@ export {
   refresh,
   logout,
   me,
-  sessions,
   changePassword,
   describeActivation,
   activate,

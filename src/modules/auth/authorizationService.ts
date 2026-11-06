@@ -1,6 +1,6 @@
 import { fail } from '../../shared/errors/AppError';
 import { isUuid } from '../../shared/validation/commonValidator';
-import { PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
+import { COMPANY_ADMIN, PLATFORM_ADMIN, ROLE_SCOPES, SUPER_ADMIN, USER, scopeOfTier } from '../catalogue/roleTiers';
 import {
   featureKeys,
   featureOfPermission,
@@ -21,6 +21,7 @@ interface ActorSource {
   must_change_password: boolean;
   role_id?: string | null;
   role_name?: string | null;
+  is_default_admin?: boolean;
 }
 
 interface ManagedUser {
@@ -59,6 +60,7 @@ function buildActor(
     role,
     roleScope,
     isPlatform,
+    isDefaultAdmin: role === COMPANY_ADMIN && Boolean(userRow.is_default_admin),
     companyId: isPlatform ? null : userRow.company_id,
     status: userRow.status,
     mustChangePassword: Boolean(userRow.must_change_password),
@@ -175,11 +177,11 @@ function assertCanManageUser(actor: Actor, target: ManagedUser): void {
   if (!actor.isPlatform && target.role !== USER && target.role !== actor.role) {
     throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
   }
-  if (!actor.isPlatform && target.role === actor.role) {
-    throw fail(
-      'TENANT_ACCESS_DENIED',
-      'Another administrator of this company can only be managed by the platform owner.'
-    );
+  if (!actor.isPlatform && target.role === COMPANY_ADMIN && !actor.isDefaultAdmin) {
+    throw fail('TENANT_ACCESS_DENIED', "Only this company's default administrator can manage other administrators.");
+  }
+  if (!actor.isPlatform && target.role === actor.role && actor.role !== COMPANY_ADMIN) {
+    throw fail('TENANT_ACCESS_DENIED', 'That account is not yours to manage.');
   }
 }
 

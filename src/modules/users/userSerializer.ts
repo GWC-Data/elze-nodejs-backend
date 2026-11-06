@@ -16,6 +16,7 @@ interface UserListItem {
   displayName?: string;
   lastLoginAt?: Date;
   companyName?: string;
+  isDefaultAdmin?: true;
 }
 
 const isCustom = (row: { role_kind: string | null }) => row.role_kind === 'custom';
@@ -38,6 +39,7 @@ function publicUser(row: UserSource | null | undefined): PublicUser | null {
     customRoleId: isCustom(row) ? row.role_id : null,
     customRoleName: isCustom(row) ? row.role_name : null,
     status: row.status,
+    isDefaultAdmin: Boolean(row.is_default_admin),
     mustChangePassword: Boolean(row.must_change_password),
     lastLoginAt: row.last_login_at || null,
     createdAt: row.created_at || null,
@@ -61,6 +63,7 @@ function userListItem(row: UserListRow, withCompany?: boolean): UserListItem {
   if (row.display_name) item.displayName = row.display_name;
   if (row.last_login_at) item.lastLoginAt = row.last_login_at;
   if (withCompany && row.companyName) item.companyName = row.companyName;
+  if (row.is_default_admin) item.isDefaultAdmin = true;
   return item;
 }
 

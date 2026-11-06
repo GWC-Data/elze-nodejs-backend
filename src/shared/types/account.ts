@@ -12,6 +12,7 @@ interface PublicUser {
   customRoleId: string | null;
   customRoleName: string | null;
   status: string;
+  isDefaultAdmin: boolean;
   mustChangePassword: boolean;
   lastLoginAt: Date | null;
   createdAt: Date | null;

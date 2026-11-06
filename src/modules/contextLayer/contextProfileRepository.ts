@@ -39,7 +39,7 @@ async function upsert({
   createdBy,
 }: {
   connectionId: string;
-  companyId: string;
+  companyId: string | null;
   name: string;
   description: string | null;
   createdBy: string | null;

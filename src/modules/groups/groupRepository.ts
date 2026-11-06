@@ -9,7 +9,12 @@ const { prisma } = config.database;
 
 const GROUP_INCLUDE = {
   company: { select: { name: true } },
-  _count: { select: { members: { where: { user: NOT_DELETED } } } },
+  _count: {
+    select: {
+      members: { where: { user: NOT_DELETED } },
+      contextAccess: { where: { connection: NOT_DELETED } },
+    },
+  },
 } as const;
 
 interface GroupView {
@@ -20,6 +25,7 @@ interface GroupView {
   active: boolean;
   createdAt: Date;
   memberCount: number;
+  contextCount: number;
 }
 
 function shape(row: Prisma.GroupGetPayload<{ include: typeof GROUP_INCLUDE }>): GroupView {
@@ -31,6 +37,7 @@ function shape(row: Prisma.GroupGetPayload<{ include: typeof GROUP_INCLUDE }>): 
     active: row.active,
     createdAt: row.createdAt,
     memberCount: row._count.members,
+    contextCount: row._count.contextAccess,
   };
 }
 
@@ -76,6 +83,7 @@ async function listMembers(groupId: string) {
     id: user.id,
     username: user.username,
     email: user.email,
+    displayName: user.displayName,
     role: user.role ? user.role.role.tier : null,
     status: user.status,
   }));

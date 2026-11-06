@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
-import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepository';
+import { orNotFound, rawRows } from '../../shared/db/baseRepository';
 import { accessColumns, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
@@ -47,7 +47,7 @@ interface PublishedVersionRow extends VersionRow {
 }
 
 interface DraftRow extends PublishedVersionRow {
-  company_id: string;
+  company_id: string | null;
   extraction_report: string | null;
   extraction_dataset_ids: Prisma.JsonValue;
   snapshot: Prisma.JsonValue;
@@ -88,7 +88,7 @@ interface CompanyPublishedRow extends AccessColumnsRow {
   connection_name: string;
   provider: string;
   host: string;
-  company_id: string;
+  company_id: string | null;
   company_name: string | null;
   published_by: string | null;
 }
@@ -425,11 +425,7 @@ async function listCompanyPublished(
   seeAll: boolean,
   search?: string | null
 ): Promise<CompanyPublishedRow[]> {
-  const conditions = [
-    Prisma.sql`v.status = 'published' AND v.deleted_at IS NULL`,
-    companyScope(actor, 'c.company_id'),
-    visibleClause(actor, seeAll),
-  ];
+  const conditions = [Prisma.sql`v.status = 'published' AND v.deleted_at IS NULL`, visibleClause(actor, seeAll)];
   if (search) {
     const pattern = likePattern(search);
     conditions.push(Prisma.sql`(v.name ILIKE ${pattern} OR c.name ILIKE ${pattern})`);

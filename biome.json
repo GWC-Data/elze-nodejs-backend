@@ -7,7 +7,15 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["src/**", "scripts/**", "tests/**", "*.ts", "!src/generated", "!src/config/dashboards"]
+    "includes": [
+      "src/**",
+      "scripts/**",
+      "tests/**",
+      "prisma/seed.ts",
+      "*.ts",
+      "!src/generated",
+      "!src/config/dashboards"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -50,7 +58,7 @@
       }
     },
     {
-      "includes": ["prisma.config.ts"],
+      "includes": ["prisma.config.ts", "prisma/seed.ts"],
       "formatter": {
         "lineEnding": "lf"
       }

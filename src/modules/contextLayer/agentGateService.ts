@@ -61,7 +61,7 @@ async function checkAgentRequest(actor: Actor, uri: unknown, method: unknown): P
   if (!rule) throw fail('INSUFFICIENT_PERMISSION', 'Unknown agent route.');
   requireAny(actor, rule.anyOf(verb));
   const connection = await requireConnectionId(actor, contextId, rule.level ? rule.level(verb) : 'view');
-  return { contextId: connection.id, companyId: connection.companyId, path: rest, method: verb };
+  return { contextId: connection.id, companyId: connection.companyId ?? actor.companyId, path: rest, method: verb };
 }
 
 export { checkAgentRequest };

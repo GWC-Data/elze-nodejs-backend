@@ -43,7 +43,7 @@ type LoadedConnection = ConnectionSecretRow & { access: ContextAccess };
 interface ConnectionRef {
   id: string;
   name: string;
-  companyId: string;
+  companyId: string | null;
   access: ContextAccess;
   row: ConnectionIdRow;
 }
@@ -242,7 +242,7 @@ async function tableProfile(actor: Actor, id: unknown, tableId: unknown): Promis
 
 async function createConnection(
   actor: Actor,
-  companyId: string,
+  companyId: string | null,
   {
     provider,
     name,
@@ -278,7 +278,12 @@ async function createConnection(
     });
   } catch (err) {
     if (sqlState(err) === UNIQUE_VIOLATION) {
-      throw fail('CONFLICT', `This company already has a ${providerId} connection called "${cleanName}".`);
+      throw fail(
+        'CONFLICT',
+        companyId === null
+          ? `The platform already has a ${providerId} connection called "${cleanName}".`
+          : `This company already has a ${providerId} connection called "${cleanName}".`
+      );
     }
     throw err;
   }

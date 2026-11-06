@@ -27,7 +27,7 @@ type PublishedDataset = JsonValue | FallbackDataset;
 interface DraftTarget {
   id: string;
   name: string;
-  companyId: string;
+  companyId: string | null;
   selectedDatasets?: readonly { id: string }[];
 }
 

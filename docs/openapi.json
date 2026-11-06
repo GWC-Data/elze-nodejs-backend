@@ -363,58 +363,6 @@
         }
       }
     },
-    "/api/auth/sessions": {
-      "get": {
-        "tags": [
-          "Auth"
-        ],
-        "operationId": "authListSessions",
-        "summary": "List my sessions",
-        "description": "Lists the signed-in account's active sessions (unrevoked, unexpired refresh-token families), newest first. `current` marks the session the request was made with. Works while a password change is pending. Requires the `da_access` session cookie. Fails with 401 `UNAUTHENTICATED`/`TOKEN_EXPIRED`, or 403 `ACCOUNT_DISABLED`, `ACCOUNT_PENDING_ACTIVATION` or `COMPANY_DISABLED` when the account or its company is no longer usable; 503 `SERVICE_UNAVAILABLE` while the access-control catalogue is not loaded.",
-        "security": [
-          {
-            "cookieAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Active sessions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "success",
-                    "data"
-                  ],
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "const": true
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AuthSessionInfo"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
     "/api/auth/change-password": {
       "post": {
         "tags": [
@@ -2844,7 +2792,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "companyId",
+            "in": "query",
+            "required": false,
+            "description": "Platform accounts only: list just this company's active users (for example to pick a group's members). Company accounts always get their own company and the value is ignored. Not a UUID: 400 VALIDATION_ERROR.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/users/scope-options": {
@@ -2934,6 +2894,8 @@
               "type": "string",
               "enum": [
                 "name",
+                "username",
+                "email",
                 "company",
                 "role",
                 "status",
@@ -8942,7 +8904,7 @@
         ],
         "operationId": "listContextShareablePeople",
         "summary": "People the context can be shared with",
-        "description": "Active users of the connection's company, excluding the owner, ordered by display name (or username). Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Active users of the connection's company (for a platform context: of every active company, with the company name), excluding the owner, ordered by display name (or username). Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -9267,7 +9229,7 @@
         ],
         "operationId": "listContextShareableGroups",
         "summary": "Groups the context can be shared with",
-        "description": "Active groups of the connection's company with their member counts, ordered by name. Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "description": "Active groups of the connection's company (for a platform context: of every active company) with their member counts, ordered by name. Not paged. Only someone who may share the context can call this: its creator, a company admin (any context.manage_all holder) or a platform account - also for a context a member created (canShare in the access response). Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
         "x-permissions": [
           "context.read"
         ],
@@ -9498,6 +9460,252 @@
         }
       }
     },
+    "/api/context/connections/{id}/access/companies": {
+      "get": {
+        "tags": [
+          "Context layer"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "operationId": "listContextShareableCompanies",
+        "summary": "Companies a platform context can be shared with",
+        "description": "Active companies with their active member counts, ordered by name. Not paged. Only platform accounts can call this, and only for a platform context (one created from the platform console, which belongs to no company); for a company's context it returns 400 VALIDATION_ERROR. Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "x-context-access": "view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Connection id. A connection is the context: sharing, versions and facts all hang off it. A malformed or unknown id, or one the caller cannot see, returns 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Shareable companies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ContextShareableCompany"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/context/connections/{id}/access/companies/{companyId}": {
+      "put": {
+        "tags": [
+          "Context layer"
+        ],
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "operationId": "shareContextWithCompany",
+        "summary": "Grant or change a company's access",
+        "description": "Creates or replaces the company's grant on this platform context: every active member of the company gets the given access level. Members get the strongest of their user, group and company grants. The company must be active (otherwise 404 \"Company not found\"). Only platform accounts can call this, and only for a platform context (one created from the platform console, which belongs to no company); for a company's context it returns 400 VALIDATION_ERROR. Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "x-permissions": [
+          "context.update"
+        ],
+        "x-context-access": "view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Connection id. A connection is the context: sharing, versions and facts all hang off it. A malformed or unknown id, or one the caller cannot see, returns 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "description": "Company id (UUID). Anything else returns 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The full sharing state of the context after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ContextSharing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Context layer"
+        ],
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "operationId": "unshareContextWithCompany",
+        "summary": "Remove a company's grant",
+        "description": "Removes the company's grant on this platform context. Removing a grant that does not exist is not an error. Returns 200 with the sharing state, not 204. Only platform accounts can call this, and only for a platform context (one created from the platform console, which belongs to no company); for a company's context it returns 400 VALIDATION_ERROR. Everyone else who can see the context gets 403 INSUFFICIENT_PERMISSION; a context the caller cannot see is 404.",
+        "x-permissions": [
+          "context.update"
+        ],
+        "x-context-access": "view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Connection id. A connection is the context: sharing, versions and facts all hang off it. A malformed or unknown id, or one the caller cannot see, returns 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "path",
+            "required": true,
+            "description": "Company id (UUID). Anything else returns 400.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full sharing state of the context after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ContextSharing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/api/platform/users/options": {
       "get": {
         "tags": [
@@ -9642,6 +9850,8 @@
               "type": "string",
               "enum": [
                 "name",
+                "username",
+                "email",
                 "company",
                 "role",
                 "status",
@@ -12089,6 +12299,7 @@
           "customRoleId",
           "customRoleName",
           "status",
+          "isDefaultAdmin",
           "mustChangePassword",
           "lastLoginAt",
           "createdAt"
@@ -12183,6 +12394,10 @@
               "disabled"
             ]
           },
+          "isDefaultAdmin": {
+            "type": "boolean",
+            "description": "True for the company administrator created with the company (its default admin). Only the default admin, besides platform accounts, can manage the other company administrators."
+          },
           "mustChangePassword": {
             "type": "boolean"
           },
@@ -12273,30 +12488,6 @@
           },
           "user": {
             "$ref": "#/components/schemas/SessionUser"
-          }
-        }
-      },
-      "AuthSessionInfo": {
-        "type": "object",
-        "required": [
-          "familyId",
-          "lastUsedAt",
-          "current"
-        ],
-        "properties": {
-          "familyId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Refresh-token family id identifying the session."
-          },
-          "lastUsedAt": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the newest refresh token of the family was issued."
-          },
-          "current": {
-            "type": "boolean",
-            "description": "True for the session making this request."
           }
         }
       },
@@ -12731,6 +12922,37 @@
               "type": "string"
             },
             "description": "Enabled feature keys (locked features included). Present on list and detail responses."
+          },
+          "primaryAdmin": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The company's default admin, or its earliest-created company admin when there is no default. Null when the company has no administrator. Present on list and detail responses.",
+            "required": [
+              "id",
+              "username",
+              "displayName",
+              "email"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "username": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "email": {
+                "type": "string"
+              }
+            }
           }
         }
       },
@@ -13915,6 +14137,13 @@
           "companyName": {
             "type": "string",
             "description": "Present only when the caller is the platform owner and the account belongs to a company."
+          },
+          "isDefaultAdmin": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Present (true) only on the company's default administrator."
           }
         }
       },
@@ -13954,6 +14183,7 @@
           "customRoleId",
           "customRoleName",
           "status",
+          "isDefaultAdmin",
           "mustChangePassword",
           "lastLoginAt",
           "createdAt"
@@ -14051,6 +14281,10 @@
               "active",
               "disabled"
             ]
+          },
+          "isDefaultAdmin": {
+            "type": "boolean",
+            "description": "True for the company administrator created with the company (its default admin). Only the default admin, besides platform accounts, can manage the other company administrators."
           },
           "mustChangePassword": {
             "type": "boolean"
@@ -14442,7 +14676,8 @@
           "name",
           "active",
           "createdAt",
-          "memberCount"
+          "memberCount",
+          "contextCount"
         ],
         "properties": {
           "id": {
@@ -14470,6 +14705,10 @@
           },
           "memberCount": {
             "type": "integer"
+          },
+          "contextCount": {
+            "type": "integer",
+            "description": "How many contexts are shared with the group (deleted contexts not counted)."
           }
         }
       },
@@ -14558,7 +14797,8 @@
           "username",
           "email",
           "role",
-          "status"
+          "status",
+          "displayName"
         ],
         "properties": {
           "id": {
@@ -14591,6 +14831,12 @@
               "pending",
               "active",
               "disabled"
+            ]
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }
@@ -15052,6 +15298,7 @@
           "label",
           "tone",
           "summary",
+          "fields",
           "detail"
         ],
         "properties": {
@@ -15083,7 +15330,26 @@
           "summary": {
             "type": "string",
             "maxLength": 240,
-            "description": "'key: value' pairs of the detail joined with ' · ', cut to 240 characters."
+            "description": "The readable 'label: value' pairs of `fields` joined with ' · ', cut to 240 characters. Never contains ids."
+          },
+          "fields": {
+            "type": "array",
+            "description": "The detail in plain language for display: labelled values, with ids left out (an id that has no stored name is replaced by the person, role, group or dashboard name, or dropped), true/false as Yes/No, and catalogue names for roles, access levels, features and permissions.",
+            "items": {
+              "type": "object",
+              "required": [
+                "label",
+                "value"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "detail": {
             "type": "object",
@@ -15512,7 +15778,8 @@
           "owner",
           "isOwner",
           "canShare",
-          "generalAccess"
+          "generalAccess",
+          "sharedWith"
         ],
         "properties": {
           "level": {
@@ -15562,6 +15829,10 @@
               "company"
             ],
             "description": "`company` gives every user of the company view access."
+          },
+          "sharedWith": {
+            "type": "integer",
+            "description": "How many people, groups and companies the context is shared with (deleted ones not counted)."
           }
         }
       },
@@ -18439,7 +18710,8 @@
           "owner",
           "isOwner",
           "canShare",
-          "generalAccess"
+          "generalAccess",
+          "sharedWith"
         ],
         "properties": {
           "level": {
@@ -18473,6 +18745,10 @@
               "restricted",
               "company"
             ]
+          },
+          "sharedWith": {
+            "type": "integer",
+            "description": "How many people, groups and companies the context is shared with (deleted ones not counted)."
           }
         }
       },
@@ -18633,7 +18909,8 @@
           "level",
           "levelId",
           "grantedAt",
-          "active"
+          "active",
+          "companyName"
         ],
         "properties": {
           "userId": {
@@ -18667,6 +18944,13 @@
           "active": {
             "type": "boolean",
             "description": "Whether the user account is active."
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the company the person or group belongs to."
           }
         }
       },
@@ -18679,7 +18963,8 @@
           "level",
           "levelId",
           "grantedAt",
-          "active"
+          "active",
+          "companyName"
         ],
         "properties": {
           "groupId": {
@@ -18707,6 +18992,75 @@
           "active": {
             "type": "boolean",
             "description": "Whether the group is active (inactive groups grant nothing)."
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the company the person or group belongs to."
+          }
+        }
+      },
+      "ContextCompanyGrant": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "name",
+          "memberCount",
+          "level",
+          "levelId",
+          "grantedAt",
+          "active"
+        ],
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "memberCount": {
+            "type": "integer",
+            "description": "Active members of the company."
+          },
+          "level": {
+            "type": "string",
+            "description": "Access level key."
+          },
+          "levelId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "grantedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the company is active (an inactive company's members cannot sign in)."
+          }
+        }
+      },
+      "ContextShareableCompany": {
+        "type": "object",
+        "required": [
+          "companyId",
+          "name",
+          "memberCount"
+        ],
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "memberCount": {
+            "type": "integer",
+            "description": "Active members of the company."
           }
         }
       },
@@ -18714,14 +19068,24 @@
         "type": "object",
         "description": "Who can access a context and how.",
         "required": [
+          "scope",
           "owner",
           "generalAccess",
           "levels",
           "people",
           "groups",
+          "companies",
           "you"
         ],
         "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "platform",
+              "company"
+            ],
+            "description": "`platform`: created from the platform console, belongs to no company and is shared with companies, people and groups of any company. `company`: belongs to one company and is shared inside it."
+          },
           "owner": {
             "anyOf": [
               {
@@ -18734,7 +19098,7 @@
           },
           "generalAccess": {
             "type": "string",
-            "description": "`restricted`: only the owner, admins and the people and groups it is shared with can see it. `company`: everyone in the company can also view it.",
+            "description": "`restricted`: only the owner, admins and the people and groups it is shared with can see it. `company`: everyone in the company can also view it. A platform context is always `restricted`.",
             "enum": [
               "restricted",
               "company"
@@ -18759,6 +19123,13 @@
               "$ref": "#/components/schemas/ContextGroupGrant"
             },
             "description": "Group grants, ordered by group name."
+          },
+          "companies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextCompanyGrant"
+            },
+            "description": "Company grants, ordered by company name. Always empty for a company context."
           },
           "you": {
             "type": "object",
@@ -18801,7 +19172,8 @@
           "userId",
           "username",
           "email",
-          "displayName"
+          "displayName",
+          "companyName"
         ],
         "properties": {
           "userId": {
@@ -18819,6 +19191,13 @@
               "string",
               "null"
             ]
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the company the person or group belongs to."
           }
         }
       },
@@ -18827,7 +19206,8 @@
         "required": [
           "groupId",
           "name",
-          "memberCount"
+          "memberCount",
+          "companyName"
         ],
         "properties": {
           "groupId": {
@@ -18839,6 +19219,13 @@
           },
           "memberCount": {
             "type": "integer"
+          },
+          "companyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the company the person or group belongs to."
           }
         }
       },

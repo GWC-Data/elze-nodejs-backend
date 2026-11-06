@@ -12,7 +12,6 @@ router.post('/login', authLimit, auth.login);
 router.post('/refresh', requireCsrf, auth.refresh);
 router.post('/logout', requireCsrf, auth.logout);
 router.get('/me', requireAuth, auth.me);
-router.get('/sessions', requireAuth, auth.sessions);
 router.post('/change-password', requireAuth, auth.changePassword);
 router.get('/activation', auth.describeActivation);
 router.post('/activation', authLimit, auth.activate);

@@ -21,7 +21,7 @@ import type { DatasetFields, JsonValue, RequestQuery } from './contextTypes';
 interface PublishTarget {
   id: string;
   name: string;
-  companyId: string;
+  companyId: string | null;
   selectedDatasets?: readonly SelectedDataset[];
 }
 

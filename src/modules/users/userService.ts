@@ -287,8 +287,12 @@ async function restoreUser(actor: Actor, id: string) {
 }
 
 const USER_SORTS = userRepository.USER_SORTS;
-function listUserOptions(actor: Actor) {
-  return userRepository.listOptions(actor, { companyAccountsOnly: actor.isPlatform && !seesPlatformAccounts(actor) });
+function listUserOptions(actor: Actor, { companyId }: { companyId?: unknown } = {}) {
+  const only = companyId === undefined || companyId === '' ? undefined : requireUuid(companyId, 'companyId');
+  return userRepository.listOptions(actor, {
+    companyAccountsOnly: actor.isPlatform && !seesPlatformAccounts(actor),
+    companyId: only,
+  });
 }
 
 export {

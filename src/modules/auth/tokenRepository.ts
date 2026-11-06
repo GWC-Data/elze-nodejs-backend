@@ -81,16 +81,6 @@ async function pruneExpiredRefresh(): Promise<number> {
   return result.count;
 }
 
-async function listSessions(userId: string) {
-  const groups = await prisma.refreshToken.groupBy({
-    by: ['familyId'],
-    where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
-    _max: { issuedAt: true },
-    orderBy: { _max: { issuedAt: 'desc' } },
-  });
-  return groups.map((g) => ({ familyId: g.familyId, lastUsedAt: g._max.issuedAt }));
-}
-
 async function retireTokens(userId: string, purpose: TokenPurpose, tx: Tx = prisma): Promise<void> {
   await tx.userToken.updateMany({
     where: { userId, purpose, consumedAt: null },
@@ -171,7 +161,6 @@ export {
   revokeAllForCompany,
   findRefreshByHash,
   pruneExpiredRefresh,
-  listSessions,
   retireTokens,
   insertToken,
   countIssuedSince,

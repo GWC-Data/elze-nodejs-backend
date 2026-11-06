@@ -55,7 +55,8 @@ async function latest(connectionId: string): Promise<BusinessLayerRow | null> {
   );
 }
 
-async function companyName(companyId: string): Promise<string | null> {
+async function companyName(companyId: string | null): Promise<string | null> {
+  if (companyId === null) return null;
   const company = await prisma.company.findUnique({ where: { id: companyId }, select: { name: true } });
   return company?.name ?? null;
 }

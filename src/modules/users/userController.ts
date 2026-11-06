@@ -11,7 +11,7 @@ import * as userPermissionService from './userPermissionService';
 const userId = (req: Request) => requireUuid(req.params.id, 'user id');
 
 async function options(req: Request, res: Response): Promise<void> {
-  ok(res, await userService.listUserOptions(req.actor));
+  ok(res, await userService.listUserOptions(req.actor, { companyId: req.query.companyId }));
 }
 
 async function scopeOptions(_req: Request, res: Response): Promise<void> {

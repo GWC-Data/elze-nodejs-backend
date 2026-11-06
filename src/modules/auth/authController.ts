@@ -33,10 +33,6 @@ async function me(req: Request, res: Response): Promise<void> {
   ok(res, await authService.me(req.actor, req.account));
 }
 
-async function sessions(req: Request, res: Response): Promise<void> {
-  ok(res, await authService.sessions(req.actor));
-}
-
 async function changePassword(req: Request, res: Response): Promise<void> {
   respondWithSession(res, await authService.changePassword(req.actor, bodyOf(req.body)));
 }
@@ -66,7 +62,6 @@ export {
   refresh,
   logout,
   me,
-  sessions,
   changePassword,
   describeActivation,
   activate,

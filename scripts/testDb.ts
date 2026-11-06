@@ -129,6 +129,8 @@ function run(args: string[]): Promise<number> {
 async function migrate(): Promise<void> {
   const code = await run([prismaCli(), 'migrate', 'deploy']);
   if (code !== 0) throw new Error(`prisma migrate deploy exited with ${code}`);
+  const check = await run(['--import', 'tsx', 'prisma/seed.ts', '--check']);
+  if (check !== 0) throw new Error('prisma/seed.ts no longer matches what the migrations insert');
 }
 
 async function answers(url: string): Promise<boolean> {

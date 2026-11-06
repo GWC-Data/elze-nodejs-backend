@@ -4,6 +4,7 @@ import { pagedRows } from '../../shared/db/baseRepository';
 import { likePattern, orderBy } from '../../shared/db/listQuery';
 import { AUDIT_SORTS } from './auditEvents';
 import type { ListWindow } from '../../shared/db/baseRepository';
+import type { AuditNameIds, AuditNames } from './auditFormatter';
 
 const { prisma } = config.database;
 
@@ -114,5 +115,28 @@ async function listPage<R>(filter: AuditFilter, list: ListWindow, shape: (row: A
   );
 }
 
-export { append, listPage };
+async function namesFor(ids: AuditNameIds): Promise<AuditNames> {
+  const [users, roles, groups, dashboards] = await Promise.all([
+    ids.users.length
+      ? prisma.user.findMany({ where: { id: { in: ids.users } }, select: { id: true, username: true } })
+      : Promise.resolve([]),
+    ids.roles.length
+      ? prisma.role.findMany({ where: { id: { in: ids.roles }, kind: 'custom' }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+    ids.groups.length
+      ? prisma.group.findMany({ where: { id: { in: ids.groups } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+    ids.dashboards.length
+      ? prisma.dashboard.findMany({ where: { id: { in: ids.dashboards } }, select: { id: true, title: true } })
+      : Promise.resolve([]),
+  ]);
+  return {
+    users: new Map(users.map((row) => [row.id, row.username])),
+    roles: new Map(roles.map((row) => [row.id, row.name])),
+    groups: new Map(groups.map((row) => [row.id, row.name])),
+    dashboards: new Map(dashboards.map((row) => [row.id, row.title])),
+  };
+}
+
+export { append, listPage, namesFor };
 export type { AuditRecord, AuditLogRow, AuditScope, AuditFilter };

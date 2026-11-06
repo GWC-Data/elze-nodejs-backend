@@ -7,6 +7,7 @@ import type { Tx } from '../../shared/db/database';
 import type { Actor } from '../../shared/types/actor';
 import type { ListWindow } from '../../shared/db/baseRepository';
 import type { UserStatus } from '../../generated/prisma/enums';
+import { COMPANY_ADMIN } from '../catalogue/roleTiers';
 
 const { prisma, withTransaction } = config.database;
 
@@ -33,6 +34,7 @@ interface UserRow {
   must_change_password: boolean;
   last_login_at: Date | null;
   created_at: Date;
+  is_default_admin: boolean;
 }
 
 interface UserInScopeRow extends UserRow {
@@ -65,6 +67,7 @@ interface UserListRow {
   status: UserStatus;
   last_login_at: Date | null;
   companyName: string | null;
+  is_default_admin: boolean;
 }
 
 const ROLE_JOIN = Prisma.sql`LEFT JOIN access_control.user_roles ur ON ur.user_id = u.id
@@ -72,13 +75,19 @@ const ROLE_JOIN = Prisma.sql`LEFT JOIN access_control.user_roles ur ON ur.user_i
 
 const ROLE_COLUMNS = Prisma.sql`r.tier AS role, ur.role_id, r.name AS role_name, r.kind AS role_kind`;
 
+const DEFAULT_ADMIN_COLUMN = Prisma.sql`COALESCE(r.tier::text = ${COMPANY_ADMIN} AND EXISTS (
+                        SELECT 1 FROM companies dc WHERE dc.id = u.company_id AND dc.primary_admin_id = u.id
+                      ), FALSE) AS is_default_admin`;
+
 const USER_COLUMNS = Prisma.sql`u.id, u.company_id, u.username, u.email, u.display_name,
                       (u.password_hash IS NOT NULL) AS has_password,
                       ${ROLE_COLUMNS}, u.status, u.must_change_password,
-                      u.last_login_at, u.created_at`;
+                      u.last_login_at, u.created_at, ${DEFAULT_ADMIN_COLUMN}`;
 
 const USER_SORTS: Record<string, string> = {
   name: 'lower(COALESCE(u.display_name, u.username))',
+  username: 'lower(u.username)',
+  email: 'lower(u.email)',
   company: 'lower(c.name)',
   role: 'r.tier',
   status: 'u.status',
@@ -178,7 +187,7 @@ async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: Us
   return pagedRows(
     prisma,
     Prisma.sql`SELECT u.id, u.username, u.email, u.display_name, ${ROLE_COLUMNS}, u.status, u.last_login_at,
-            c.name AS "companyName", COUNT(*) OVER () AS "__total"
+            c.name AS "companyName", ${DEFAULT_ADMIN_COLUMN}, COUNT(*) OVER () AS "__total"
        ${from}
       ${Prisma.raw(orderBy(list, USER_SORTS, 'u.id'))}
       LIMIT ${list.pageSize} OFFSET ${list.offset}`,
@@ -187,12 +196,17 @@ async function listPage<R>(filter: UserFilter, list: ListWindow, shape: (row: Us
   );
 }
 
-async function listOptions(actor: Actor, { companyAccountsOnly = false }: { companyAccountsOnly?: boolean } = {}) {
-  const scope = actor.isPlatform
-    ? companyAccountsOnly
-      ? { companyId: { not: null } }
-      : {}
-    : { companyId: actor.companyId as string };
+async function listOptions(
+  actor: Actor,
+  { companyAccountsOnly = false, companyId }: { companyAccountsOnly?: boolean; companyId?: string } = {}
+) {
+  const scope = !actor.isPlatform
+    ? { companyId: actor.companyId as string }
+    : companyId
+      ? { companyId }
+      : companyAccountsOnly
+        ? { companyId: { not: null } }
+        : {};
   return prisma.user.findMany({
     where: { status: 'active', ...NOT_DELETED, ...scope },
     select: { id: true, username: true, email: true },

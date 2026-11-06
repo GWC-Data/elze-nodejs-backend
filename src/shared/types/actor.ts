@@ -6,6 +6,7 @@ interface Actor {
   role: string;
   roleScope: string;
   isPlatform: boolean;
+  isDefaultAdmin: boolean;
   companyId: string | null;
   status: string;
   mustChangePassword: boolean;
@@ -14,7 +15,6 @@ interface Actor {
   roleId: string | null;
   roleName: string | null;
   scopes?: Record<string, unknown[]>;
-  familyId?: string;
 }
 
 export type { Actor };

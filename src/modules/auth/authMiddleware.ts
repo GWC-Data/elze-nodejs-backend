@@ -48,7 +48,6 @@ async function actorFromToken(token: string): Promise<{ actor: Actor; account: P
 
   const actor: Actor = buildActor(user, found.permissions, found.features);
   actor.scopes = found.scopes;
-  actor.familyId = typeof payload.fam === 'string' ? payload.fam : undefined;
   return { actor, account: publicUser(user) };
 }
 

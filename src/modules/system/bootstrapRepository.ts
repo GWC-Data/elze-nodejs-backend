@@ -2,7 +2,7 @@ import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
 import { rawRows } from '../../shared/db/baseRepository';
 
-const { prisma, withTransaction } = config.database;
+const { prisma } = config.database;
 
 async function appliedMigrations(): Promise<string[]> {
   const [{ present }] = await rawRows<{ present: boolean }>(
@@ -17,32 +17,8 @@ async function appliedMigrations(): Promise<string[]> {
   return applied.map((r) => r.migration_name);
 }
 
-async function countUsers(): Promise<number> {
-  return prisma.user.count();
-}
-
 async function countUsersWithoutRole(): Promise<number> {
   return prisma.user.count({ where: { role: null } });
-}
-
-async function insertSuperAdmin({
-  username,
-  email,
-  passwordHash,
-  roleId,
-}: {
-  username: string;
-  email: string;
-  passwordHash: string;
-  roleId: string;
-}): Promise<void> {
-  await withTransaction(async (tx) => {
-    const user = await tx.user.create({
-      data: { companyId: null, username, email, passwordHash, status: 'active', mustChangePassword: true },
-      select: { id: true },
-    });
-    await tx.userRole.create({ data: { userId: user.id, roleId } });
-  });
 }
 
 async function insertDashboardIfMissing({
@@ -71,4 +47,4 @@ async function insertDashboardIfMissing({
   });
 }
 
-export { appliedMigrations, countUsers, countUsersWithoutRole, insertSuperAdmin, insertDashboardIfMissing };
+export { appliedMigrations, countUsersWithoutRole, insertDashboardIfMissing };

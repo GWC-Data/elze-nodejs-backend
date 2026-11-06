@@ -4,6 +4,7 @@ import { fail, messageOf } from '../../shared/errors/AppError';
 import { isUuid } from '../../shared/validation/commonValidator';
 import { can, seesPlatformAccounts } from '../auth/authorizationService';
 import { shapeEntry } from './auditSerializer';
+import { namesToResolve } from './auditFormatter';
 import {
   auditActions,
   auditCategories,
@@ -207,20 +208,25 @@ async function listEntries(
       search: list.search,
     },
     list,
-    (row) =>
-      shapeEntry(
-        {
-          ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
-          event: row.event,
-          ...visibleDetail(detailOf(row.detail), visible),
-          actor: row.actor,
-          actorId: row.actor_id,
-          actorCompanyId: row.actor_company_id,
-        },
-        { id: row.id, companyId: row.company_id, companyName: row.company_name }
-      )
+    (row) => row
   );
-  return { ...page, scope: scope.kind };
+  const details = page.items.map((row) => visibleDetail(detailOf(row.detail), visible));
+  const names = await auditRepository.namesFor(namesToResolve(details));
+  const items = page.items.map((row, index) =>
+    shapeEntry(
+      {
+        ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
+        event: row.event,
+        ...details[index],
+        actor: row.actor,
+        actorId: row.actor_id,
+        actorCompanyId: row.actor_company_id,
+      },
+      { id: row.id, companyId: row.company_id, companyName: row.company_name },
+      names
+    )
+  );
+  return { items, total: page.total, scope: scope.kind };
 }
 
 function denied(actor: AuditActor, detail?: AuditDetail): void {
