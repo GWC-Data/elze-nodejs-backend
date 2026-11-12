@@ -109,8 +109,10 @@ async function createConnection(
     throw fail('VALIDATION_ERROR', `The ${connector.name} connector is not built yet, so it cannot be configured.`);
   }
 
-  const companyId = resolveTargetCompany(actor, body.companyId);
-  await requireActiveCompany(actor, companyId, 'That company is deactivated, so connections cannot be added to it.');
+  const companyId = actor.isPlatform ? null : resolveTargetCompany(actor, body.companyId);
+  if (companyId !== null) {
+    await requireActiveCompany(actor, companyId, 'That company is deactivated, so connections cannot be added to it.');
+  }
 
   const result = await connections.createConnection(actor, companyId, {
     provider: connector.id,

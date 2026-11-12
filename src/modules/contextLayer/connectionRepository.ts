@@ -1,7 +1,7 @@
 import config from '../../config';
 import { Prisma } from '../../generated/prisma/client';
-import { companyScope, orNotFound, rawRows } from '../../shared/db/baseRepository';
-import { accessColumns, visibleClause } from './contextAccessRepository';
+import { orNotFound, rawRows } from '../../shared/db/baseRepository';
+import { accessColumns, contextScope, visibleClause } from './contextAccessRepository';
 import type { AccessColumnsRow } from './contextAccessRepository';
 import { likePattern } from '../../shared/db/listQuery';
 import { DELETED, NOT_DELETED, RESTORED, softDeletion } from '../../shared/db/softDelete';
@@ -12,7 +12,7 @@ const { prisma, withTransaction } = config.database;
 
 interface ConnectionRow extends AccessColumnsRow {
   id: string;
-  company_id: string;
+  company_id: string | null;
   provider: string;
   name: string;
   host: string;
@@ -41,7 +41,7 @@ interface ConnectionSecretRow extends ConnectionRow {
 interface ConnectionIdRow extends AccessColumnsRow {
   id: string;
   name: string;
-  company_id: string;
+  company_id: string | null;
 }
 
 interface PublishedConnectionRow {
@@ -78,7 +78,7 @@ async function listForActor(actor: Actor, seeAll: boolean): Promise<ListedConnec
     Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)},
             (SELECT COUNT(*) FROM datasets d WHERE d.connection_id = c.id) AS "selectedDatasetCount"
        FROM connections c
-      WHERE ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+      WHERE ${visibleClause(actor, seeAll)}
       ORDER BY c.provider, c.name`
   );
 }
@@ -89,7 +89,6 @@ async function listDrafts(
   { search, offset, limit }: { search: string; offset: number; limit: number }
 ): Promise<{ rows: DraftConnectionRow[]; total: number }> {
   const conditions = [
-    companyScope(actor, 'c.company_id'),
     visibleClause(actor, seeAll),
     Prisma.sql`(d.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM context_layer_versions p
                                         WHERE p.connection_id = c.id AND p.status = 'published'
@@ -122,7 +121,7 @@ async function listPublished(actor: Actor, seeAll: boolean): Promise<PublishedCo
     prisma,
     Prisma.sql`SELECT c.id, c.name
        FROM connections c
-      WHERE ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+      WHERE ${visibleClause(actor, seeAll)}
         AND EXISTS (SELECT 1 FROM context_layer_versions v
                      WHERE v.connection_id = c.id AND v.status = 'published' AND v.deleted_at IS NULL)
       ORDER BY c.name, c.id`
@@ -137,7 +136,7 @@ async function listPublishedVersions(actor: Actor, seeAll: boolean): Promise<Pub
        FROM context_layer_versions v
        JOIN connections c ON c.id = v.connection_id
       WHERE v.status = 'published' AND v.deleted_at IS NULL
-        AND ${companyScope(actor, 'c.company_id')} AND ${visibleClause(actor, seeAll)}
+        AND ${visibleClause(actor, seeAll)}
       ORDER BY v.name, c.name, v.connection_id, v.version DESC`
   );
 }
@@ -153,7 +152,7 @@ async function findWithSecret(
       prisma,
       Prisma.sql`SELECT ${COLUMNS}, ${accessColumns(actor)}, c.secret
          FROM connections c
-        WHERE c.id = ${id}::uuid AND ${live} AND ${companyScope(actor, 'c.company_id')}`
+        WHERE c.id = ${id}::uuid AND ${live} AND ${contextScope(actor)}`
     ),
     NOT_FOUND
   );
@@ -166,7 +165,7 @@ async function findId(actor: Actor, id: string): Promise<ConnectionIdRow | null>
       prisma,
       Prisma.sql`SELECT c.id, c.name, c.company_id, ${accessColumns(actor)}
          FROM connections c
-        WHERE c.id = ${id}::uuid AND c.deleted_at IS NULL AND ${companyScope(actor, 'c.company_id')}`
+        WHERE c.id = ${id}::uuid AND c.deleted_at IS NULL AND ${contextScope(actor)}`
     ),
     NOT_FOUND
   );
@@ -198,7 +197,7 @@ async function insert({
   createdBy,
 }: {
   id: string;
-  companyId: string;
+  companyId: string | null;
   provider: string;
   name: string;
   host: string;

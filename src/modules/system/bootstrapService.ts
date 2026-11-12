@@ -3,16 +3,14 @@ import path from 'node:path';
 import config from '../../config';
 import * as bootstrapRepository from './bootstrapRepository';
 import * as dashboardRepository from '../dashboards/dashboardRepository';
-import { loadCatalogue, systemRoleId } from '../catalogue/catalogueService';
-import { SUPER_ADMIN } from '../catalogue/roleTiers';
-import { hashPassword } from '../../shared/security/password';
+import { loadCatalogue } from '../catalogue/catalogueService';
 import { normalizeSpec } from '../dashboards/cardModel';
+import { seed } from '../../../prisma/seed';
 import { pruneExpiredTokens } from '../auth/tokenService';
 import { pruneAttempts } from '../auth/loginThrottleService';
 import { verifyTransport } from '../../shared/email/emailService';
 import { codeOf, messageOf } from '../../shared/errors/AppError';
 
-const { bootstrapSuperAdmin } = config.auth;
 const { DASHBOARD_CONFIG_DIR, MIGRATIONS_DIR } = config.env;
 
 const HOUSEKEEPING_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -21,22 +19,6 @@ let ready = false;
 
 function isRbacReady(): boolean {
   return ready;
-}
-
-async function seedSuperAdmin(): Promise<boolean> {
-  if ((await bootstrapRepository.countUsers()) > 0) return false;
-
-  const { username, email, password } = bootstrapSuperAdmin();
-  await bootstrapRepository.insertSuperAdmin({
-    username,
-    email: String(email).toLowerCase(),
-    passwordHash: hashPassword(password),
-    roleId: systemRoleId(SUPER_ADMIN),
-  });
-  console.log(
-    `[rbac] seeded platform owner "${username}" as ${SUPER_ADMIN}, flagged to change its password at first sign-in`
-  );
-  return true;
 }
 
 async function seedDefaultDashboards(): Promise<void> {
@@ -85,8 +67,8 @@ async function assertMigrated(): Promise<void> {
 async function bootstrapAppMeta(): Promise<boolean> {
   try {
     await assertMigrated();
+    await seed();
     await loadCatalogue();
-    await seedSuperAdmin();
     await seedDefaultDashboards();
 
     const roleless = await bootstrapRepository.countUsersWithoutRole();

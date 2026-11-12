@@ -398,6 +398,129 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
     `${r.status} ${JSON.stringify(r.body)}`
   );
 
+  section('Default company admin');
+
+  r = await alphaAdmin.call('GET', '/api/users?pageSize=100');
+  const defaultAdminRow = (r.body?.data?.items || []).find((u: any) => u.username === 'alpha.admin');
+  check(
+    'the administrator created with the company is its default admin',
+    defaultAdminRow?.isDefaultAdmin === true &&
+      (r.body?.data?.items || []).filter((u: any) => u.isDefaultAdmin).length === 1,
+    JSON.stringify(r.body?.data?.items)
+  );
+
+  r = await alphaAdmin.call('POST', '/api/users', {
+    username: 'alpha.admin2',
+    email: 'alpha.admin2@example.com',
+    role: 'COMPANY_ADMIN',
+  });
+  check(
+    'a company admin adds a second administrator, who is not the default admin',
+    r.status === 201 && r.body?.data?.role === 'COMPANY_ADMIN' && r.body?.data?.isDefaultAdmin === false,
+    JSON.stringify(r.body)
+  );
+  const secondAdminId = r.body?.data?.id;
+
+  const secondAdmin = client('secondAdmin');
+  r = await secondAdmin.call('POST', '/api/auth/activation', {
+    token: activationTokenFrom(latestEmail('alpha.admin2@example.com')),
+    password: 'AlphaAdmin2!',
+  });
+  check(
+    'the second administrator activates',
+    r.status === 200 && r.body?.data?.user?.isDefaultAdmin === false,
+    JSON.stringify(r.body)
+  );
+
+  r = await owner.call('GET', '/api/platform/companies');
+  const alphaListed = (r.body?.data?.items || []).find((c: any) => c.id === companyA);
+  check(
+    'the companies list names the default admin as the administrator',
+    alphaListed?.primaryAdmin?.username === 'alpha.admin' &&
+      alphaListed?.primaryAdmin?.email === 'alpha.admin@example.com',
+    JSON.stringify(alphaListed)
+  );
+
+  r = await owner.call('GET', `/api/platform/companies/${companyA}`);
+  check(
+    'the company detail names the same administrator',
+    r.status === 200 && r.body?.data?.primaryAdmin?.username === 'alpha.admin',
+    JSON.stringify(r.body)
+  );
+
+  r = await alphaAdmin.call('GET', '/api/users?pageSize=100&sort=username&dir=asc');
+  const byUsernameAsc = (r.body?.data?.items || []).map((u: any) => u.username);
+  r = await alphaAdmin.call('GET', '/api/users?pageSize=100&sort=username&dir=desc');
+  const byUsernameDesc = (r.body?.data?.items || []).map((u: any) => u.username);
+  check(
+    'people can be sorted by username',
+    r.status === 200 && byUsernameAsc.length > 1 && byUsernameAsc.join() === [...byUsernameDesc].reverse().join(),
+    JSON.stringify({ byUsernameAsc, byUsernameDesc })
+  );
+
+  r = await alphaAdmin.call('GET', '/api/users?pageSize=100&sort=email&dir=asc');
+  const byEmailAsc = (r.body?.data?.items || []).map((u: any) => u.email);
+  r = await alphaAdmin.call('GET', '/api/users?pageSize=100&sort=email&dir=desc');
+  const byEmailDesc = (r.body?.data?.items || []).map((u: any) => u.email);
+  check(
+    'people can be sorted by email',
+    r.status === 200 && byEmailAsc.length > 1 && byEmailAsc.join() === [...byEmailDesc].reverse().join(),
+    JSON.stringify({ byEmailAsc, byEmailDesc })
+  );
+
+  r = await owner.call('GET', `/api/users/options?companyId=${companyA}`);
+  const companyAOptions: string[] = (r.body?.data || []).map((u: any) => u.username);
+  check(
+    "the platform can list one company's people to pick group members from",
+    r.status === 200 &&
+      companyAOptions.includes('alpha.admin') &&
+      !companyAOptions.includes('beta.admin') &&
+      !companyAOptions.includes('platformowner'),
+    JSON.stringify(companyAOptions)
+  );
+  r = await owner.call('GET', '/api/users/options?companyId=not-a-uuid');
+  check('a malformed company filter is refused', r.status === 400, String(r.status));
+
+  r = await alphaAdmin.call('PATCH', `/api/users/${secondAdminId}`, { displayName: 'Second Admin' });
+  check(
+    'the default admin manages the other administrator',
+    r.status === 200 && r.body?.data?.displayName === 'Second Admin',
+    JSON.stringify(r.body)
+  );
+
+  r = await secondAdmin.call('PATCH', `/api/users/${defaultAdminRow?.id}`, { displayName: 'Renamed' });
+  check(
+    'another administrator cannot manage the default admin',
+    r.status === 403 && r.body?.error?.code === 'TENANT_ACCESS_DENIED',
+    JSON.stringify(r.body)
+  );
+
+  r = await secondAdmin.call('POST', '/api/users', {
+    username: 'alpha.admin3',
+    email: 'alpha.admin3@example.com',
+    role: 'COMPANY_ADMIN',
+  });
+  check('any company admin can still add an administrator', r.status === 201, JSON.stringify(r.body));
+  const thirdAdminId = r.body?.data?.id;
+
+  r = await secondAdmin.call('POST', `/api/users/${thirdAdminId}/deactivate`);
+  check(
+    'but only the default admin manages administrators afterwards',
+    r.status === 403 && /default administrator/.test(r.body?.error?.message || ''),
+    JSON.stringify(r.body)
+  );
+
+  r = await secondAdmin.call('PATCH', `/api/users/${alphaUserId}`, { displayName: 'Alpha User' });
+  check('any company admin still manages the members', r.status === 200, JSON.stringify(r.body));
+
+  r = await owner.call('PATCH', `/api/platform/users/${secondAdminId}`, { displayName: 'Second Admin (platform)' });
+  check('the platform owner still manages every administrator', r.status === 200, JSON.stringify(r.body));
+
+  r = await alphaAdmin.call('DELETE', `/api/users/${thirdAdminId}`);
+  check('the default admin removes an administrator', r.status === 200, JSON.stringify(r.body));
+  r = await alphaAdmin.call('DELETE', `/api/users/${secondAdminId}`);
+  check('the default admin removes the second administrator', r.status === 200, JSON.stringify(r.body));
+
   section('Dashboard access and tenant isolation of data');
 
   r = await alphaAdmin.call('GET', '/api/access/dashboards');
@@ -2141,6 +2264,35 @@ async function nextEmail(toAddress: string, after: number, timeoutMs = 5000): Pr
       creditEvents.includes('credit_limit_updated') &&
       creditEvents.includes('credit_rate_updated'),
     JSON.stringify(creditEvents)
+  );
+
+  section('Readable audit trail');
+
+  const anyUuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  const trail: any[] = [];
+  for (let page = 1; page <= 50; page++) {
+    r = await owner.call('GET', `/api/audit?pageSize=100&page=${page}`);
+    const items: any[] = r.body?.data?.items || [];
+    trail.push(...items);
+    if (items.length < 100) break;
+  }
+  const showingIds = trail.filter(
+    (i) => !Array.isArray(i.fields) || anyUuid.test(i.summary || '') || anyUuid.test(JSON.stringify(i.fields))
+  );
+  check(
+    'no audit entry shows an id in its readable fields or summary',
+    trail.length > 100 && showingIds.length === 0,
+    JSON.stringify(showingIds.slice(0, 3).map((i) => ({ event: i.event, summary: i.summary, fields: i.fields })))
+  );
+  const roleChange = trail.find(
+    (i) => i.event === 'user_updated' && i.detail?.customRoleChanged === true && i.detail?.roleId === analystRoleId
+  );
+  check(
+    'a company role change reads as plain words, with the role named instead of its id',
+    roleChange?.fields?.some((f: any) => f.label === 'Company role' && f.value === 'Analyst') &&
+      roleChange?.fields?.some((f: any) => f.label === 'Company role changed' && f.value === 'Yes') &&
+      roleChange?.fields?.some((f: any) => f.label === 'Person' && f.value === 'alpha.user'),
+    JSON.stringify(roleChange)
   );
 
   section('Unauthenticated and malformed requests');

@@ -8,7 +8,7 @@ import type { DraftTarget, RequestBody } from './contextTypes';
 import type { PublishedVersion } from './versionSerializer';
 
 async function businessLayer(
-  connection: { id: string; companyId: string },
+  connection: { id: string; companyId: string | null },
   version: PublishedVersion | null
 ): Promise<BusinessLayerView> {
   const [row, organizationName] = await Promise.all([

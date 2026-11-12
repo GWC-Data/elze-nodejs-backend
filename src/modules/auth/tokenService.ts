@@ -73,8 +73,6 @@ async function pruneExpiredTokens(): Promise<number> {
   return refresh + resets;
 }
 
-const listSessions = tokenRepository.listSessions;
-
 export {
   SESSION_ENDED,
   signAccessToken as issueAccessToken,
@@ -85,6 +83,5 @@ export {
   revokeAllForUser,
   revokeAllForCompany,
   pruneExpiredTokens,
-  listSessions,
 };
 export type { IssuedRefreshToken };

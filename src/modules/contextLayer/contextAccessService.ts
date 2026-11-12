@@ -6,7 +6,7 @@ import type { AccessColumnsRow } from './contextAccessRepository';
 import type { Actor } from '../../shared/types/actor';
 import type { GeneralAccess } from '../../generated/prisma/enums';
 
-type OwnerRow = Pick<AccessColumnsRow, 'created_by'>;
+type OwnerRow = Pick<AccessColumnsRow, 'created_by' | 'context_company_id'>;
 
 interface ContextAccess {
   level: ContextAccessLevel;
@@ -14,10 +14,20 @@ interface ContextAccess {
   isOwner: boolean;
   canShare: boolean;
   generalAccess: GeneralAccess;
+  sharedWith: number;
 }
 
 function isContextAdmin(actor: Actor): boolean {
   return actor.isPlatform || can(actor, 'context.manage_all');
+}
+
+function administers(actor: Actor, row: Pick<AccessColumnsRow, 'context_company_id'>): boolean {
+  if (actor.isPlatform) return true;
+  return row.context_company_id !== null && row.context_company_id === actor.companyId && isContextAdmin(actor);
+}
+
+function isPlatformContext(row: Pick<AccessColumnsRow, 'context_company_id'>): boolean {
+  return row.context_company_id === null;
 }
 
 function ownerIdOf(row: OwnerRow): string | null {
@@ -39,9 +49,16 @@ function strongest(...levels: (string | null)[]): ContextAccessLevel | null {
 }
 
 function levelOf(actor: Actor, row: AccessColumnsRow): ContextAccessLevel | null {
-  if (isContextAdmin(actor)) return 'full';
+  if (administers(actor, row)) return 'full';
   if (ownerIdOf(row) === actor.id) return 'full';
-  return strongest(row.granted_level, row.group_level, row.general_access === 'company' ? 'view' : null);
+  const sameCompany = row.context_company_id !== null && row.context_company_id === actor.companyId;
+  if (!sameCompany && !isPlatformContext(row)) return null;
+  return strongest(
+    row.granted_level,
+    row.group_level,
+    isPlatformContext(row) ? row.company_level : null,
+    sameCompany && row.general_access === 'company' ? 'view' : null
+  );
 }
 
 function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessLevel): boolean {
@@ -49,7 +66,8 @@ function levelAtLeast(level: ContextAccessLevel | null, required: ContextAccessL
 }
 
 function mayShare(actor: Actor, row: OwnerRow): boolean {
-  return isContextAdmin(actor) || ownerIdOf(row) === actor.id;
+  if (isPlatformContext(row)) return actor.isPlatform;
+  return administers(actor, row) || ownerIdOf(row) === actor.id;
 }
 
 function accessOf(actor: Actor, row: AccessColumnsRow): ContextAccess | null {
@@ -62,6 +80,7 @@ function accessOf(actor: Actor, row: AccessColumnsRow): ContextAccess | null {
     isOwner: ownerId !== null && ownerId === actor.id,
     canShare: mayShare(actor, row),
     generalAccess: row.general_access,
+    sharedWith: Number(row.shared_count ?? 0),
   };
 }
 
@@ -89,10 +108,12 @@ function assertMayShare(actor: Actor, row: OwnerRow): void {
   if (!mayShare(actor, row)) {
     throw fail(
       'INSUFFICIENT_PERMISSION',
-      'Only the person who created this context, or a company admin, can share it.'
+      isPlatformContext(row)
+        ? 'Only platform accounts can share a platform context.'
+        : 'Only the person who created this context, or a company admin, can share it.'
     );
   }
 }
 
-export { isContextAdmin, levelOf, levelAtLeast, mayShare, accessOf, assertLevel, assertMayShare };
+export { isContextAdmin, isPlatformContext, levelOf, levelAtLeast, mayShare, accessOf, assertLevel, assertMayShare };
 export type { ContextAccess };

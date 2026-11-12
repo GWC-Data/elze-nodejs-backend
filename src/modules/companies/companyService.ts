@@ -108,7 +108,7 @@ async function createCompany(
     const companyRow = await insertCompany(actor, { name, slug }, conn);
     await setInitialFeatures(actor, companyRow.id, featureKeys, conn);
     await seedForCompany(companyRow.id, conn);
-    const userRow = await createAccount(
+    const created = await createAccount(
       {
         companyId: companyRow.id,
         username: adminFields.username,
@@ -119,6 +119,8 @@ async function createCompany(
       },
       conn
     );
+    await companyRepository.setPrimaryAdmin(companyRow.id, created.id, conn);
+    const userRow = present(await userRepository.findById(created.id, conn), 'The new administrator');
     return {
       company: companyRow,
       user: userRow,

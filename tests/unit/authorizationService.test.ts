@@ -47,6 +47,12 @@ const companyAdmin = (companyId = uuid(1)) =>
   );
 const member = (permissions: string[] = ['user.read']) =>
   buildActor(userRow(), permissions, ['metadata_lakehouse', 'agents']);
+const defaultAdmin = (companyId = uuid(1)) =>
+  buildActor(
+    userRow({ id: uuid(5), role: 'COMPANY_ADMIN', company_id: companyId, is_default_admin: true }),
+    ['user.read', 'user.update'],
+    ['metadata_lakehouse']
+  );
 
 beforeAll(async () => {
   vi.mocked(catalogueRepository.loadAll).mockResolvedValue(catalogueRows() as any);
@@ -89,6 +95,13 @@ describe('buildActor', () => {
     );
     expect(errorCode(() => buildActor(userRow({ company_id: null }), []))).toBe('INTERNAL_ERROR');
     expect(() => buildActor(null, [])).toThrow('buildActor requires a user row');
+  });
+
+  it('marks only a company admin as the default admin', () => {
+    expect(defaultAdmin().isDefaultAdmin).toBe(true);
+    expect(companyAdmin().isDefaultAdmin).toBe(false);
+    expect(buildActor(userRow({ is_default_admin: true }), []).isDefaultAdmin).toBe(false);
+    expect(platformOwner().isDefaultAdmin).toBe(false);
   });
 });
 
@@ -180,6 +193,32 @@ describe('managing roles and accounts', () => {
     expect(
       errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(33), role: 'SUPER_ADMIN', company_id: null })))
     ).toBe('TENANT_ACCESS_DENIED');
+  });
+
+  it('lets the default admin manage the other administrators of their company', () => {
+    const admin = defaultAdmin();
+    expect(
+      errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(34), role: 'COMPANY_ADMIN' })))
+    ).toBeUndefined();
+    expect(errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(35) })))).toBeUndefined();
+    expect(
+      errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(36), role: 'COMPANY_ADMIN', company_id: uuid(2) })))
+    ).toBe('TENANT_ACCESS_DENIED');
+    expect(
+      errorCode(() => assertCanManageUser(admin, userRow({ id: uuid(37), role: 'PLATFORM_ADMIN', company_id: null })))
+    ).toBe('TENANT_ACCESS_DENIED');
+  });
+
+  it('keeps the default admin out of reach of the other company admins', () => {
+    const target = userRow({ id: uuid(5), role: 'COMPANY_ADMIN', is_default_admin: true });
+    expect(errorCode(() => assertCanManageUser(companyAdmin(), target))).toBe('TENANT_ACCESS_DENIED');
+    expect(errorCode(() => assertCanManageUser(platformOwner(), target))).toBeUndefined();
+  });
+
+  it('does not let a member manage another member', () => {
+    expect(errorCode(() => assertCanManageUser(member(['user.update']), userRow({ id: uuid(38) })))).toBe(
+      'TENANT_ACCESS_DENIED'
+    );
   });
 
   it('sends people to their profile for their own account', () => {

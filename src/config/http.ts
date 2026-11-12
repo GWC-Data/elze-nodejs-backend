@@ -5,7 +5,7 @@ function trustProxy(): boolean | number | string {
   const raw = String(optional('TRUST_PROXY', 'false')).toLowerCase();
   if (raw === 'false') return false;
   if (raw === 'true') return true;
-  if (/^d+$/.test(raw)) return Number(raw);
+  if (/^\d+$/.test(raw)) return Number(raw);
   return raw;
 }
 

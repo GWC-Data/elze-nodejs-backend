@@ -183,7 +183,11 @@ function installFakeDomo() {
   }) as unknown as typeof fetch;
 }
 
-const made: { companies: string[]; users: string[] } = { companies: [], users: [] };
+const made: { companies: string[]; users: string[]; platformUsers: string[] } = {
+  companies: [],
+  users: [],
+  platformUsers: [],
+};
 
 async function makeCompany(name: string): Promise<string> {
   const { rows } = await db.query(`INSERT INTO companies (name, slug, active) VALUES (?, ?, TRUE) RETURNING id`, [
@@ -249,6 +253,10 @@ async function makeMember(companyId: string, username: string): Promise<Actor> {
 async function cleanup(): Promise<void> {
   for (const id of made.companies) {
     await db.query('DELETE FROM companies WHERE id = ?', [id]);
+  }
+  for (const id of made.platformUsers) {
+    await db.query('DELETE FROM connections WHERE created_by = ? AND company_id IS NULL', [id]);
+    await db.query('DELETE FROM users WHERE id = ?', [id]);
   }
 }
 
@@ -485,6 +493,125 @@ async function cleanup(): Promise<void> {
     'restricted hides it from members again',
     shared.generalAccess === 'restricted' && (await service.listConnections(memberA)).length === 0
   );
+
+  section('Platform contexts');
+
+  const platformRow = await db.query(
+    `INSERT INTO users (company_id, username, email, password_hash, status)
+     VALUES (NULL, 'ctx.platform', 'ctx.platform@example.com', 'x', 'active') RETURNING id`
+  );
+  const platform = {
+    id: platformRow.rows[0].id,
+    username: 'ctx.platform',
+    companyId: null,
+    isPlatform: true,
+    role: 'SUPER_ADMIN',
+    permissions: ['context.read', 'context.create', 'context.update', 'context.publish', 'context.delete'],
+    features: [],
+  } as unknown as Actor;
+  made.platformUsers.push(platform.id);
+  const memberB = await makeMember(companyB, 'ctx.beta.member');
+
+  const platformCreated = await service.createConnection(platform, null, {
+    provider: 'domo',
+    name: 'Domo — Platform',
+    host: GOOD_HOST,
+    token: GOOD_TOKEN,
+  });
+  const platformId = platformCreated.connection.id;
+  const sees = async (actor: Actor) => (await service.listConnections(actor)).some((c) => c.id === platformId);
+
+  check(
+    'a context made on the platform belongs to no company',
+    platformCreated.connection.companyId === null,
+    String(platformCreated.connection.companyId)
+  );
+  check('the platform sees it', await sees(platform));
+  check('a company admin does not see a platform context nobody shared', !(await sees(adminA)));
+  const unsharedRead = await codeOf(() => service.requireConnection(adminA, platformId));
+  check('opening it unshared is a 404', unsharedRead === 'RESOURCE_NOT_FOUND', unsharedRead);
+  const adminTakesOver = await codeOf(() => sharing.shareWithUser(adminA, platformId, memberA.id, level('view')));
+  check('a company admin cannot share it', adminTakesOver === 'RESOURCE_NOT_FOUND', adminTakesOver);
+
+  let platformSharing = await sharing.contextAccess(platform, platformId);
+  check('its sharing scope is the platform', platformSharing.scope === 'platform', platformSharing.scope);
+  const companyChoices = await sharing.shareableCompanies(platform, platformId);
+  check(
+    'every active company can be chosen',
+    companyChoices.some((c) => c.companyId === companyA) && companyChoices.some((c) => c.companyId === companyB),
+    JSON.stringify(companyChoices)
+  );
+  const anyone = await sharing.shareablePeople(platform, platformId);
+  check(
+    'people from every company can be chosen, with their company named',
+    anyone.some((p) => p.userId === memberA.id && p.companyName === 'Ctx Alpha') &&
+      anyone.some((p) => p.userId === memberB.id && p.companyName === 'Ctx Beta'),
+    JSON.stringify(anyone.map((p) => [p.username, p.companyName]))
+  );
+
+  platformSharing = await sharing.shareWithCompany(platform, platformId, companyA, level('view'));
+  check(
+    'sharing with a company lists it with its level',
+    platformSharing.companies.length === 1 &&
+      platformSharing.companies[0].companyId === companyA &&
+      platformSharing.companies[0].level === 'view',
+    JSON.stringify(platformSharing.companies)
+  );
+  const viaCompany = await service.requireConnection(memberA, platformId);
+  check(
+    'every member of that company can open it at that level',
+    viaCompany.access.level === 'view' && viaCompany.access.canShare === false,
+    JSON.stringify(viaCompany.access)
+  );
+  const adminViaCompany = await service.requireConnection(adminA, platformId);
+  check(
+    "that company's admin gets the shared level, not full control",
+    adminViaCompany.access.level === 'view' && adminViaCompany.access.canShare === false,
+    JSON.stringify(adminViaCompany.access)
+  );
+  const adminReshares = await codeOf(() => sharing.shareWithUser(adminA, platformId, otherAdminA.id, level('view')));
+  check('and cannot share it on', adminReshares === 'INSUFFICIENT_PERMISSION', adminReshares);
+  check('a company it was not shared with still does not see it', !(await sees(adminB)));
+
+  platformSharing = await sharing.shareWithUser(platform, platformId, memberB.id, level('edit'));
+  check(
+    'a person from any company can be added, shown with their company',
+    platformSharing.people.some((p) => p.userId === memberB.id && p.companyName === 'Ctx Beta'),
+    JSON.stringify(platformSharing.people)
+  );
+  const asSharee = await service.requireConnection(memberB, platformId, 'edit');
+  check('and opens it at their level', asSharee.access.level === 'edit', asSharee.access.level);
+  const counted = (await service.listConnections(platform)).find((c) => c.id === platformId);
+  check(
+    'the list counts who it is shared with: one company and one person',
+    counted?.access?.sharedWith === 2,
+    String(counted?.access?.sharedWith)
+  );
+  check("while their company's admin still does not see it", !(await sees(adminB)));
+
+  const openToCompany = await codeOf(() =>
+    sharing.setGeneralAccess(platform, platformId, { generalAccess: 'company' })
+  );
+  check('a platform context cannot be opened to "the company"', openToCompany === 'VALIDATION_ERROR', openToCompany);
+  const companyContextToCompany = await codeOf(() =>
+    sharing.shareWithCompany(adminA, connectionId, companyB, level('view'))
+  );
+  check(
+    "a company's own context cannot be shared with another company",
+    companyContextToCompany === 'VALIDATION_ERROR',
+    companyContextToCompany
+  );
+  const billed = await agentGate.checkAgentRequest(
+    memberA,
+    `/svc/adk/contexts/${platformId}/description-editor/sessions`,
+    'GET'
+  );
+  check("using it is billed to the member's own company", billed?.companyId === companyA, JSON.stringify(billed));
+
+  platformSharing = await sharing.unshareWithCompany(platform, platformId, companyA);
+  check('removing the company empties the list', platformSharing.companies.length === 0);
+  const afterUnshare = await codeOf(() => service.requireConnection(memberA, platformId));
+  check('and its members lose sight of it', afterUnshare === 'RESOURCE_NOT_FOUND', afterUnshare);
 
   section('Listing datasets');
 

@@ -16,6 +16,8 @@
     "reset:access": "node dist/scripts/resetAccess.js",
     "db:migrate": "prisma migrate deploy",
     "db:status": "prisma migrate status",
+    "db:seed": "prisma db seed",
+    "db:seed:check": "tsx prisma/seed.ts --check",
     "db:generate": "prisma generate",
     "docs:check": "tsx scripts/checkApiDocs.ts",
     "test": "npm run test:unit && npm run test:integration",

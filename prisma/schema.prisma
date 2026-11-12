@@ -10,16 +10,18 @@ datasource db {
 }
 
 model Company {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String    @db.VarChar(150)
-  slug      String    @db.VarChar(64)
-  active    Boolean   @default(true)
-  createdBy String?   @map("created_by") @db.Uuid
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
-  deletedBy String?   @map("deleted_by") @db.Uuid
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String    @db.VarChar(150)
+  slug           String    @db.VarChar(64)
+  active         Boolean   @default(true)
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy      String?   @map("deleted_by") @db.Uuid
+  primaryAdminId String?   @map("primary_admin_id") @db.Uuid
 
-  users                User[]
+  primaryAdmin         User?                 @relation("CompanyPrimaryAdmin", fields: [primaryAdminId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  users                User[]                @relation("CompanyUsers")
   groups               Group[]
   dashboards           Dashboard[]
   dashboardAssignments CompanyDashboard[]
@@ -28,6 +30,7 @@ model Company {
   connections          Connection[]
   contextVersions      ContextLayerVersion[]
   contextProfiles      ContextProfile[]
+  contextAccess        ContextCompanyAccess[]
   credits              CompanyCredits?
   creditLedger         CreditLedger[]
 
@@ -49,7 +52,8 @@ model User {
   deletedAt          DateTime?  @map("deleted_at") @db.Timestamptz(6)
   deletedBy          String?    @map("deleted_by") @db.Uuid
 
-  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company        Company?  @relation("CompanyUsers", fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  primaryAdminOf Company[] @relation("CompanyPrimaryAdmin")
 
   role                        UserRole?              @relation("UserRoleHolder")
   roleAssignments             UserRole[]             @relation("UserRoleAssigner")
@@ -68,6 +72,7 @@ model User {
   contextAccess               ContextUserAccess[]    @relation("ContextUserAccessHolder")
   contextAccessGranted        ContextUserAccess[]    @relation("ContextUserAccessGranter")
   contextGroupAccessGranted   ContextGroupAccess[]
+  contextCompanyAccessGranted ContextCompanyAccess[]
   groupMemberships            GroupUser[]
   groupsCreated               Group[]
   dashboardsCreated           Dashboard[]
@@ -250,7 +255,7 @@ model Connector {
 
 model Connection {
   id             String           @id @db.Uuid
-  companyId      String           @map("company_id") @db.Uuid
+  companyId      String?          @map("company_id") @db.Uuid
   provider       String           @db.VarChar(32)
   name           String           @db.VarChar(120)
   host           String           @db.VarChar(190)
@@ -265,16 +270,17 @@ model Connection {
   deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
   deletedBy      String?          @map("deleted_by") @db.Uuid
 
-  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator   User?     @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
   connector Connector @relation(fields: [provider], references: [id], onUpdate: NoAction)
 
-  datasets    Dataset[]
-  versions    ContextLayerVersion[]
-  reviews     ContextObjectReview[]
-  profile     ContextProfile?
-  userAccess  ContextUserAccess[]
-  groupAccess ContextGroupAccess[]
+  datasets      Dataset[]
+  versions      ContextLayerVersion[]
+  reviews       ContextObjectReview[]
+  profile       ContextProfile?
+  userAccess    ContextUserAccess[]
+  groupAccess   ContextGroupAccess[]
+  companyAccess ContextCompanyAccess[]
 
   @@index([companyId], map: "idx_context_connections_company")
   @@map("connections")
@@ -301,7 +307,7 @@ model Dataset {
 model ContextLayerVersion {
   id                     String        @id @db.Uuid
   connectionId           String        @map("connection_id") @db.Uuid
-  companyId              String        @map("company_id") @db.Uuid
+  companyId              String?       @map("company_id") @db.Uuid
   name                   String        @db.VarChar(120)
   version                Int
   status                 VersionStatus @default(draft)
@@ -328,7 +334,7 @@ model ContextLayerVersion {
   businessLayer          Json          @default("{}") @map("business_layer")
   businessLayerUpdatedAt DateTime?     @map("business_layer_updated_at") @db.Timestamptz(6)
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company    Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator    User?      @relation("ContextVersionCreator", fields: [createdBy], references: [id], onUpdate: NoAction)
   publisher  User?      @relation("ContextVersionPublisher", fields: [publishedBy], references: [id], onUpdate: NoAction)
@@ -360,14 +366,14 @@ model ContextObjectReview {
 model ContextProfile {
   id           String   @id @db.Uuid
   connectionId String   @unique(map: "uq_context_profiles_connection") @map("connection_id") @db.Uuid
-  companyId    String   @map("company_id") @db.Uuid
+  companyId    String?  @map("company_id") @db.Uuid
   name         String   @db.VarChar(120)
   description  String?
   createdBy    String?  @map("created_by") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company    Company?   @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   connection Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   creator    User?      @relation(fields: [createdBy], references: [id], onUpdate: NoAction)
 
@@ -425,6 +431,7 @@ model AccessLevel {
   dashboardGroupAccess DashboardGroupAccess[]
   contextUserAccess    ContextUserAccess[]
   contextGroupAccess   ContextGroupAccess[]
+  contextCompanyAccess ContextCompanyAccess[]
 
   @@unique([resource, key], map: "uq_access_levels_resource_key")
   @@map("access_levels")
@@ -627,6 +634,24 @@ model ContextGroupAccess {
   @@id([connectionId, groupId])
   @@index([groupId], map: "idx_context_group_access_group_id")
   @@map("context_group_access")
+  @@schema("access_control")
+}
+
+model ContextCompanyAccess {
+  connectionId  String   @map("connection_id") @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  accessLevelId String   @map("access_level_id") @db.Uuid
+  grantedBy     String?  @map("granted_by") @db.Uuid
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  connection  Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_company_access_connection_id")
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_context_company_access_company_id")
+  accessLevel AccessLevel @relation(fields: [accessLevelId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_context_company_access_access_level_id")
+  granter     User?       @relation(fields: [grantedBy], references: [id], onUpdate: NoAction, map: "fk_context_company_access_granted_by")
+
+  @@id([connectionId, companyId])
+  @@index([companyId], map: "idx_context_company_access_company_id")
+  @@map("context_company_access")
   @@schema("access_control")
 }
 

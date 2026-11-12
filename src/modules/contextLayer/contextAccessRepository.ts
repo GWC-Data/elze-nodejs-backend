@@ -10,10 +10,13 @@ const { prisma } = config.database;
 
 interface AccessColumnsRow {
   created_by: string | null;
+  context_company_id: string | null;
   general_access: GeneralAccess;
   owner_name: string | null;
   granted_level: string | null;
   group_level: string | null;
+  company_level: string | null;
+  shared_count: number;
 }
 
 interface GrantRow {
@@ -25,6 +28,7 @@ interface GrantRow {
   email: string;
   display_name: string | null;
   status: UserStatus;
+  company_name: string | null;
 }
 
 interface PersonRow {
@@ -32,6 +36,7 @@ interface PersonRow {
   username: string;
   email: string;
   display_name: string | null;
+  company_name: string | null;
 }
 
 interface GroupGrantRow {
@@ -42,13 +47,33 @@ interface GroupGrantRow {
   name: string;
   active: boolean;
   member_count: number;
+  company_name: string | null;
 }
 
 interface ShareableGroupRow {
   id: string;
   name: string;
   member_count: number;
+  company_name: string | null;
 }
+
+interface CompanyGrantRow {
+  company_id: string;
+  access_level: string;
+  access_level_id: string;
+  granted_at: Date;
+  name: string;
+  active: boolean;
+  member_count: number;
+}
+
+interface ShareableCompanyRow {
+  id: string;
+  name: string;
+  member_count: number;
+}
+
+type AccessActor = Pick<Actor, 'id' | 'companyId' | 'isPlatform'>;
 
 interface GroupContextRow {
   connection_id: string;
@@ -67,8 +92,12 @@ const MEMBER_GROUP_GRANTS = Prisma.sql`access_control.context_group_access ga
             JOIN groups gr ON gr.id = ga.group_id AND gr.active AND gr.deleted_at IS NULL
             JOIN group_users gu ON gu.group_id = ga.group_id`;
 
-function accessColumns(actor: Pick<Actor, 'id'>): Prisma.Sql {
+const COMPANY_MEMBERS = Prisma.sql`(SELECT COUNT(*)::int FROM users mu
+            WHERE mu.company_id = co.id AND mu.deleted_at IS NULL AND mu.status = 'active')`;
+
+function accessColumns(actor: Pick<Actor, 'id' | 'companyId'>): Prisma.Sql {
   return Prisma.sql`(SELECT ou.id FROM users ou WHERE ou.id = c.created_by AND ou.deleted_at IS NULL) AS created_by,
+          c.company_id AS context_company_id,
           c.general_access,
           (SELECT COALESCE(ou.display_name, ou.username) FROM users ou
             WHERE ou.id = c.created_by AND ou.deleted_at IS NULL) AS owner_name,
@@ -79,48 +108,91 @@ function accessColumns(actor: Pick<Actor, 'id'>): Prisma.Sql {
              JOIN access_control.access_levels l ON l.id = ga.access_level_id
             WHERE ga.connection_id = c.id AND gu.user_id = ${actor.id}::uuid
             ORDER BY l.rank DESC
-            LIMIT 1) AS group_level`;
+            LIMIT 1) AS group_level,
+          (SELECT l.key FROM access_control.context_company_access ca
+             JOIN access_control.access_levels l ON l.id = ca.access_level_id
+            WHERE ca.connection_id = c.id AND ca.company_id = ${actor.companyId}::uuid) AS company_level,
+          ((SELECT COUNT(*)::int FROM access_control.context_user_access sa
+              JOIN users su ON su.id = sa.user_id AND su.deleted_at IS NULL
+             WHERE sa.connection_id = c.id)
+           + (SELECT COUNT(*)::int FROM access_control.context_group_access sg
+                JOIN groups sgr ON sgr.id = sg.group_id AND sgr.deleted_at IS NULL
+               WHERE sg.connection_id = c.id)
+           + (SELECT COUNT(*)::int FROM access_control.context_company_access sc
+                JOIN companies sco ON sco.id = sc.company_id AND sco.deleted_at IS NULL
+               WHERE sc.connection_id = c.id)) AS shared_count`;
 }
 
-function visibleClause(actor: Pick<Actor, 'id'>, seeAll: boolean): Prisma.Sql {
-  if (seeAll) return Prisma.sql`c.deleted_at IS NULL`;
-  return Prisma.sql`(c.deleted_at IS NULL AND (c.created_by = ${actor.id}::uuid OR c.general_access = 'company'
-           OR EXISTS (SELECT 1 FROM access_control.context_user_access a
+function contextScope(actor: Pick<Actor, 'companyId' | 'isPlatform'>): Prisma.Sql {
+  if (actor.isPlatform) return Prisma.sql`TRUE`;
+  return Prisma.sql`(c.company_id = ${actor.companyId}::uuid OR c.company_id IS NULL)`;
+}
+
+function visibleClause(actor: AccessActor, seeAll: boolean): Prisma.Sql {
+  if (actor.isPlatform) return Prisma.sql`c.deleted_at IS NULL`;
+  const shared = Prisma.sql`(EXISTS (SELECT 1 FROM access_control.context_user_access a
                        WHERE a.connection_id = c.id AND a.user_id = ${actor.id}::uuid)
            OR EXISTS (SELECT 1 FROM ${MEMBER_GROUP_GRANTS}
-                       WHERE ga.connection_id = c.id AND gu.user_id = ${actor.id}::uuid)))`;
+                       WHERE ga.connection_id = c.id AND gu.user_id = ${actor.id}::uuid))`;
+  const ownCompany = seeAll
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`(c.created_by = ${actor.id}::uuid OR c.general_access = 'company' OR ${shared})`;
+  return Prisma.sql`(c.deleted_at IS NULL AND (
+           (c.company_id = ${actor.companyId}::uuid AND ${ownCompany})
+           OR (c.company_id IS NULL AND (${shared}
+                OR EXISTS (SELECT 1 FROM access_control.context_company_access ca
+                            WHERE ca.connection_id = c.id AND ca.company_id = ${actor.companyId}::uuid)))))`;
 }
 
 async function listGrants(connectionId: string): Promise<GrantRow[]> {
   return rawRows<GrantRow>(
     prisma,
     Prisma.sql`SELECT a.user_id, l.key AS access_level, a.access_level_id, a.granted_at,
-            u.username, u.email, u.display_name, u.status
+            u.username, u.email, u.display_name, u.status, co.name AS company_name
        FROM access_control.context_user_access a
        JOIN access_control.access_levels l ON l.id = a.access_level_id
        JOIN users u ON u.id = a.user_id AND u.deleted_at IS NULL
+       LEFT JOIN companies co ON co.id = u.company_id
       WHERE a.connection_id = ${connectionId}::uuid
       ORDER BY COALESCE(u.display_name, u.username)`
   );
 }
 
-async function shareablePeople(companyId: string, ownerId: string | null): Promise<PersonRow[]> {
+async function shareablePeople(companyId: string | null, ownerId: string | null): Promise<PersonRow[]> {
+  const inScope =
+    companyId === null
+      ? Prisma.sql`co.deleted_at IS NULL AND co.active`
+      : Prisma.sql`u.company_id = ${companyId}::uuid`;
   return rawRows<PersonRow>(
     prisma,
-    Prisma.sql`SELECT u.id, u.username, u.email, u.display_name
+    Prisma.sql`SELECT u.id, u.username, u.email, u.display_name, co.name AS company_name
        FROM users u
-      WHERE u.company_id = ${companyId}::uuid AND u.status = 'active' AND u.deleted_at IS NULL
+       JOIN companies co ON co.id = u.company_id
+      WHERE ${inScope} AND u.status = 'active' AND u.deleted_at IS NULL
         AND u.id IS DISTINCT FROM ${ownerId}::uuid
-      ORDER BY COALESCE(u.display_name, u.username)`
+      ORDER BY lower(co.name), COALESCE(u.display_name, u.username)`
   );
 }
 
-async function findActiveCompanyUser(companyId: string, userId: string): Promise<PersonRow | null> {
+async function findActiveCompanyUser(companyId: string | null, userId: string): Promise<PersonRow | null> {
   const user = await prisma.user.findFirst({
-    where: { id: userId, companyId, status: 'active', ...NOT_DELETED },
-    select: { id: true, username: true, email: true, displayName: true },
+    where: {
+      id: userId,
+      status: 'active',
+      ...NOT_DELETED,
+      ...(companyId === null ? { company: { active: true, ...NOT_DELETED } } : { companyId }),
+    },
+    select: { id: true, username: true, email: true, displayName: true, company: { select: { name: true } } },
   });
-  return user ? { id: user.id, username: user.username, email: user.email, display_name: user.displayName } : null;
+  return user
+    ? {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        display_name: user.displayName,
+        company_name: user.company?.name ?? null,
+      }
+    : null;
 }
 
 async function findGrant(connectionId: string, userId: string): Promise<string | null> {
@@ -155,7 +227,12 @@ async function listGroupGrants(connectionId: string): Promise<GroupGrantRow[]> {
     include: {
       accessLevel: { select: { key: true } },
       group: {
-        select: { name: true, active: true, _count: { select: { members: { where: { user: NOT_DELETED } } } } },
+        select: {
+          name: true,
+          active: true,
+          company: { select: { name: true } },
+          _count: { select: { members: { where: { user: NOT_DELETED } } } },
+        },
       },
     },
     orderBy: { group: { name: 'asc' } },
@@ -168,26 +245,103 @@ async function listGroupGrants(connectionId: string): Promise<GroupGrantRow[]> {
     name: g.group.name,
     active: g.group.active,
     member_count: g.group._count.members,
+    company_name: g.group.company?.name ?? null,
   }));
 }
 
-async function shareableGroups(companyId: string): Promise<ShareableGroupRow[]> {
+async function shareableGroups(companyId: string | null): Promise<ShareableGroupRow[]> {
   const groups = await prisma.group.findMany({
-    where: { companyId, active: true, ...NOT_DELETED },
-    select: { id: true, name: true, _count: { select: { members: { where: { user: NOT_DELETED } } } } },
-    orderBy: { name: 'asc' },
+    where: {
+      active: true,
+      ...NOT_DELETED,
+      ...(companyId === null ? { company: { active: true, ...NOT_DELETED } } : { companyId }),
+    },
+    select: {
+      id: true,
+      name: true,
+      company: { select: { name: true } },
+      _count: { select: { members: { where: { user: NOT_DELETED } } } },
+    },
+    orderBy: [{ company: { name: 'asc' } }, { name: 'asc' }],
   });
-  return groups.map((g) => ({ id: g.id, name: g.name, member_count: g._count.members }));
+  return groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    member_count: g._count.members,
+    company_name: g.company?.name ?? null,
+  }));
 }
 
 async function findActiveCompanyGroup(
-  companyId: string,
+  companyId: string | null,
   groupId: string
 ): Promise<{ id: string; name: string } | null> {
   return prisma.group.findFirst({
-    where: { id: groupId, companyId, active: true, ...NOT_DELETED },
+    where: {
+      id: groupId,
+      active: true,
+      ...NOT_DELETED,
+      ...(companyId === null ? { company: { active: true, ...NOT_DELETED } } : { companyId }),
+    },
     select: { id: true, name: true },
   });
+}
+
+async function listCompanyGrants(connectionId: string): Promise<CompanyGrantRow[]> {
+  return rawRows<CompanyGrantRow>(
+    prisma,
+    Prisma.sql`SELECT ca.company_id, l.key AS access_level, ca.access_level_id, ca.granted_at,
+            co.name, co.active, ${COMPANY_MEMBERS} AS member_count
+       FROM access_control.context_company_access ca
+       JOIN access_control.access_levels l ON l.id = ca.access_level_id
+       JOIN companies co ON co.id = ca.company_id AND co.deleted_at IS NULL
+      WHERE ca.connection_id = ${connectionId}::uuid
+      ORDER BY lower(co.name)`
+  );
+}
+
+async function shareableCompanies(): Promise<ShareableCompanyRow[]> {
+  return rawRows<ShareableCompanyRow>(
+    prisma,
+    Prisma.sql`SELECT co.id, co.name, ${COMPANY_MEMBERS} AS member_count
+       FROM companies co
+      WHERE co.deleted_at IS NULL AND co.active
+      ORDER BY lower(co.name)`
+  );
+}
+
+async function findActiveCompany(companyId: string): Promise<{ id: string; name: string } | null> {
+  return prisma.company.findFirst({
+    where: { id: companyId, active: true, ...NOT_DELETED },
+    select: { id: true, name: true },
+  });
+}
+
+async function findCompanyGrant(connectionId: string, companyId: string): Promise<string | null> {
+  const grant = await prisma.contextCompanyAccess.findUnique({
+    where: { connectionId_companyId: { connectionId, companyId } },
+    select: { accessLevel: { select: { key: true } } },
+  });
+  return grant ? grant.accessLevel.key : null;
+}
+
+async function upsertCompanyGrant(
+  connectionId: string,
+  companyId: string,
+  level: string,
+  grantedBy: string
+): Promise<void> {
+  const accessLevelId = contextLevel(level);
+  await prisma.contextCompanyAccess.upsert({
+    where: { connectionId_companyId: { connectionId, companyId } },
+    create: { connectionId, companyId, accessLevelId, grantedBy },
+    update: { accessLevelId, grantedBy, grantedAt: new Date() },
+  });
+}
+
+async function deleteCompanyGrant(connectionId: string, companyId: string): Promise<boolean> {
+  const result = await prisma.contextCompanyAccess.deleteMany({ where: { connectionId, companyId } });
+  return result.count > 0;
 }
 
 async function findGroupGrant(connectionId: string, groupId: string): Promise<string | null> {
@@ -257,6 +411,7 @@ async function listContextsForGroup(groupId: string): Promise<GroupContextRow[]>
 
 export {
   accessColumns,
+  contextScope,
   visibleClause,
   listGrants,
   shareablePeople,
@@ -272,5 +427,20 @@ export {
   upsertGroupGrant,
   deleteGroupGrant,
   listContextsForGroup,
+  listCompanyGrants,
+  shareableCompanies,
+  findActiveCompany,
+  findCompanyGrant,
+  upsertCompanyGrant,
+  deleteCompanyGrant,
 };
-export type { AccessColumnsRow, GrantRow, PersonRow, GroupGrantRow, ShareableGroupRow, GroupContextRow };
+export type {
+  AccessColumnsRow,
+  GrantRow,
+  PersonRow,
+  GroupGrantRow,
+  ShareableGroupRow,
+  GroupContextRow,
+  CompanyGrantRow,
+  ShareableCompanyRow,
+};

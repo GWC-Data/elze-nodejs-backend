@@ -6,7 +6,22 @@ type CompanySource = CompanyRow & {
   dashboardCount?: number;
   pendingCount?: number;
   feature_ids?: string[];
+  admin_id?: string | null;
+  admin_username?: string | null;
+  admin_display_name?: string | null;
+  admin_email?: string | null;
 };
+
+function primaryAdminOf(row: CompanySource) {
+  if (row.admin_id === undefined) return undefined;
+  if (row.admin_id === null) return null;
+  return {
+    id: row.admin_id,
+    username: row.admin_username as string,
+    displayName: row.admin_display_name ?? null,
+    email: row.admin_email as string,
+  };
+}
 
 function shapeCompany(row: CompanySource | null | undefined) {
   if (!row) return null;
@@ -20,6 +35,7 @@ function shapeCompany(row: CompanySource | null | undefined) {
     pendingCount: row.pendingCount === undefined ? undefined : Number(row.pendingCount),
     features:
       row.feature_ids === undefined ? undefined : visibleFeatureKeys(effectiveFeatures(featureKeysOf(row.feature_ids))),
+    primaryAdmin: primaryAdminOf(row),
   };
 }
 
