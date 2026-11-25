@@ -183,6 +183,10 @@ async function latestPublished(connectionId: string): Promise<Version | null> {
   return shapeVersion(await versionRepository.latestPublished(connectionId));
 }
 
+async function livePublished(connectionId: string, name: string): Promise<Version | null> {
+  return shapeVersion(await versionRepository.livePublished(connectionId, name));
+}
+
 async function requirePublishedVersion(
   connection: { id: string; selectedDatasets?: readonly SelectedDataset[] },
   versionId: string
@@ -255,6 +259,7 @@ export {
   trackStep,
   publishDraft,
   latestPublished,
+  livePublished,
   requirePublishedVersion,
   deletePublishedVersion,
   restorePublishedVersion,

@@ -180,6 +180,45 @@ function numberFrom(value: unknown): number | null {
   return n * scale;
 }
 
+function isTableOfDataset(table: Pick<ObjectRow, 'qualified_name' | 'payload'>, dataset: DatasetFields): boolean {
+  const wanted = [dataset.id, dataset.name].filter(Boolean).map(identifierKey);
+  const p = table.payload || {};
+  return (
+    wanted.includes(identifierKey(table.qualified_name)) ||
+    [field(p, 'dataset_id'), field(p, 'datasetId')].filter(Boolean).map(String).includes(String(dataset.id))
+  );
+}
+
+function groupByTable(rows: readonly ObjectRow[]): {
+  tables: ObjectRow[];
+  groups: Map<string, TableGroup>;
+  unattached: ObjectRow[];
+} {
+  const tables = rows.filter((r) => r.object_type === 'table');
+  const names: string[] = tables.map((t) => t.qualified_name).sort((a, b) => b.length - a.length);
+  const ownerOf = (name: string): string | null => names.find((t) => name === t || name.startsWith(`${t}.`)) ?? null;
+
+  const groups = new Map<string, TableGroup>(
+    tables.map((t) => [t.qualified_name, { table: t, columns: [], related: [] }])
+  );
+  const unattached: ObjectRow[] = [];
+  for (const row of rows) {
+    if (row.object_type === 'table') continue;
+    if (row.object_type === 'column_stats') {
+      const owner = ownerOf(row.qualified_name);
+      const group = owner ? groups.get(owner) : undefined;
+      if (group) group.columns.push(row);
+      else unattached.push(row);
+      continue;
+    }
+    const text = `${row.qualified_name}\n${JSON.stringify(row.payload || {})}`;
+    const concerns = names.filter((t) => text.includes(t));
+    if (concerns.length === 0) unattached.push(row);
+    for (const t of concerns) groups.get(t)?.related.push(row);
+  }
+  return { tables, groups, unattached };
+}
+
 async function snapshotTableProfile(
   connectionId: string,
   versionId: string | null | undefined,
@@ -187,15 +226,7 @@ async function snapshotTableProfile(
 ): Promise<SnapshotTableProfile> {
   const rows = await loadObjects(connectionId, undefined, { versionId });
   const tables = rows.filter((r) => r.object_type === 'table');
-  const wanted = [dataset.id, dataset.name].filter(Boolean).map(identifierKey);
-  const table =
-    tables.find((t) => {
-      const p = t.payload || {};
-      return (
-        wanted.includes(identifierKey(t.qualified_name)) ||
-        [field(p, 'dataset_id'), field(p, 'datasetId')].filter(Boolean).map(String).includes(String(dataset.id))
-      );
-    }) || (tables.length === 1 ? tables[0] : null);
+  const table = tables.find((t) => isTableOfDataset(t, dataset)) || (tables.length === 1 ? tables[0] : null);
 
   const payload: JsonValue = table?.payload || {};
   const split = columnSplitter(rows);
@@ -254,29 +285,7 @@ async function snapshotTableProfile(
 
 async function tableView(connectionId: string, query: RequestQuery = {}): Promise<TableView> {
   const rows = await guarded(() => loadObjects(connectionId, undefined, { versionId: query.version }));
-
-  const tables = rows.filter((r) => r.object_type === 'table');
-  const names: string[] = tables.map((t) => t.qualified_name).sort((a, b) => b.length - a.length);
-  const ownerOf = (name: string): string | null => names.find((t) => name === t || name.startsWith(`${t}.`)) ?? null;
-
-  const groups = new Map<string, TableGroup>(
-    tables.map((t) => [t.qualified_name, { table: t, columns: [], related: [] }])
-  );
-  const unattached: ObjectRow[] = [];
-  for (const row of rows) {
-    if (row.object_type === 'table') continue;
-    if (row.object_type === 'column_stats') {
-      const owner = ownerOf(row.qualified_name);
-      const group = owner ? groups.get(owner) : undefined;
-      if (group) group.columns.push(row);
-      else unattached.push(row);
-      continue;
-    }
-    const text = `${row.qualified_name}\n${JSON.stringify(row.payload || {})}`;
-    const concerns = names.filter((t) => text.includes(t));
-    if (concerns.length === 0) unattached.push(row);
-    for (const t of concerns) groups.get(t)?.related.push(row);
-  }
+  const { tables, groups, unattached } = groupByTable(rows);
 
   const counts: Record<string, number> = {};
   let needsReview = 0;
@@ -572,6 +581,8 @@ async function understanding(connectionId: string, query: RequestQuery = {}): Pr
 export {
   loadObjects,
   columnSplitter,
+  isTableOfDataset,
+  groupByTable,
   listContextObjects,
   snapshotTableProfile,
   tableView,
@@ -586,6 +597,7 @@ export type {
   SnapshotColumn,
   SnapshotTableProfile,
   ContextObjectList,
+  TableGroup,
   TableView,
   ReviewQueue,
   Term,

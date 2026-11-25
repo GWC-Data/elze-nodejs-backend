@@ -86,6 +86,14 @@
     {
       "name": "Credits",
       "description": "Each company has one credit pool that the platform team fills. Every member spends from it, unless a company admin restricts them to a fixed number of credits. AI actions cost a fixed number of credits from the price list and are charged by the agent gate."
+    },
+    {
+      "name": "MCP tokens",
+      "description": "Personal access tokens for MCP clients (Claude Desktop, Claude Code, Cursor, VS Code). A client sends one as a Bearer token to read the published contexts its owner can read. Only a hash is stored; the token is shown once."
+    },
+    {
+      "name": "MCP data",
+      "description": "Read-only published contexts for elze-context-mcp. Authenticated with a personal MCP token, never the session cookie; every answer is limited to what the token owner can read in the web app."
     }
   ],
   "paths": {
@@ -6332,7 +6340,7 @@
         ],
         "operationId": "getContextConnectionMcp",
         "summary": "Get MCP connection details",
-        "description": "Returns how an MCP client connects to the latest published context of this connection: server URL, transport, auth mode, the available tools and a ready-made client configuration. No token is included. 404 RESOURCE_NOT_FOUND when the connection has no published context yet. Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
+        "description": "Returns how an MCP client connects to one published context of this connection through elze-context-mcp: the context URL and the all-contexts URL, transport, Bearer auth with a personal MCP token, the available tools and ready-made client settings for Claude Desktop, HTTP clients and Claude Code. No token is included. `name` picks the context; without it, the most recently published one. 404 RESOURCE_NOT_FOUND when the connection has no published context (with that name). Per-context access: platform accounts and holders of `context.manage_all` have full access to every connection in their scope, the creator (owner) has full access, and anyone else gets the strongest of their direct share and their group shares. This call needs at least `view` access. A connection that does not exist, is in another company, has a malformed id, or is not visible to the caller returns 404 RESOURCE_NOT_FOUND (\"Connection not found\"). Requires a signed-in session (401 UNAUTHENTICATED / TOKEN_EXPIRED otherwise; 403 PASSWORD_CHANGE_REQUIRED, ACCOUNT_DISABLED, COMPANY_DISABLED for blocked accounts; 503 SERVICE_UNAVAILABLE while the RBAC catalogue is not ready). Needs the `context.read` permission (403 INSUFFICIENT_PERMISSION or FEATURE_NOT_ENABLED).",
         "security": [
           {
             "cookieAuth": []
@@ -6351,6 +6359,16 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Published context name. Default: the most recently published context of the connection.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
             }
           }
         ],
@@ -11885,6 +11903,836 @@
           }
         }
       }
+    },
+    "/api/mcp/tokens": {
+      "get": {
+        "tags": [
+          "MCP tokens"
+        ],
+        "operationId": "listMcpTokens",
+        "summary": "Your MCP tokens",
+        "description": "Every personal MCP access token of the caller, newest first, with its status (`active`, `expired`, `revoked`). The token itself and its hash are never returned. With `userId`, lists another account's tokens instead: needs `user.read` (403 INSUFFICIENT_PERMISSION otherwise) and the account must be visible to the caller (404 otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "description": "Another account's id. Omit for your own tokens.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/McpToken"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "MCP tokens"
+        ],
+        "operationId": "createMcpToken",
+        "summary": "Create an MCP token",
+        "description": "Issues a personal access token (`elze_pat_` + 43 characters) that an MCP client sends as `Authorization: Bearer <token>` to read the published contexts the caller can read. The token is in this response only (`Cache-Control: no-store`); only its hash is stored. Expires after `expiresInDays` whole days (1-365, default 90); anything else is 400 VALIDATION_ERROR. At most 10 active tokens per account (409 CONFLICT). Audited as `mcp_token_created`.\n\nRequires permission `context.read` (403 INSUFFICIENT_PERMISSION otherwise).\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMcpTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Token created. Copy it now: it is never shown again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/IssuedMcpToken"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/tokens/revoke-all": {
+      "post": {
+        "tags": [
+          "MCP tokens"
+        ],
+        "operationId": "revokeAllMcpTokens",
+        "summary": "Revoke all MCP tokens",
+        "description": "Revokes every active token of the caller, or of `userId`. Revoking another account's tokens needs `user.deactivate` and the right to manage that account (same company; only the default administrator manages other administrators), otherwise 403 or 404. Audited as `mcp_token_revoked` when anything was revoked.\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAllMcpTokensRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpTokensRevoked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "MCP tokens"
+        ],
+        "operationId": "revokeMcpToken",
+        "summary": "Revoke an MCP token",
+        "description": "Revokes one token at once; the next MCP call that sends it fails. Your own tokens always; another account's with `user.deactivate` and the right to manage that account. A token that is not yours to revoke is reported as 404. Already revoked is 409 CONFLICT. Audited as `mcp_token_revoked`.\n\nCommon errors from the session guard: 401 UNAUTHENTICATED/TOKEN_EXPIRED; 403 ACCOUNT_DISABLED, ACCOUNT_PENDING_ACTIVATION, COMPANY_DISABLED, PASSWORD_CHANGE_REQUIRED (and CSRF_TOKEN_INVALID on writes); 503 SERVICE_UNAVAILABLE while access control is not ready.",
+        "security": [
+          {
+            "cookieAuth": [],
+            "csrfToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Token id. A malformed or unknown id is 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpToken"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/session": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "getMcpSession",
+        "summary": "Who the token belongs to",
+        "description": "The account and token behind the Bearer token. elze-context-mcp calls this on every request before it answers, so a revoked or expired token, or a blocked account, fails at once with 401. The token itself and its hash are never returned.\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpSession"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/contexts": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "listMcpContexts",
+        "summary": "Published contexts the token can read",
+        "description": "One entry per published context (connection + name) at its live version, newest first. `q` narrows by context or connection name.\n\nThe caller sees exactly the contexts the web app shows them: platform accounts every context, company admins (`context.manage_all`) every context of their company, the creator their own, and others what is shared with them directly, through an active group, with their company (platform contexts) or with the whole company (`generalAccess: company`). Anything else, and anything deleted, is 404 RESOURCE_NOT_FOUND (\"Context not found.\").\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Text to look for in the context or connection name (max 200 characters).",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per page, 1-100 (default 25).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The `nextCursor` of the previous page. Opaque; anything else is 400.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpContextPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/contexts/{connectionId}/{name}": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "getMcpContextOverview",
+        "summary": "Overview of one context",
+        "description": "The datasets (with their business overview from the Business Layer step), fact counts per type and the table list of one published version.\n\nThe caller sees exactly the contexts the web app shows them: platform accounts every context, company admins (`context.manage_all`) every context of their company, the creator their own, and others what is shared with them directly, through an active group, with their company (platform contexts) or with the whole company (`generalAccess: company`). Anything else, and anything deleted, is 404 RESOURCE_NOT_FOUND (\"Context not found.\").\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Connection id of the context. A malformed id is 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Published context name, URL-encoded (`encodeURIComponent`), e.g. `Revenue%20%26%20Orders`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "A published version number (`3` or `v3`). Default: the live version, the highest published one. An unpublished or deleted version of a context you can read is 404 with \"Version N of this context is not published.\"",
+            "schema": {
+              "type": "string",
+              "pattern": "^[vV]?\\d+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpContextOverview"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/contexts/{connectionId}/{name}/versions": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "listMcpContextVersions",
+        "summary": "Published versions of one context",
+        "description": "Every published, non-deleted version, newest first; `live` marks the highest.\n\nThe caller sees exactly the contexts the web app shows them: platform accounts every context, company admins (`context.manage_all`) every context of their company, the creator their own, and others what is shared with them directly, through an active group, with their company (platform contexts) or with the whole company (`generalAccess: company`). Anything else, and anything deleted, is 404 RESOURCE_NOT_FOUND (\"Context not found.\").\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Connection id of the context. A malformed id is 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Published context name, URL-encoded (`encodeURIComponent`), e.g. `Revenue%20%26%20Orders`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpContextVersions"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/contexts/{connectionId}/{name}/objects": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "listMcpContextObjects",
+        "summary": "Approved facts of one context",
+        "description": "The approved facts stored in the published version, ordered by type and qualified name. `type` takes one or more object types, comma-separated. `qualifiedName` matches one fact exactly. `q` is a keyword search: every word (up to 8) must appear in the qualified name or the payload text; facts whose name matches come first.\n\nThe caller sees exactly the contexts the web app shows them: platform accounts every context, company admins (`context.manage_all`) every context of their company, the creator their own, and others what is shared with them directly, through an active group, with their company (platform contexts) or with the whole company (`generalAccess: company`). Anything else, and anything deleted, is 404 RESOURCE_NOT_FOUND (\"Context not found.\").\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Connection id of the context. A malformed id is 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Published context name, URL-encoded (`encodeURIComponent`), e.g. `Revenue%20%26%20Orders`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "A published version number (`3` or `v3`). Default: the live version, the highest published one. An unpublished or deleted version of a context you can read is 404 with \"Version N of this context is not published.\"",
+            "schema": {
+              "type": "string",
+              "pattern": "^[vV]?\\d+$"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated object types: table, column_stats, join, transformation, glossary, metric, example, constraint. An unknown type is 400.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "qualifiedName",
+            "in": "query",
+            "required": false,
+            "description": "Exact qualified name of one fact (max 500 characters).",
+            "schema": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Keywords (max 200 characters).",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per page, 1-100 (default 25).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The `nextCursor` of the previous page. Opaque; anything else is 400.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpEntryPage"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api/mcp/data/contexts/{connectionId}/{name}/table": {
+      "get": {
+        "tags": [
+          "MCP data"
+        ],
+        "operationId": "describeMcpContextTable",
+        "summary": "One table of one context",
+        "description": "The table fact, its column facts, every other fact that mentions the table (relationships, transformations, metrics, examples) and the dataset it was built from with its business overview. `qualifiedName` is matched exactly, then case-insensitively; no single match is 404.\n\nThe caller sees exactly the contexts the web app shows them: platform accounts every context, company admins (`context.manage_all`) every context of their company, the creator their own, and others what is shared with them directly, through an active group, with their company (platform contexts) or with the whole company (`generalAccess: company`). Anything else, and anything deleted, is 404 RESOURCE_NOT_FOUND (\"Context not found.\").\n\nBearer guard: 401 UNAUTHENTICATED with a `WWW-Authenticate: Bearer realm=\"elze-mcp\"` challenge when the token is missing, malformed, unknown, revoked or expired, or when its owner is deleted, disabled, pending activation, in an inactive company or must change their password (the last five are audited once per 10 minutes per token as `mcp_token_rejected`); 403 INSUFFICIENT_PERMISSION without `context.read`; 429 RATE_LIMITED per token (`MCP_RATE_LIMIT_PER_MINUTE`, default 300) and per address for rejected tokens only (`MCP_AUTH_FAILURES_PER_MINUTE`, default 60); 503 SERVICE_UNAVAILABLE while access control is not ready. The session cookie is not accepted here, and a personal MCP token is not accepted anywhere else.",
+        "x-permissions": [
+          "context.read"
+        ],
+        "security": [
+          {
+            "mcpBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "description": "Connection id of the context. A malformed id is 404.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Published context name, URL-encoded (`encodeURIComponent`), e.g. `Revenue%20%26%20Orders`.",
+            "schema": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "description": "A published version number (`3` or `v3`). Default: the live version, the highest published one. An unpublished or deleted version of a context you can read is 404 with \"Version N of this context is not published.\"",
+            "schema": {
+              "type": "string",
+              "pattern": "^[vV]?\\d+$"
+            }
+          },
+          {
+            "name": "qualifiedName",
+            "in": "query",
+            "required": true,
+            "description": "Qualified name of the table (max 500 characters).",
+            "schema": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/McpTableDescription"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11900,6 +12748,11 @@
         "in": "header",
         "name": "x-csrf-token",
         "description": "Must equal the value of the da_csrf cookie. Required on every POST, PUT, PATCH and DELETE of a signed-in route, and on refresh and logout."
+      },
+      "mcpBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A personal MCP token (`elze_pat_` + 43 characters) from POST /api/mcp/tokens, sent as `Authorization: Bearer <token>`. Accepted only by /api/mcp/data."
       }
     },
     "parameters": {
@@ -16355,10 +17208,17 @@
           "name": {
             "type": "string",
             "enum": [
-              "list_context_objects",
-              "get_context_object",
-              "search_context_objects",
-              "query_sql"
+              "list_contexts",
+              "get_context_overview",
+              "list_versions",
+              "list_tables",
+              "describe_table",
+              "search_context",
+              "list_metrics",
+              "get_metric",
+              "lookup_glossary",
+              "list_relationships",
+              "list_examples"
             ]
           },
           "description": {
@@ -16368,59 +17228,53 @@
       },
       "ConnectionMcpDetails": {
         "type": "object",
-        "description": "How an MCP client reaches the published context of a connection. Server URL and auth mode come from the CONTEXT_MCP_SERVER_URL and CONTEXT_MCP_AUTH_REQUIRED settings; no token is ever included.",
+        "description": "How an MCP client reaches one published context through elze-context-mcp. URLs come from CONTEXT_MCP_SERVER_URL. Clients authenticate with a personal MCP token (POST /api/mcp/tokens); no token is ever included here.",
         "required": [
           "configured",
           "serverName",
-          "serverUrl",
           "transport",
-          "workspaceId",
           "context",
+          "urls",
           "auth",
           "tools",
-          "clientConfig",
+          "clients",
           "usage"
         ],
         "properties": {
           "configured": {
             "type": "boolean",
-            "description": "False when no MCP server URL is configured."
+            "description": "False when CONTEXT_MCP_SERVER_URL is not set."
           },
           "serverName": {
             "type": "string",
-            "description": "`context-` followed by a slug of the connection name (max 40 characters), e.g. `context-sales`."
-          },
-          "serverUrl": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uri"
+            "description": "`elze-` followed by a slug of the context name (max 40 characters), e.g. `elze-revenue`."
           },
           "transport": {
             "type": "string",
             "const": "streamable-http"
           },
-          "workspaceId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The connection id; pass it as `context_id` on every tool call."
-          },
           "context": {
             "type": "object",
-            "description": "The latest published version.",
             "required": [
+              "connectionId",
               "name",
               "version",
               "publishedAt"
             ],
             "properties": {
+              "connectionId": {
+                "type": "string",
+                "format": "uuid"
+              },
               "name": {
                 "type": "string"
               },
               "version": {
                 "type": "string",
-                "description": "Version label, e.g. `v3`."
+                "examples": [
+                  "v3"
+                ],
+                "description": "The live version."
               },
               "publishedAt": {
                 "type": [
@@ -16431,48 +17285,60 @@
               }
             }
           },
-          "auth": {
-            "description": "Bearer details when the server requires auth, otherwise `{ \"type\": \"none\" }`.",
-            "oneOf": [
-              {
-                "type": "object",
-                "required": [
-                  "type",
-                  "header",
-                  "format",
-                  "source"
+          "urls": {
+            "type": "object",
+            "required": [
+              "context",
+              "all"
+            ],
+            "properties": {
+              "context": {
+                "type": [
+                  "string",
+                  "null"
                 ],
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "const": "bearer"
-                  },
-                  "header": {
-                    "type": "string",
-                    "const": "Authorization"
-                  },
-                  "format": {
-                    "type": "string",
-                    "const": "Bearer <token>"
-                  },
-                  "source": {
-                    "type": "string"
-                  }
-                }
+                "description": "`<CONTEXT_MCP_SERVER_URL>/<connectionId>/<encoded name>`: only this context."
               },
-              {
-                "type": "object",
-                "required": [
-                  "type"
+              "all": {
+                "type": [
+                  "string",
+                  "null"
                 ],
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "const": "none"
-                  }
-                }
+                "description": "`CONTEXT_MCP_SERVER_URL`: every published context the token owner can read."
               }
-            ]
+            }
+          },
+          "auth": {
+            "type": "object",
+            "required": [
+              "type",
+              "header",
+              "format",
+              "tokenPlaceholder",
+              "tokens"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "bearer"
+              },
+              "header": {
+                "type": "string",
+                "const": "Authorization"
+              },
+              "format": {
+                "type": "string"
+              },
+              "tokenPlaceholder": {
+                "type": "string",
+                "const": "<token>"
+              },
+              "tokens": {
+                "type": "string",
+                "const": "/api/mcp/tokens",
+                "description": "Where the signed-in user creates one."
+              }
+            }
           },
           "tools": {
             "type": "array",
@@ -16480,52 +17346,79 @@
               "$ref": "#/components/schemas/ConnectionMcpTool"
             }
           },
-          "clientConfig": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "description": "Ready-to-paste MCP client configuration; null when no server URL is configured.",
+          "clients": {
+            "type": "object",
             "required": [
-              "mcpServers"
+              "context",
+              "all"
             ],
             "properties": {
-              "mcpServers": {
-                "type": "object",
-                "description": "One entry keyed by `serverName`.",
-                "additionalProperties": {
-                  "type": "object",
-                  "required": [
-                    "type",
-                    "url"
-                  ],
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "const": "http"
-                    },
-                    "url": {
-                      "type": "string",
-                      "format": "uri"
-                    },
-                    "headers": {
-                      "type": "object",
-                      "description": "Only when auth is required; contains a placeholder, not a real token.",
-                      "properties": {
-                        "Authorization": {
-                          "type": "string",
-                          "const": "Bearer <MCP access token>"
-                        }
-                      }
-                    }
+              "context": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Ready-made client settings; null when CONTEXT_MCP_SERVER_URL is not set. `<token>` stands for a personal MCP token.",
+                "required": [
+                  "url",
+                  "claudeDesktop",
+                  "http",
+                  "claudeCode"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "claudeDesktop": {
+                    "type": "object",
+                    "description": "`mcpServers` entry that runs mcp-remote (pinned) with the token in an env variable."
+                  },
+                  "http": {
+                    "type": "object",
+                    "description": "`mcpServers` entry for clients that speak streamable HTTP with headers (Cursor, VS Code, Claude Code JSON)."
+                  },
+                  "claudeCode": {
+                    "type": "string",
+                    "description": "A `claude mcp add --transport http ...` command."
+                  }
+                }
+              },
+              "all": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Ready-made client settings; null when CONTEXT_MCP_SERVER_URL is not set. `<token>` stands for a personal MCP token.",
+                "required": [
+                  "url",
+                  "claudeDesktop",
+                  "http",
+                  "claudeCode"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "claudeDesktop": {
+                    "type": "object",
+                    "description": "`mcpServers` entry that runs mcp-remote (pinned) with the token in an env variable."
+                  },
+                  "http": {
+                    "type": "object",
+                    "description": "`mcpServers` entry for clients that speak streamable HTTP with headers (Cursor, VS Code, Claude Code JSON)."
+                  },
+                  "claudeCode": {
+                    "type": "string",
+                    "description": "A `claude mcp add --transport http ...` command."
                   }
                 }
               }
             }
           },
           "usage": {
-            "type": "string",
-            "description": "Plain-language hint, e.g. `Pass \"context_id\": \"<id>\" on every tool call.`"
+            "type": "string"
           }
         }
       },
@@ -20169,6 +21062,654 @@
             ],
             "format": "date-time",
             "description": "When the business layer was last saved; null if never."
+          }
+        }
+      },
+      "McpToken": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scope",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "lastUsedAt",
+          "revokedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "prefix": {
+            "type": "string",
+            "description": "The first 16 characters of the token, to tell tokens apart."
+          },
+          "scope": {
+            "type": "string",
+            "examples": [
+              "mcp:read"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "IssuedMcpToken": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/McpToken"
+          },
+          {
+            "type": "object",
+            "required": [
+              "token"
+            ],
+            "properties": {
+              "token": {
+                "type": "string",
+                "pattern": "^elze_pat_[A-Za-z0-9_-]{43}$",
+                "description": "The token itself. Returned once, never again."
+              }
+            }
+          }
+        ]
+      },
+      "CreateMcpTokenRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "What the token is for, e.g. \"Claude Desktop on my laptop\"."
+          },
+          "expiresInDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 90
+          }
+        }
+      },
+      "RevokeAllMcpTokensRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Another account's id. Omit to revoke your own tokens."
+          }
+        }
+      },
+      "McpTokensRevoked": {
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many active tokens were revoked."
+          }
+        }
+      },
+      "McpContextSummary": {
+        "type": "object",
+        "required": [
+          "connectionId",
+          "name",
+          "connectionName",
+          "provider",
+          "company",
+          "access",
+          "liveVersion",
+          "versionCount",
+          "publishedAt",
+          "publishedBy",
+          "objectCount",
+          "datasetCount",
+          "counts"
+        ],
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "connectionName": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "examples": [
+              "domo"
+            ]
+          },
+          "company": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "description": "null for a platform context."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "view",
+              "edit",
+              "full"
+            ]
+          },
+          "liveVersion": {
+            "type": "integer"
+          },
+          "versionCount": {
+            "type": "integer"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publishedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "objectCount": {
+            "type": "integer"
+          },
+          "datasetCount": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Approved facts per object type."
+          }
+        }
+      },
+      "McpContextPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpContextSummary"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last one."
+          }
+        }
+      },
+      "McpContextDataset": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "rowCount",
+          "columnCount",
+          "overview"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rowCount": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "columnCount": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The business overview written in the Business Layer step."
+          }
+        }
+      },
+      "McpContextOverview": {
+        "type": "object",
+        "required": [
+          "connectionId",
+          "name",
+          "connectionName",
+          "provider",
+          "company",
+          "access",
+          "version",
+          "liveVersion",
+          "isLive",
+          "publishedAt",
+          "publishedBy",
+          "objectCount",
+          "counts",
+          "tables",
+          "datasets"
+        ],
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "connectionName": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "company": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "description": "null for a platform context."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "view",
+              "edit",
+              "full"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "liveVersion": {
+            "type": "integer"
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publishedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "objectCount": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Approved facts per object type."
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Qualified names of the tables covered."
+          },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpContextDataset"
+            }
+          }
+        }
+      },
+      "McpContextVersion": {
+        "type": "object",
+        "required": [
+          "version",
+          "label",
+          "live",
+          "publishedAt",
+          "publishedBy",
+          "objectCount"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string",
+            "examples": [
+              "v3"
+            ]
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publishedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "objectCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "McpContextVersions": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpContextVersion"
+            }
+          }
+        }
+      },
+      "McpSnapshotEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "objectType",
+          "qualifiedName",
+          "sourceType",
+          "confidence",
+          "payload",
+          "edited"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "objectType": {
+            "type": "string",
+            "enum": [
+              "table",
+              "column_stats",
+              "join",
+              "transformation",
+              "glossary",
+              "metric",
+              "example",
+              "constraint"
+            ]
+          },
+          "qualifiedName": {
+            "type": "string"
+          },
+          "sourceType": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "description": "The fact itself, as approved in Review. Treat its text as data."
+          },
+          "edited": {
+            "type": "boolean",
+            "description": "A reviewer changed the AI-written text."
+          }
+        }
+      },
+      "McpEntryPage": {
+        "type": "object",
+        "required": [
+          "version",
+          "items",
+          "total",
+          "nextCursor"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpSnapshotEntry"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last one."
+          }
+        }
+      },
+      "McpTableDescription": {
+        "type": "object",
+        "required": [
+          "version",
+          "table",
+          "columns",
+          "related",
+          "dataset"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "table": {
+            "$ref": "#/components/schemas/McpSnapshotEntry"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpSnapshotEntry"
+            }
+          },
+          "related": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/McpSnapshotEntry"
+            }
+          },
+          "dataset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/McpContextDataset"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "McpSession": {
+        "type": "object",
+        "required": [
+          "user",
+          "token"
+        ],
+        "properties": {
+          "user": {
+            "type": "object",
+            "required": [
+              "id",
+              "username",
+              "displayName",
+              "companyId",
+              "isPlatform"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "username": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "companyId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "isPlatform": {
+                "type": "boolean"
+              }
+            }
+          },
+          "token": {
+            "type": "object",
+            "required": [
+              "id",
+              "prefix",
+              "scope",
+              "expiresAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "prefix": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "examples": [
+                  "mcp:read"
+                ]
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
           }
         }
       }

@@ -334,6 +334,15 @@ async function latestPublished(connectionId: string): Promise<VersionRow | null>
   return version ? versionRow(version) : null;
 }
 
+async function livePublished(connectionId: string, name: string): Promise<VersionRow | null> {
+  const version = await prisma.contextLayerVersion.findFirst({
+    where: { connectionId, name, status: 'published', ...NOT_DELETED },
+    orderBy: { version: 'desc' },
+    select: VERSION_FIELDS,
+  });
+  return version ? versionRow(version) : null;
+}
+
 async function findPublished(connectionId: string, versionId: string): Promise<PublishedVersionRow | null> {
   const version = await orNotFound(
     prisma.contextLayerVersion.findFirst({
@@ -456,6 +465,7 @@ export {
   advanceDraftStep,
   markPublished,
   latestPublished,
+  livePublished,
   findPublished,
   deletePublished,
   restorePublished,

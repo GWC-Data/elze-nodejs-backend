@@ -28,13 +28,18 @@ function requireRbac(_req: Request, _res: Response, next: NextFunction): void {
   next();
 }
 
-async function actorFromToken(token: string): Promise<{ actor: Actor; account: PublicUser }> {
-  const payload = verifyAccessToken(token);
-  if (!isUuid(payload.sub)) throw fail('UNAUTHENTICATED', 'Your session is not valid.');
-  const found = await findActor(payload.sub);
+type ActiveAccount = NonNullable<Awaited<ReturnType<typeof findActor>>>;
+
+interface SignedInActor {
+  actor: Actor;
+  account: PublicUser;
+}
+
+async function activeAccount(userId: string): Promise<ActiveAccount> {
+  const found = await findActor(userId);
   const user = found?.user;
 
-  if (!user) throw fail('UNAUTHENTICATED', 'This account no longer exists.');
+  if (!found || !user) throw fail('UNAUTHENTICATED', 'This account no longer exists.');
   if (user.status === USER_STATUS.DISABLED) throw fail('ACCOUNT_DISABLED', 'This account has been deactivated.');
   if (user.status === USER_STATUS.PENDING) {
     throw fail('ACCOUNT_PENDING_ACTIVATION', 'This account has not been activated yet.');
@@ -42,13 +47,27 @@ async function actorFromToken(token: string): Promise<{ actor: Actor; account: P
   if (user.company_id && !user.companyActive) {
     throw fail('COMPANY_DISABLED', 'This company is not currently active.');
   }
-  if (payload.rol !== user.role) {
+  return found;
+}
+
+function signedIn(found: ActiveAccount): SignedInActor {
+  const actor: Actor = buildActor(found.user, found.permissions, found.features);
+  actor.scopes = found.scopes;
+  return { actor, account: publicUser(found.user) };
+}
+
+async function actorForUser(userId: string): Promise<SignedInActor> {
+  return signedIn(await activeAccount(userId));
+}
+
+async function actorFromToken(token: string): Promise<SignedInActor> {
+  const payload = verifyAccessToken(token);
+  if (!isUuid(payload.sub)) throw fail('UNAUTHENTICATED', 'Your session is not valid.');
+  const found = await activeAccount(payload.sub);
+  if (payload.rol !== found.user.role) {
     throw fail('UNAUTHENTICATED', 'Your access has changed. Please sign in again.');
   }
-
-  const actor: Actor = buildActor(user, found.permissions, found.features);
-  actor.scopes = found.scopes;
-  return { actor, account: publicUser(user) };
+  return signedIn(found);
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -140,4 +159,13 @@ function requireDashboardAccess(level: string, param = 'dashboardId'): RequestHa
 
 const authenticated: RequestHandler[] = [requireRbac, requireAuth, requirePasswordCurrent];
 
-export { requireRbac, requireAuth, requirePlatform, requirePermission, requireDashboardAccess, authenticated };
+export {
+  requireRbac,
+  requireAuth,
+  requirePlatform,
+  requirePermission,
+  requireDashboardAccess,
+  authenticated,
+  actorForUser,
+};
+export type { SignedInActor };

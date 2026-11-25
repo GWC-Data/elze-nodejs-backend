@@ -15,6 +15,8 @@ const SUITES: Record<string, Suite> = {
   e2e: { file: 'tests/rbac.e2e.ts', needsServer: true },
   context: { file: 'tests/contextLayer.test.ts', needsServer: false },
   dashboard: { file: 'tests/dashboard_lifecycle.test.ts', needsServer: false },
+  mcp: { file: 'tests/mcpTokens.test.ts', needsServer: false },
+  'mcp-e2e': { file: 'tests/mcp.e2e.ts', needsServer: true },
 };
 
 const SERVER_READY_TIMEOUT_MS = 90_000;
@@ -48,6 +50,8 @@ function suiteEnv(): NodeJS.ProcessEnv {
     APPLICATION_URL: serverUrl,
     RATE_LIMIT_PER_MINUTE: '100000',
     AUTH_RATE_LIMIT_PER_15_MIN: '100000',
+    MCP_RATE_LIMIT_PER_MINUTE: '100000',
+    MCP_AUTH_FAILURES_PER_MINUTE: '100000',
     JWT_ACCESS_SECRET: 'test-only-access-token-secret',
     JWT_REFRESH_SECRET: 'test-only-refresh-token-secret',
     CREDENTIAL_SECRET: 'test-only-credential-secret-at-least-32-chars',

@@ -1281,6 +1281,9 @@ const AUDIT_EVENT_TYPES: AuditEventTypeSeed[] = [
     action: 'update',
     sortOrder: 59,
   },
+  { key: 'mcp_token_created', label: 'MCP token created', categories: ['auth'], action: 'create', sortOrder: 60 },
+  { key: 'mcp_token_revoked', label: 'MCP token revoked', categories: ['auth'], action: 'delete', sortOrder: 61 },
+  { key: 'mcp_token_rejected', label: 'MCP token rejected', categories: ['auth'], action: null, sortOrder: 62 },
 ];
 
 function idOf(list: { id: string; key: string }[], key: string): string {

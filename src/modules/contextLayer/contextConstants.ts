@@ -28,13 +28,17 @@ const GLOSSARY_FILTERS: Record<string, string[] | null> = {
 };
 
 const MCP_TOOLS = [
-  { name: 'list_context_objects', description: 'List the facts recorded for this connection, filterable by type.' },
-  { name: 'get_context_object', description: 'Read one fact by id or qualified name.' },
-  { name: 'search_context_objects', description: 'Semantic search over the facts (pgvector).' },
-  {
-    name: 'query_sql',
-    description: 'Read-only SELECT / WITH over the context store, row-level scoped to the workspace.',
-  },
+  { name: 'list_contexts', description: 'The published contexts you can read (on the all-contexts URL).' },
+  { name: 'get_context_overview', description: 'Datasets, fact counts and the business overview of a context.' },
+  { name: 'list_versions', description: 'The published versions of a context; the newest is live.' },
+  { name: 'list_tables', description: 'Every table in the context with its short description.' },
+  { name: 'describe_table', description: 'One table: columns and statistics, relationships, business overview.' },
+  { name: 'search_context', description: 'Keyword search over every approved fact in the context.' },
+  { name: 'list_metrics', description: 'The metric definitions of the context.' },
+  { name: 'get_metric', description: 'One metric by name, with its definition and logic.' },
+  { name: 'lookup_glossary', description: 'Business terms and what they mean in this context.' },
+  { name: 'list_relationships', description: 'How the tables join to each other.' },
+  { name: 'list_examples', description: 'Example queries and cards recorded for the context.' },
 ];
 
 type ContextAccessLevel = 'view' | 'edit' | 'full';

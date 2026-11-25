@@ -8,6 +8,7 @@ declare global {
       account: PublicUser;
       dashboardId?: string;
       dashboardLevel?: string | null;
+      mcpTokenId?: string;
     }
   }
 }

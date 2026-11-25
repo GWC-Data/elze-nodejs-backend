@@ -25,7 +25,8 @@
     "test:integration": "tsx scripts/testDb.ts",
     "test:e2e": "tsx scripts/testDb.ts e2e",
     "test:context": "tsx scripts/testDb.ts context",
-    "test:dashboard": "tsx scripts/testDb.ts dashboard"
+    "test:dashboard": "tsx scripts/testDb.ts dashboard",
+    "test:mcp": "tsx scripts/testDb.ts mcp mcp-e2e"
   },
   "keywords": [],
   "author": "",
