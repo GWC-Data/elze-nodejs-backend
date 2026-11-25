@@ -18,6 +18,8 @@ import companyRoleRoutes from './modules/roles/companyRoleRoutes';
 import gateRoutes from './modules/contextLayer/gateRoutes';
 import deletedItemRoutes from './modules/deletedItems/deletedItemRoutes';
 import creditRoutes from './modules/credits/creditRoutes';
+import mcpTokenRoutes from './modules/mcp/mcpTokenRoutes';
+import mcpDataRoutes from './modules/mcp/mcpDataRoutes';
 import docsRoutes from './modules/system/docsRoutes';
 
 const { IS_PRODUCTION } = config.env;
@@ -44,6 +46,8 @@ router.use('/roles', companyRoleRoutes);
 router.use('/gate', gateRoutes);
 router.use('/deleted-items', deletedItemRoutes);
 router.use('/credits', creditRoutes);
+router.use('/mcp/tokens', mcpTokenRoutes);
+router.use('/mcp/data', mcpDataRoutes);
 
 router.use('/context', contextRoutes);
 

@@ -3,73 +3,110 @@ import { MCP_TOOLS as TOOLS } from './contextConstants';
 
 const { mcpServer } = config.context;
 
-const { url: SERVER_URL, authRequired: AUTH_REQUIRED } = mcpServer();
+const { url: SERVER_URL } = mcpServer();
 
-function serverKey(connectionName: string | null | undefined): string {
-  const slug = String(connectionName || 'context')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-  return `context-${slug || 'layer'}`;
+const MCP_REMOTE_PACKAGE = 'mcp-remote@0.15.2';
+const AUTH_ENV = 'ELZE_MCP_AUTH';
+const TOKEN_PLACEHOLDER = '<token>';
+
+interface DesktopServer {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
 }
 
-interface McpServerConfig {
-  type: string;
+interface HttpServer {
+  type: 'http';
   url: string;
-  headers?: { Authorization: string };
+  headers: { Authorization: string };
+}
+
+interface ClientTemplates {
+  url: string;
+  claudeDesktop: { mcpServers: Record<string, DesktopServer> };
+  http: { mcpServers: Record<string, HttpServer> };
+  claudeCode: string;
 }
 
 interface McpAccess {
   configured: boolean;
   serverName: string;
-  serverUrl: string | null;
   transport: string;
-  workspaceId: string;
-  context: { name: string; version: string; publishedAt: Date | null };
-  auth: { type: string; header?: string; format?: string; source?: string };
+  context: { connectionId: string; name: string; version: string; publishedAt: Date | null };
+  urls: { context: string | null; all: string | null };
+  auth: { type: 'bearer'; header: 'Authorization'; format: string; tokenPlaceholder: string; tokens: string };
   tools: typeof TOOLS;
-  clientConfig: { mcpServers: Record<string, McpServerConfig> } | null;
+  clients: { context: ClientTemplates | null; all: ClientTemplates | null };
   usage: string;
 }
 
+function serverKey(contextName: string | null | undefined): string {
+  const slug = String(contextName || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return `elze-${slug || 'context'}`;
+}
+
+function contextUrl(connectionId: string, name: string): string | null {
+  return SERVER_URL ? `${SERVER_URL}/${connectionId}/${encodeURIComponent(name)}` : null;
+}
+
+function templates(key: string, url: string | null): ClientTemplates | null {
+  if (!url) return null;
+  return {
+    url,
+    claudeDesktop: {
+      mcpServers: {
+        [key]: {
+          command: 'npx',
+          args: ['-y', MCP_REMOTE_PACKAGE, url, '--header', `Authorization:\${${AUTH_ENV}}`],
+          env: { [AUTH_ENV]: `Bearer ${TOKEN_PLACEHOLDER}` },
+        },
+      },
+    },
+    http: {
+      mcpServers: {
+        [key]: { type: 'http', url, headers: { Authorization: `Bearer ${TOKEN_PLACEHOLDER}` } },
+      },
+    },
+    claudeCode: `claude mcp add --transport http ${key} ${url} --header "Authorization: Bearer ${TOKEN_PLACEHOLDER}"`,
+  };
+}
+
 function mcpDetails(
-  connection: { id: string; name: string | null | undefined },
+  connection: { id: string },
   published: { name: string; label: string; publishedAt: Date | null }
 ): McpAccess {
-  const key = serverKey(connection.name);
-  const headers = AUTH_REQUIRED ? { Authorization: 'Bearer <MCP access token>' } : undefined;
+  const key = serverKey(published.name);
+  const urls = { context: contextUrl(connection.id, published.name), all: SERVER_URL };
 
   return {
     configured: Boolean(SERVER_URL),
     serverName: key,
-    serverUrl: SERVER_URL,
     transport: 'streamable-http',
-    workspaceId: connection.id,
-    context: { name: published.name, version: published.label, publishedAt: published.publishedAt },
-    auth: AUTH_REQUIRED
-      ? {
-          type: 'bearer',
-          header: 'Authorization',
-          format: 'Bearer <token>',
-          source: 'Issued by your platform administrator (the MCP reader access token).',
-        }
-      : { type: 'none' },
+    context: {
+      connectionId: connection.id,
+      name: published.name,
+      version: published.label,
+      publishedAt: published.publishedAt,
+    },
+    urls,
+    auth: {
+      type: 'bearer',
+      header: 'Authorization',
+      format: 'Bearer <personal MCP token>',
+      tokenPlaceholder: TOKEN_PLACEHOLDER,
+      tokens: '/api/mcp/tokens',
+    },
     tools: TOOLS,
-    clientConfig: SERVER_URL
-      ? {
-          mcpServers: {
-            [key]: {
-              type: 'http',
-              url: SERVER_URL,
-              ...(headers ? { headers } : {}),
-            },
-          },
-        }
-      : null,
-    usage: `Pass "context_id": "${connection.id}" on every tool call.`,
+    clients: { context: templates(key, urls.context), all: templates('elze-contexts', urls.all) },
+    usage:
+      'Create a personal MCP token in Elze and send it as "Authorization: Bearer <token>". ' +
+      'The context URL serves only this context; the all-contexts URL serves every published context you can read.',
   };
 }
 
-export { mcpDetails };
-export type { McpAccess };
+export { mcpDetails, serverKey, MCP_REMOTE_PACKAGE };
+export type { McpAccess, ClientTemplates };

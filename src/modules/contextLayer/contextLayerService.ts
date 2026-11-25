@@ -82,11 +82,18 @@ async function listConnections(actor: Actor): Promise<ConnectionWithStatus[]> {
   });
 }
 
-async function mcpAccess(actor: Actor, id: unknown): Promise<McpAccess> {
+async function mcpAccess(actor: Actor, id: unknown, name?: unknown): Promise<McpAccess> {
   const connection = await connections.requireConnection(actor, id);
-  const published = await versions.latestPublished(connection.id);
+  const wanted = typeof name === 'string' && name.trim() ? name : null;
+  const contextName = wanted ?? (await versions.latestPublished(connection.id))?.name ?? null;
+  const published = contextName ? await versions.livePublished(connection.id, contextName) : null;
   if (!published) {
-    throw fail('RESOURCE_NOT_FOUND', 'This connection has no published context yet.');
+    throw fail(
+      'RESOURCE_NOT_FOUND',
+      wanted
+        ? 'This connection has no published context with that name.'
+        : 'This connection has no published context yet.'
+    );
   }
   return mcpDetails(connection, {
     name: published.name,

@@ -66,6 +66,10 @@ const EVENTS = {
   CREDITS_ALLOCATED: 'credits_allocated',
   CREDIT_LIMIT_UPDATED: 'credit_limit_updated',
   CREDIT_RATE_UPDATED: 'credit_rate_updated',
+
+  MCP_TOKEN_CREATED: 'mcp_token_created',
+  MCP_TOKEN_REVOKED: 'mcp_token_revoked',
+  MCP_TOKEN_REJECTED: 'mcp_token_rejected',
 };
 
 const FORBIDDEN_DETAIL_KEYS = new Set([

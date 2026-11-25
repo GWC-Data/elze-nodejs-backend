@@ -32,7 +32,7 @@ async function publishedContexts(req: Request, res: Response): Promise<void> {
 }
 
 async function mcp(req: Request, res: Response): Promise<void> {
-  ok(res, await contextLayer.mcpAccess(req.actor, req.params.id as string));
+  ok(res, await contextLayer.mcpAccess(req.actor, req.params.id as string, req.query.name));
 }
 
 async function createConnection(req: Request, res: Response): Promise<void> {

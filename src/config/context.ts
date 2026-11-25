@@ -18,16 +18,12 @@ function credentialSecret(): string {
   return value;
 }
 
-function mcpServer(): { url: string | null; authRequired: boolean } {
-  const url = optional('CONTEXT_MCP_SERVER_URL', '').trim() || null;
+function mcpServer(): { url: string | null } {
+  const url = optional('CONTEXT_MCP_SERVER_URL', '').trim().replace(/\/+$/, '') || null;
   if (url && !/^https?:\/\//i.test(url)) {
     throw new ConfigError(`CONTEXT_MCP_SERVER_URL must be an http(s) URL (got "${url}")`);
   }
-  const authRaw = optional('CONTEXT_MCP_AUTH_REQUIRED', 'true').toLowerCase();
-  if (!['true', 'false'].includes(authRaw)) {
-    throw new ConfigError('CONTEXT_MCP_AUTH_REQUIRED must be true or false');
-  }
-  return { url, authRequired: authRaw === 'true' };
+  return { url };
 }
 
 export { credentialSecret, mcpServer };

@@ -12,7 +12,7 @@ modules/contextLayer/connectionService.ts     company-scoped connection logic; t
 modules/contextLayer/contextService.ts        facts, review, glossary, snapshot profiles
 modules/contextLayer/versionService.ts        draft -> published -> next draft lifecycle
 modules/contextLayer/publishService.ts        publish = flip the draft to published + store the snapshot
-modules/contextLayer/mcpService.ts            how an MCP client reaches a published context
+modules/contextLayer/mcpService.ts            how an MCP client reaches a published context (see docs/mcp.md)
 modules/contextLayer/domoProvider.ts          the only implemented provider
 modules/contextLayer/connectionRepository.ts  connections and datasets
 modules/contextLayer/contextRepository.ts     context_objects (raw SQL: not a Prisma model) and review decisions
@@ -21,7 +21,7 @@ modules/contextLayer/contextModel.ts          this feature's table names
 modules/contextLayer/contextConstants.ts      editable keys, glossary vocabulary, MCP tool list
 modules/contextLayer/contextValidator.ts      limit, dataset selection and extraction payload checks
 shared/security/secretBox.ts                  AES-256-GCM seal/open for stored credentials
-config/context.ts                             CREDENTIAL_SECRET and CONTEXT_MCP_* settings
+config/context.ts                             CREDENTIAL_SECRET and CONTEXT_MCP_SERVER_URL
 ```
 
 ## These two tables are shared

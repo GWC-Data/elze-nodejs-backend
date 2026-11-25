@@ -31,7 +31,7 @@ backend/
 │   │   ├── auth.ts                  tokens, cookies, password policy
 │   │   ├── email.ts                 the SMTP relay, read from the environment
 │   │   ├── engine.ts                DB_SCHEMA, Redis cache, dashboard directory
-│   │   ├── context.ts               CREDENTIAL_SECRET, CONTEXT_MCP_* settings
+│   │   ├── context.ts               CREDENTIAL_SECRET, CONTEXT_MCP_SERVER_URL
 │   │   └── dashboards/default.json  runtime dashboard metadata (not source)
 │   │
 │   ├── modules/
@@ -49,6 +49,8 @@ backend/
 │   │   ├── dashboards/              dashboard specs, the editor (metadata routes), card model
 │   │   ├── contextLayer/            warehouse connections, context store, review, versions, publish,
 │   │   │                            sharing, MCP, the agent gate, the Domo provider and its throttle
+│   │   ├── mcp/                     personal MCP tokens and the read-only /api/mcp/data that
+│   │   │                            elze-context-mcp calls (docs/mcp.md)
 │   │   ├── queryEngine/             metadata, planner, optimizer, SQL generator, semantic layer,
 │   │   │                            result formatter, query repository and cache
 │   │   └── system/                  startup bootstrap, health, API docs
